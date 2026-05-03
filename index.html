@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Login — Roti Bakar Ngeunah</title>
+  <link rel="icon" type="image/png" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="apple-touch-icon" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#f97316" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="RBN POS" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .login-input-wrap { position: relative; }
+    .toggle-pw {
+      position: absolute; right: 12px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; padding: 4px;
+    }
+    .toggle-pw:hover { color: var(--text); }
+
+    #db-status {
+      margin: 12px 16px 0;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      display: none;
+    }
+    #db-status.ok      { background:#E8F5E9; color:#2E7D32; border:1px solid #A5D6A7; display:block; }
+    #db-status.warn    { background:#FFF8E1; color:#F57F17; border:1px solid #FFE082; display:block; }
+    #db-status.fail    { background:#FFEBEE; color:#C62828; border:1px solid #EF9A9A; display:block; }
+    #db-status code    { background:rgba(0,0,0,0.08); padding:1px 5px; border-radius:4px; font-size:11px; }
+  </style>
+</head>
+<body class="login-page">
+
+  <div id="toast-container"></div>
+
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-brand-logo">
+        <img src="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" alt="Logo Roti Bakar Ngeunah" />
+      </div>
+      <div class="login-brand-name">Roti Bakar Ngeunah</div>
+      <div class="login-brand-tagline">Point of Sale System</div>
+    </div>
+
+    <div id="db-status"></div>
+
+    <div class="login-form-wrap">
+      <div class="login-form-title">Selamat Datang</div>
+
+      <div id="login-error" class="login-error"></div>
+
+      <form class="login-form" id="login-form" autocomplete="off">
+        <div class="form-group">
+          <label class="form-label" for="input-name">Username</label>
+          <input
+            id="input-name"
+            type="text"
+            class="form-control"
+            placeholder="Masukkan username"
+            autocomplete="username"
+            required
+          />
+        </div>
+
+        <div class="form-group mb-5">
+          <label class="form-label" for="input-password">Password</label>
+          <div class="login-input-wrap">
+            <input
+              id="input-password"
+              type="password"
+              class="form-control"
+              placeholder="Masukkan password"
+              autocomplete="current-password"
+              required
+            />
+            <button type="button" class="toggle-pw" id="toggle-pw" title="Tampilkan password">
+              <i data-lucide="eye" class="icon-sm toggle-pw-show"></i>
+              <i data-lucide="eye-off" class="icon-sm toggle-pw-hide hidden"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="login-btn">
+          <span id="login-btn-text">Masuk</span>
+          <span id="login-btn-spinner" class="btn-spinner hidden"></span>
+        </button>
+      </form>
+
+      <p class="text-center small text-muted mt-5">
+        &copy; 2025 Roti Bakar Ngeunah
+      </p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    // ── Redirect if already logged in ──
+    (function() {
+      const s = auth.getSession();
+      if (s) {
+        window.location.href = s.role === 'admin' ? 'admin.html' : 'pos.html';
+      }
+    })();
+
+    // ── DB Connection Test (runs on load) ──────────────────
+    async function testDbConnection() {
+      const statusEl = document.getElementById('db-status');
+      try {
+        // Use regular SELECT (not HEAD) — more reliable across all Supabase versions
+        const { data, error } = await db
+          .from('users')
+          .select('id')
+          .limit(1);
+
+        if (error) {
+          const msg    = (error.message || '').toLowerCase();
+          const code   = String(error.code   || '');
+          const status = Number(error.status || 0);
+          console.error('[RBN] DB test error:', error);
+
+          // 401 / 403 = tabel ada tapi GRANT belum diberikan ke anon role
+          if (status === 401 || status === 403 || code === '42501' || msg.includes('permission denied')) {
+            statusEl.className = 'fail';
+            statusEl.innerHTML =
+                '❌ <strong>Permission ditolak (401).</strong> Tabel ada tapi anon key tidak bisa mengakses.<br><br>' +
+                  '<strong>Solusi — jalankan SQL ini di Supabase SQL Editor:</strong><br>' +
+                  '<code class="db-help-code">' +
+                  'GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;<br>' +
+                  'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;<br>' +
+                  'GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated;' +
+                  '</code>';
+
+          // 42P01 = tabel tidak ada → schema.sql belum dijalankan
+          } else if (code === '42P01' || msg.includes('does not exist') || msg.includes('relation')) {
+            statusEl.className = 'fail';
+            statusEl.innerHTML =
+              '❌ <strong>Tabel belum dibuat!</strong><br>' +
+              'Buka <strong>Supabase Dashboard → SQL Editor</strong>, paste seluruh isi file ' +
+              '<code>schema.sql</code>, lalu klik <strong>Run</strong>.';
+
+          // JWT salah
+          } else if (msg.includes('jwt') || msg.includes('invalid key')) {
+            statusEl.className = 'fail';
+            statusEl.innerHTML =
+              '❌ <strong>API Key tidak valid!</strong><br>' +
+              'Periksa <code>SUPABASE_KEY</code> di <code>js/supabaseClient.js</code>.';
+
+          } else {
+            statusEl.className = 'warn';
+            statusEl.innerHTML =
+              '⚠️ <strong>Error:</strong> status=' + status + ' code=' + code +
+              ' msg=<code>' + (error.message || '(kosong)') + '</code><br>' +
+              'Screenshot ini dan kirimkan ke developer.';
+          }
+          return;
+        }
+
+        // Sukses (data array, termasuk array kosong [] = OK)
+        statusEl.classList.add('hidden');
+        console.log('[RBN] DB connection OK, rows:', data?.length ?? 0);
+
+      } catch (e) {
+        console.error('[RBN] Fetch error:', e);
+        statusEl.className = 'fail';
+        statusEl.innerHTML =
+          '❌ <strong>Tidak bisa terhubung ke Supabase.</strong><br>' +
+          'Periksa koneksi internet Anda. Error: <code>' + (e.message || e) + '</code>';
+      }
+    }
+
+    testDbConnection();
+
+    // Toggle password visibility (lucide icons)
+    document.getElementById('toggle-pw').addEventListener('click', function() {
+      const inp = document.getElementById('input-password');
+      const show = inp.type === 'password';
+      inp.type = show ? 'text' : 'password';
+      const showIcon = this.querySelector('.toggle-pw-show');
+      const hideIcon = this.querySelector('.toggle-pw-hide');
+      if (showIcon && hideIcon) {
+        showIcon.classList.toggle('hidden', !show);
+        hideIcon.classList.toggle('hidden', show);
+      }
+    });
+
+    // Login form
+    document.getElementById('login-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const name     = document.getElementById('input-name').value;
+      const password = document.getElementById('input-password').value;
+      const btn      = document.getElementById('login-btn');
+      const btnText  = document.getElementById('login-btn-text');
+      const spinner  = document.getElementById('login-btn-spinner');
+      const errorEl  = document.getElementById('login-error');
+
+      errorEl.classList.remove('show');
+      btn.disabled = true;
+      btnText.textContent = 'Masuk...';
+      spinner.classList.remove('hidden');
+
+      try {
+        const user = await auth.login(name, password);
+        btnText.textContent = 'Berhasil!';
+        setTimeout(() => {
+          window.location.href = user.role === 'admin' ? 'admin.html' : 'pos.html';
+        }, 400);
+      } catch(err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.add('show');
+        btn.disabled = false;
+        btnText.textContent = 'Masuk';
+        spinner.classList.add('hidden');
+      }
+    });
+  </script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
+</body>
+</html>

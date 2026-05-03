@@ -1,0 +1,25 @@
+{
+  "name": "Roti Bakar Ngeunah POS",
+  "short_name": "RBN POS",
+  "description": "Point of Sale — Roti Bakar Ngeunah",
+  "start_url": "./pos.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111827",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
