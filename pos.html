@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>POS — Roti Bakar Ngeunah</title>
+  <link rel="icon" type="image/png" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="apple-touch-icon" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#f97316" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="RBN POS" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style>
+    /* Product grid & card — inline override to bypass CSS cache */
+    .pos-products-grid {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+      gap: 10px !important;
+      padding: 12px !important;
+      overflow-y: auto !important;
+      flex: 1 !important;
+      align-content: start !important;
+    }
+    @media (max-width: 768px) {
+      .pos-products-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+        padding: 8px !important;
+        padding-bottom: 80px !important;
+      }
+    }
+
+    .pcard {
+      background: #fff !important;
+      border-radius: 12px !important;
+      border: 1.5px solid #e5e7eb !important;
+      overflow: visible !important;
+      cursor: pointer !important;
+      display: block !important;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07) !important;
+      transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease !important;
+      -webkit-tap-highlight-color: transparent !important;
+      user-select: none !important;
+    }
+    .pcard:hover {
+      border-color: #f97316 !important;
+      box-shadow: 0 6px 20px rgba(0,0,0,.13) !important;
+      transform: translateY(-3px) !important;
+    }
+    .pcard:active { transform: scale(0.97) !important; }
+
+    .pcard-img {
+      width: 100% !important;
+      aspect-ratio: 4 / 3 !important;
+      background: #f3f4f6 !important;
+      overflow: hidden !important;
+      border-radius: 10px 10px 0 0 !important;
+      position: relative !important;
+      display: block !important;
+    }
+    .pcard-img img {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      display: block !important;
+      transition: transform .3s ease !important;
+    }
+    .pcard:hover .pcard-img img { transform: scale(1.05) !important; }
+    .pcard-placeholder {
+      position: absolute !important;
+      inset: 0 !important;
+      display: flex;
+      align-items: center !important;
+      justify-content: center !important;
+      color: #9ca3af !important;
+      font-size: 28px !important;
+    }
+
+    .pcard-body {
+      display: block !important;
+      padding: 8px 10px 10px !important;
+      background: #fff !important;
+      border-radius: 0 0 10px 10px !important;
+    }
+    .pcard-name {
+      display: -webkit-box !important;
+      -webkit-line-clamp: 2 !important;
+      line-clamp: 2 !important;
+      -webkit-box-orient: vertical !important;
+      overflow: hidden !important;
+      font-size: 12px !important;
+      font-weight: 700 !important;
+      line-height: 1.35 !important;
+      color: #111827 !important;
+      word-break: break-word !important;
+      margin: 0 0 3px !important;
+    }
+    .pcard-meta {
+      display: block !important;
+      font-size: 10px !important;
+      color: #6b7280 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      margin-bottom: 6px !important;
+    }
+    .pcard-foot {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 6px !important;
+    }
+    .pcard-price {
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      color: #dc2626 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      flex: 1 !important;
+    }
+    .pcard-btn {
+      width: 26px !important;
+      height: 26px !important;
+      border-radius: 50% !important;
+      background: #111827 !important;
+      color: #fff !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-size: 16px !important;
+      line-height: 1 !important;
+      flex-shrink: 0 !important;
+      transition: background .15s ease, transform .15s ease !important;
+    }
+    .pcard:hover .pcard-btn { background: #dc2626 !important; transform: scale(1.1) !important; }
+  </style>
+</head>
+<body class="pos-page">
+
+  <div id="toast-container"></div>
+
+  <!-- Header -->
+  <header class="pos-header">
+    <button class="pos-mobile-menu-btn" data-action="toggle-mobile-drawer">
+      <i data-lucide="menu" class="icon-lg"></i>
+    </button>
+    <div class="pos-brand">
+      <div class="pos-brand-dot">
+        <img src="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" alt="Logo" />
+      </div>
+      <div>
+        <div class="pos-brand-name">Roti Bakar Ngeunah</div>
+        <div class="pos-branch-name" id="header-branch-name">Memuat...</div>
+      </div>
+    </div>
+    <div class="pos-header-right">
+      <button class="btn btn-outline btn-sm" data-action="open-printer-settings" title="Pengaturan Printer">
+        <i data-lucide="printer" class="icon-sm"></i>
+      </button>
+      <span id="header-staff-name" style="font-weight:700;"></span>
+      <button class="btn btn-outline btn-sm" data-action="open-close-shift" style="color:var(--danger);border-color:var(--danger);margin-left:8px;">
+        <i data-lucide="clock" class="icon-sm"></i>
+        <span>Tutup Shift</span>
+      </button>
+      <button class="btn btn-ghost btn-sm" data-action="confirm-logout">Keluar</button>
+    </div>
+  </header>
+
+  <!-- Tab Bar (desktop + tablet) -->
+  <div class="pos-tab-bar" id="pos-main-tab-bar">
+    <button class="pos-tab-item active" id="pos-maintab-kasir" data-action="switch-main-tab" data-tab="kasir">
+      <i data-lucide="shopping-bag" class="icon-sm"></i> Kasir
+    </button>
+    <button class="pos-tab-item" id="pos-maintab-summary" data-action="switch-main-tab" data-tab="summary">
+      <i data-lucide="bar-chart-2" class="icon-sm"></i> Ringkasan
+    </button>
+    <button class="pos-tab-item" id="pos-maintab-transactions" data-action="switch-main-tab" data-tab="transactions">
+      <i data-lucide="list" class="icon-sm"></i> Transaksi
+    </button>
+    <button class="pos-tab-item" id="pos-maintab-stock" data-action="switch-main-tab" data-tab="stock">
+      <i data-lucide="package" class="icon-sm"></i> Stok
+    </button>
+    <button class="pos-tab-item" id="pos-maintab-cash" data-action="switch-main-tab" data-tab="cash">
+      <i data-lucide="banknote" class="icon-sm"></i> Kas
+    </button>
+  </div>
+
+  <!-- Content Area -->
+  <div class="pos-content-area">
+
+    <!-- ═══ KASIR PANEL (product grid + cart) ═══ -->
+    <div class="pos-body" id="panel-kasir">
+
+      <!-- Products Panel -->
+      <div class="pos-products" id="panel-products">
+        <div class="pos-products-toolbar">
+          <div class="search-wrap search-compact">
+            <span class="search-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            </span>
+            <input type="text" class="form-control" id="product-search" placeholder="Cari produk..." autocomplete="off" />
+          </div>
+          <div class="pos-category-bar" id="category-bar"></div>
+        </div>
+        <div class="pos-products-grid" id="products-grid">
+          <div class="empty-state col-span-full">
+            <div class="empty-icon"><i data-lucide="loader" class="icon"></i></div>
+            <div class="empty-title">Memuat produk...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile Floating Cart Button (Modern Bottom Bar) -->
+      <button class="pos-fab-cart" data-action="toggle-mobile-cart" id="mobile-fab-cart">
+        <div class="fab-info">
+          <span class="fab-title">Total Belanja</span>
+          <span class="fab-total" id="fab-cart-total">Rp 0</span>
+        </div>
+        <div class="fab-action">
+          <i data-lucide="shopping-cart" class="icon"></i>
+          <span>Keranjang</span>
+          <span class="fab-badge" id="fab-cart-count" style="display:none">0</span>
+        </div>
+      </button>
+
+      <!-- Cart Panel -->
+      <div class="pos-cart" id="panel-cart">
+        <div class="pos-cart-header">
+          <button class="btn btn-ghost btn-sm mobile-back-btn" data-action="toggle-mobile-cart" title="Kembali ke Produk">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <span class="pos-cart-title">Keranjang</span>
+          <span class="pos-cart-count" id="cart-count">0</span>
+          <div class="pos-cart-actions">
+            <button class="btn btn-outline btn-sm" id="btn-hold-cart"
+              data-action="hold-cart" title="Tahan Keranjang">
+              <i data-lucide="pause-circle" class="icon-sm"></i>
+            </button>
+            <div class="pos-relative">
+              <button class="btn btn-outline btn-sm" data-action="show-held-carts"
+                title="Lihat Keranjang Ditahan">
+                <i data-lucide="layers" class="icon-sm"></i>
+              </button>
+              <span id="held-cart-badge" class="held-badge hidden">0</span>
+            </div>
+            <button class="btn btn-ghost btn-sm text-danger" data-action="clear-cart">Hapus</button>
+          </div>
+        </div>
+
+        <div class="pos-cart-items" id="cart-items"></div>
+
+        <div id="cart-empty" class="pos-cart-empty empty-state">
+          <div class="empty-icon"><i data-lucide="shopping-cart" class="icon"></i></div>
+          <div class="empty-title">Keranjang Kosong</div>
+          <div class="empty-desc">Pilih produk di sebelah kiri untuk mulai transaksi</div>
+        </div>
+
+        <div class="pos-cart-footer hidden" id="cart-footer">
+          <div class="cart-summary">
+            <div class="cart-summary-row">
+              <span id="cart-items-count-text" class="small">0 item</span>
+              <span id="cart-subtotal-text" class="fw-600">Rp 0</span>
+            </div>
+            <div class="cart-discount-row hidden" id="cart-discount-row">
+              <span>Diskon</span>
+              <span id="cart-discount-text">−Rp 0</span>
+            </div>
+          </div>
+          <div class="cart-total-row">
+            <span class="cart-total-label">TOTAL</span>
+            <span class="cart-total-value" id="cart-total-display">Rp 0</span>
+          </div>
+          <button class="btn-checkout" id="btn-checkout" data-action="open-payment-modal">
+            Bayar Sekarang →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ RINGKASAN PENJUALAN ═══ -->
+    <div class="pos-alt-panel" id="panel-summary">
+      <div class="panel-header" style="flex-wrap: wrap; gap: 12px; align-items: center;">
+        <h2 class="h2" style="margin: 0; min-width: max-content;">Ringkasan Penjualan</h2>
+        <div class="flex gap-2 w-full sm-w-auto" style="flex: 1; justify-content: flex-end;">
+          <input type="date" id="summary-filter-date" class="form-control" style="width:130px; height:32px; font-size:12px; padding:4px 8px;" data-action-change="load-sales-summary" />
+          <select id="summary-filter-method" class="form-control"
+            style="width:140px; height:32px; font-size:12px; padding:4px 8px;"
+            data-action-change="load-sales-summary">
+            <option value="all">Semua Metode</option>
+            <!-- opsi dinamis dari loadPaymentMethodFilter() -->
+          </select>
+          <button class="btn btn-outline btn-sm" data-action="load-sales-summary" title="Refresh">
+            <i data-lucide="refresh-cw" class="icon-sm"></i>
+          </button>
+        </div>
+      </div>
+      <div class="pos-summary-grid" id="summary-stats"></div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Transaksi Terakhir</span></div>
+            <div id="summary-trx-body" class="trx-list">
+              <div class="p-4 text-center text-muted">Memuat...</div>
+            </div>
+      </div>
+    </div>
+
+    <!-- ═══ STOK INVENTORI ═══ -->
+    <div class="pos-alt-panel" id="panel-stock">
+      <div class="panel-header" style="flex-wrap:wrap;gap:10px;align-items:center;">
+        <h2 class="h2" style="margin:0;">Stok Bahan Baku</h2>
+        <div class="flex gap-2" style="flex:1;justify-content:flex-end;flex-wrap:wrap;">
+          <input type="date" id="stock-filter-date" class="form-control"
+            style="width:130px;height:32px;font-size:12px;padding:4px 8px;"
+            data-action-change="load-inventory-summary" />
+          <button class="btn btn-primary btn-sm" data-action="open-stock-adjust-modal">
+            <i data-lucide="plus" class="icon-sm"></i> Tambah Stok
+          </button>
+          <button class="btn btn-outline btn-sm" data-action="load-inventory-summary" title="Refresh">
+            <i data-lucide="refresh-cw" class="icon-sm"></i>
+          </button>
+        </div>
+      </div>
+      <div class="pos-inv-grid" id="stock-grid">
+        <div class="empty-state col-span-full">
+          <div class="empty-icon"><i data-lucide="package" class="icon"></i></div>
+          <div class="empty-title">Memuat stok...</div>
+        </div>
+      </div>
+      <!-- Riwayat penambahan stok -->
+      <div id="stock-log-section" style="padding:0 var(--s4) var(--s6);"></div>
+    </div>
+
+    <!-- ═══ RINGKASAN KAS ═══ -->
+    <div class="pos-alt-panel" id="panel-cash">
+      <div class="panel-header">
+        <h2 class="h2">Ringkasan Kas</h2>
+        <button class="btn btn-outline btn-sm" data-action="update-cash-summary">
+          <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
+        </button>
+      </div>
+      <div id="cash-summary-content" class="content-narrow">
+        <div class="empty-state">
+          <div class="empty-icon"><i data-lucide="banknote" class="icon"></i></div>
+          <div class="empty-title">Memuat info kas...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TRANSAKSI SHIFT ═══ -->
+    <div class="pos-alt-panel" id="panel-transactions">
+      <div class="panel-header" style="flex-wrap:wrap;gap:12px;align-items:center;">
+        <h2 class="h2" style="margin:0;min-width:max-content;">Transaksi Shift Ini</h2>
+        <div class="flex gap-2" style="flex:1;justify-content:flex-end;">
+          <button class="btn btn-outline btn-sm" data-action="load-session-transactions" title="Refresh">
+            <i data-lucide="refresh-cw" class="icon-sm"></i>
+          </button>
+        </div>
+      </div>
+      <div class="card">
+        <div id="pos-trx-body" class="trx-list">
+          <div class="p-4 text-center text-muted">Memuat...</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .pos-content-area -->
+
+  <!-- Mobile Drawer -->
+  <div class="modal-overlay" id="mobile-drawer-overlay" data-action="toggle-mobile-drawer" style="z-index:1900;"></div>
+  <div class="pos-mobile-drawer" id="pos-mobile-drawer">
+    <div class="pos-mobile-drawer-header">
+      <div class="fw-800 text-lg">Menu POS</div>
+      <button class="btn btn-ghost p-0" data-action="toggle-mobile-drawer"><i data-lucide="x" class="icon"></i></button>
+    </div>
+    <div class="pos-mobile-drawer-menu">
+      <button class="drawer-btn active" id="drawer-tab-kasir" data-action="switch-mobile-drawer-tab" data-tab="kasir">
+        <i data-lucide="shopping-bag" class="icon"></i> Kasir
+      </button>
+      <button class="drawer-btn" id="drawer-tab-cart" data-action="switch-mobile-drawer-tab" data-tab="cart">
+        <i data-lucide="shopping-cart" class="icon"></i> Keranjang <span class="badge badge-red ml-2" id="mobile-cart-badge" style="display:none">0</span>
+      </button>
+      <button class="drawer-btn" id="drawer-tab-summary" data-action="switch-mobile-drawer-tab" data-tab="summary">
+        <i data-lucide="bar-chart-2" class="icon"></i> Ringkasan
+      </button>
+      <button class="drawer-btn" id="drawer-tab-transactions" data-action="switch-mobile-drawer-tab" data-tab="transactions">
+        <i data-lucide="list" class="icon"></i> Transaksi
+      </button>
+      <button class="drawer-btn" id="drawer-tab-stock" data-action="switch-mobile-drawer-tab" data-tab="stock">
+        <i data-lucide="package" class="icon"></i> Stok
+      </button>
+      <button class="drawer-btn" id="drawer-tab-cash" data-action="switch-mobile-drawer-tab" data-tab="cash">
+        <i data-lucide="banknote" class="icon"></i> Kas
+      </button>
+      <div class="border-t my-2" style="border-color: var(--border);"></div>
+      <button class="drawer-btn" data-action="open-printer-settings">
+        <i data-lucide="printer" class="icon"></i> Pengaturan Printer
+      </button>
+      <button class="drawer-btn text-warning" data-action="open-close-shift">
+        <i data-lucide="clock" class="icon"></i> Tutup Shift
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Pengaturan Printer
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-printer">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="printer" class="icon-sm"></i> Pengaturan Printer</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-printer">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">
+        <!-- Printer status -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--success-bg);border:1px solid rgba(22,163,74,0.2);border-radius:var(--r);padding:12px 14px;">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);">Status Printer</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Browser Print (window.print) — siap digunakan</div>
+          </div>
+          <i data-lucide="check-circle" class="icon" style="color:var(--success);flex-shrink:0;"></i>
+        </div>
+
+        <!-- Auto print toggle -->
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2);">
+          <input type="checkbox" id="cb-auto-print" data-action-change="save-printer-settings" style="width:16px;height:16px;accent-color:var(--danger);cursor:pointer;" />
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text);">Cetak otomatis setelah transaksi</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Struk akan tercetak segera setelah pembayaran berhasil</div>
+          </div>
+        </label>
+
+        <!-- Paper size info -->
+        <div style="font-size:11px;color:var(--text-muted);background:var(--bg-alt);padding:10px;border-radius:var(--r);line-height:1.6;">
+          <strong>Ukuran kertas:</strong> 58mm (thermal)<br>
+          Pastikan printer thermal sudah terhubung dan dipilih di dialog cetak browser.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="test-print">
+          <i data-lucide="printer" class="icon-sm"></i> Tes Print
+        </button>
+        <button class="btn btn-primary" data-action="close-modal" data-modal-id="modal-printer">Selesai</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Pilih Varian Produk
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-variant-select">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title">Pilih Varian</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-variant-select">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="variant-product-preview">
+          <div class="variant-product-img" id="vs-product-img"><i data-lucide="shopping-bag" class="icon"></i></div>
+          <div>
+            <div class="variant-product-title" id="vs-product-name">—</div>
+            <div class="variant-product-sub" id="vs-product-category">—</div>
+          </div>
+        </div>
+        <div class="variant-select-grid" id="variant-select-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Pilih Cabang
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-branch">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title">
+          <i data-lucide="store" class="icon-sm"></i> Pilih Cabang
+        </span>
+      </div>
+      <div class="modal-body">
+        <p class="text-sub mb-4 small">Pilih cabang tempat Anda bertugas hari ini.</p>
+        <div id="branch-list" class="flex-col gap-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Buka Shift (WAJIB)
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-shift">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="clock" class="icon-sm"></i> Buka Shift</span>
+      </div>
+      <div class="modal-body">
+        <div class="alert-warning">
+          <i data-lucide="alert-triangle" class="icon"></i>
+          Shift harus dibuka sebelum mulai berjualan. Hitung uang awal di laci kasir.
+        </div>
+        <div class="form-group">
+          <label class="form-label">Kas Awal (Rp) *</label>
+          <div class="input-prefix-wrap">
+            <span class="input-prefix">Rp</span>
+            <input type="number" class="form-control" id="shift-opening-cash" placeholder="0" min="0" />
+          </div>
+          <span class="form-hint">Jumlah uang tunai di laci kasir saat ini (boleh 0)</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <!-- BUG-01 FIX: Allow user to cancel/logout instead of being trapped in shift modal -->
+        <button class="btn btn-ghost btn-sm" data-action="confirm-logout" title="Batalkan dan keluar">Keluar</button>
+        <button class="btn btn-primary" id="btn-open-shift" data-action="confirm-open-shift">Buka Shift &amp; Mulai Berjualan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Tutup Shift
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-close-shift">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="lock" class="icon-sm"></i> Tutup Shift</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-close-shift">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="close-shift-summary"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="close-modal" data-modal-id="modal-close-shift">Batal</button>
+        <button class="btn btn-danger" id="btn-close-shift" data-action="confirm-close-shift">Tutup Shift</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Keranjang Ditahan
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-held-carts">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title">
+          <i data-lucide="pause-circle" class="icon-sm"></i> Keranjang Ditahan
+        </span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-held-carts">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="held-carts-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Tambah / Koreksi Stok
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-stock-adjust">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="package" class="icon-sm"></i> Penyesuaian Stok</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-stock-adjust">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Bahan Baku *</label>
+          <select class="form-control" id="stock-adj-ingredient"></select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Jenis Penyesuaian</label>
+          <select class="form-control" id="stock-adj-type">
+            <option value="in">Stok Masuk (Pembelian / Tambah)</option>
+            <option value="out">Stok Keluar (Koreksi / Susut)</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Jumlah *</label>
+          <input type="number" class="form-control" id="stock-adj-qty" placeholder="0"
+            min="0.01" step="0.01" inputmode="decimal" />
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Catatan <span class="text-muted" style="font-weight:400;">(opsional)</span></label>
+          <input type="text" class="form-control" id="stock-adj-notes"
+            placeholder="Contoh: Beli di pasar, restock pagi..." />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="close-modal" data-modal-id="modal-stock-adjust">Batal</button>
+        <button class="btn btn-primary" id="btn-submit-stock-adj" data-action="submit-stock-adjust">
+          <i data-lucide="check" class="icon-sm"></i> Simpan
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Pembayaran
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-payment">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">Pembayaran</div>
+          <div class="modal-subtitle">Pilih metode dan konfirmasi pembayaran</div>
+        </div>
+        <button class="modal-close" data-action="close-payment-modal">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Payment methods -->
+        <div class="payment-methods">
+          <button class="payment-method-btn active" data-action="select-payment-method" data-method="cash">Tunai</button>
+          <button class="payment-method-btn" data-action="select-payment-method" data-method="qris">QRIS</button>
+          <button class="payment-method-btn" data-action="select-payment-method" data-method="transfer">Transfer</button>
+        </div>
+
+        <!-- Order summary -->
+        <div class="payment-summary">
+          <div class="stat-label mb-2">Ringkasan Pesanan</div>
+          <div id="payment-items-summary"></div>
+          <div class="payment-summary-divider"></div>
+
+          <!-- Discount -->
+          <div class="discount-section">
+            <div class="stat-label mb-2 text-warning">Diskon</div>
+            <select class="form-control mb-2" id="discount-type" data-action-change="toggle-discount-input">
+              <option value="none">Tanpa Diskon</option>
+              <option value="pct">Persentase (%)</option>
+              <option value="fixed">Nominal (Rp)</option>
+            </select>
+            <div id="discount-value-wrap" class="hidden">
+              <label class="form-label" id="discount-value-label">Nilai Diskon</label>
+              <div class="flex gap-2 mt-1">
+                <input type="number" class="form-control" id="discount-value" placeholder="0" min="0"
+                  data-action-input="apply-discount-preview" />
+                <button class="btn btn-outline btn-sm" data-action="apply-discount">Terapkan</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-between small mb-1 text-sub">
+            <span>Subtotal</span>
+            <span id="payment-subtotal-display">Rp 0</span>
+          </div>
+          <div class="flex justify-between small mb-1 text-danger fw-600">
+            <span>Diskon</span>
+            <span id="payment-discount-display">—</span>
+          </div>
+          <div class="flex justify-between small mb-2 text-warning fw-600" id="payment-fee-row" style="display:none">
+            <span>Biaya Layanan</span>
+            <span id="payment-fee-display">—</span>
+          </div>
+
+          <!-- Total -->
+          <div class="payment-summary-total">
+            <span>Total Bayar</span>
+            <span id="payment-total-display">Rp 0</span>
+          </div>
+        </div>
+
+        <!-- Cash input -->
+        <div id="cash-input-wrap" class="form-group">
+          <label class="form-label">Uang Diterima</label>
+          <input type="number" id="cash-received" class="form-control input-hero" placeholder="Masukkan jumlah uang" inputmode="numeric" data-action-input="calc-change" />
+          <div id="quick-amounts"></div>
+        </div>
+
+        <div id="change-display" class="change-display hidden">
+          <span class="change-label">Kembalian</span>
+          <span class="change-value" id="change-value">Rp 0</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="close-payment-modal">Batal</button>
+        <button class="btn btn-success btn-lg btn-full" id="btn-confirm-pay" data-action="confirm-checkout">
+          <i data-lucide="check" class="icon-sm"></i> Konfirmasi Bayar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Struk
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-receipt">
+    <div class="modal modal-sm" id="receipt-modal-inner">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="receipt" class="icon-sm"></i> Struk Pembayaran</span>
+        <button class="modal-close" data-action="close-receipt">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="receipt-content" class="receipt-wrap"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="close-receipt">Tutup</button>
+        <button class="btn btn-primary" data-action="print-receipt">
+          <i data-lucide="printer" class="icon-sm"></i> Cetak
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Detail Transaksi (POS Shift)
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-pos-trx-detail">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title"><i data-lucide="receipt" class="icon-sm"></i> Detail Transaksi</div>
+          <div class="modal-subtitle" id="pos-trx-detail-subtitle">—</div>
+        </div>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-pos-trx-detail">✕</button>
+      </div>
+      <div class="modal-body" id="pos-trx-detail-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="close-modal" data-modal-id="modal-pos-trx-detail">Tutup</button>
+        <button class="btn btn-danger" id="btn-pos-void-trx" data-action="void-pos-transaction" style="display:none">
+          <i data-lucide="x-circle" class="icon-sm"></i> Void Transaksi
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Konfirmasi Custom
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-confirm">
+    <div class="modal modal-sm modal-confirm-card">
+      <div class="modal-confirm-icon" id="confirm-icon">⚠️</div>
+      <div class="modal-confirm-title" id="confirm-title">Konfirmasi</div>
+      <div class="modal-confirm-body" id="confirm-body">Apakah Anda yakin?</div>
+      <div class="modal-footer modal-confirm-footer">
+        <button class="btn btn-outline btn-confirm-cancel" id="btn-confirm-cancel"
+          data-action="close-modal" data-modal-id="modal-confirm">Batal</button>
+        <button class="btn btn-danger btn-confirm-ok" id="btn-confirm-ok">Ya, Lanjutkan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loader -->
+  <div id="page-loader" class="loader-overlay"><div class="spinner"></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils/safeNum.js"></script>
+  <script src="js/utils/formatter.js"></script>
+  <script src="js/utils/validator.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/services/inventoryService.js"></script>
+  <script src="js/services/cashService.js"></script>
+  <script src="js/services/transactionService.js"></script>
+  <script src="js/pos.js"></script>
+  <!-- ══════════════════════════════════════════
+       MODAL: Pilih Topping
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-topping-select">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <span class="modal-title">Pilih Topping</span>
+          <div class="text-xs text-muted mt-1" id="topping-select-subtitle" style="font-weight:400"></div>
+        </div>
+        <button class="modal-close" data-action="skip-topping-select">✕</button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="topping-select-list" class="flex flex-col gap-2 p-4"></div>
+      </div>
+      <div class="modal-footer" style="flex-direction:column;gap:10px;align-items:stretch">
+        <div class="flex justify-between items-center" style="font-size:13px;padding:0 2px">
+          <span class="text-muted">Harga tambahan topping:</span>
+          <span id="topping-select-extra" class="fw-700" style="color:var(--primary)">+Rp 0</span>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline flex-1" data-action="skip-topping-select">Tanpa Topping</button>
+          <button class="btn btn-primary flex-1" data-action="confirm-topping-select">
+            <i data-lucide="plus" class="icon-sm"></i> Tambah ke Keranjang
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Sukses Transaksi
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-success-trx" data-action="close-success-popup" style="backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);">
+    <div class="success-popup" id="success-popup-card" onclick="event.stopPropagation()">
+      <div class="success-popup-check">
+        <svg class="success-check-svg" viewBox="0 0 52 52">
+          <circle class="success-check-circle" cx="26" cy="26" r="24" fill="none"/>
+          <path  class="success-check-mark"   fill="none" d="M14 26.5l8 8 16-17"/>
+        </svg>
+      </div>
+      <div class="success-popup-title">Transaksi Berhasil!</div>
+      <div class="success-popup-meta" id="success-popup-meta"></div>
+      <div class="success-popup-btns">
+        <button class="btn btn-outline btn-lg" style="flex:1;min-width:130px;" data-action="close-success-popup">
+          <i data-lucide="plus-circle" class="icon-sm"></i> Transaksi Baru
+        </button>
+        <button class="btn btn-primary btn-lg" style="flex:1;min-width:130px;" data-action="print-receipt-close">
+          <i data-lucide="printer" class="icon-sm"></i> Cetak Struk
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
+</body>
+</html>

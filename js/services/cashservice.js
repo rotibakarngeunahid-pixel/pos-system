@@ -1,0 +1,267 @@
+'use strict';
+
+// ── Cash Service ──────────────────────────────────────────────────────────────
+// All cash_log operations go through this service.
+// Core rule: cash_logs are IMMUTABLE — never delete, only void with reason.
+
+// TODO (DBA): Verify FK constraint names with this SQL if getLogs() still fails:
+// SELECT conname, a.attname
+// FROM pg_constraint c
+// JOIN pg_attribute a ON a.attnum = ANY(c.conkey) AND a.attrelid = c.conrelid
+// WHERE c.conrelid = 'cash_logs'::regclass AND c.contype = 'f';
+// Then update the alias hints below to match the actual constraint names.
+
+const cashService = {
+
+  // ── Log a cash movement ───────────────────────────────────────
+  async logCash({
+    branchId, sessionId = null, type, categoryId = null,
+    amount, note = null, createdBy = null,
+    referenceType = null, referenceId = null
+  }) {
+    // BUG 5B FIX: skip (don't throw) if amount is 0 or negative (e.g. 100% discount void)
+    if (!branchId || !type) {
+      throw new Error('logCash: branchId dan type wajib diisi');
+    }
+    if (!amount || amount <= 0) {
+      console.warn('cashService.logCash: amount <= 0, skipping log entry', { branchId, type, amount, referenceType, referenceId });
+      return null;
+    }
+    const { data, error } = await db.from('cash_logs').insert({
+      branch_id:      branchId,
+      session_id:     sessionId  || null,
+      type,
+      category_id:    categoryId || null,
+      amount:         parseFloat(amount),
+      note:           note       || null,
+      created_by:     createdBy  || null,
+      reference_type: referenceType || null,
+      reference_id:   referenceId   || null,
+      is_void:        false
+    }).select().single();
+    if (error) throw error;
+    return data;
+  },
+
+  // ── Auto-log cash from a completed sale (cash payment only) ───
+  async logSale({ branchId, sessionId, amount, transactionId, createdBy }) {
+    // Find the "Penjualan Tunai" category
+    const { data: cat } = await db.from('cash_categories')
+      .select('id')
+      .eq('name', 'Penjualan Tunai')
+      .eq('type', 'in')
+      .maybeSingle();
+
+    return this.logCash({
+      branchId,
+      sessionId,
+      type:          'in',
+      categoryId:    cat?.id || null,
+      amount,
+      note:          `Penjualan #${transactionId}`,
+      createdBy,
+      referenceType: 'sale',
+      referenceId:   transactionId
+    });
+  },
+
+  // ── Auto-log cash out from a refund ───────────────────────────
+  async logRefund({ branchId, sessionId, amount, refundId, createdBy }) {
+    const { data: cat } = await db.from('cash_categories')
+      .select('id')
+      .eq('name', 'Refund')
+      .eq('type', 'out')
+      .maybeSingle();
+
+    return this.logCash({
+      branchId,
+      sessionId,
+      type:          'out',
+      categoryId:    cat?.id || null,
+      amount,
+      note:          `Refund #${refundId}`,
+      createdBy,
+      referenceType: 'refund',
+      referenceId:   refundId
+    });
+  },
+
+  // ── Void a cash log (never delete) ───────────────────────────
+  async voidLog({ logId, reason, voidedBy }) {
+    if (!logId || !reason?.trim()) {
+      throw new Error('Log ID dan alasan void wajib diisi');
+    }
+    const { data: log } = await db.from('cash_logs')
+      .select('is_void').eq('id', logId).maybeSingle();
+    if (!log) throw new Error('Cash log tidak ditemukan');
+    if (log.is_void) throw new Error('Log ini sudah di-void');
+
+    const { error } = await db.from('cash_logs').update({
+      is_void:    true,
+      void_reason: reason.trim(),
+      voided_by:  voidedBy || null,
+      voided_at:  new Date().toISOString()
+    }).eq('id', logId);
+    if (error) throw error;
+    return true;
+  },
+
+  // ── Get cash summary for a session or date range ──────────────
+  // Returns: { openingCash, salesIn, cashIn, cashOut, refundOut, voidOut, expectedCash }
+  async getSummary({ branchId, sessionId = null, dateFrom = null, dateTo = null, includeVoided = true }) {
+    let q = db.from('cash_logs')
+      .select('type, amount, reference_type, is_void, session_id')
+      .eq('branch_id', branchId);
+    if (!includeVoided) q = q.eq('is_void', false);
+
+    if (sessionId) {
+      q = q.eq('session_id', sessionId);
+    } else {
+      if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
+      if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59');
+    }
+
+    const { data: logs, error } = await q;
+    if (error) throw error;
+
+    const rows = logs || [];
+    const sum  = (arr) => arr.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+
+    // Filter out voided rows to prevent them from affecting the expected cash calculations
+    const validRows = rows.filter(r => !r.is_void);
+
+    const salesIn   = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'sale'));
+    const manualIn  = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'manual'));
+    const manualOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'manual'));
+    const refundOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'refund'));
+    const openingIn = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'opening'));
+    const voidOut   = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'void'));
+
+    // Opening cash comes from session record, not logs — fetch separately
+    let openingCash = openingIn;
+    if (sessionId) {
+      const { data: sess } = await db.from('cashier_sessions')
+        .select('opening_cash').eq('id', sessionId).maybeSingle();
+      openingCash = parseFloat(sess?.opening_cash || 0);
+    }
+
+    // BUG 2A FIX: voidOut is now included in expectedCash and totalOut
+    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut;
+
+    return {
+      openingCash,
+      salesIn,
+      manualIn,
+      manualOut,
+      refundOut,
+      voidOut,
+      expectedCash,
+      totalIn:  openingCash + salesIn + manualIn,
+      totalOut: manualOut + refundOut + voidOut
+    };
+  },
+
+  // ── Get paginated cash log list ───────────────────────────────
+  // BUG 1 FIX: use explicit FK aliases so PostgREST can disambiguate
+  // the two foreign keys from cash_logs to users (created_by and voided_by).
+  // Alias format: aliasName:tableName!constraintName(columns)
+  // If the query still fails, check actual FK constraint names with the SQL TODO above
+  // and update the constraint hint suffixes accordingly.
+  async getLogs({ branchId, sessionId = null, dateFrom = null, dateTo = null, includeVoided = true, limit = 200 }) {
+    // Fast path: try explicit FK aliasing (works if constraint names match)
+    try {
+      let q = db.from('cash_logs')
+        .select(`
+          id, type, amount, note, created_at,
+          reference_type, reference_id,
+          is_void, void_reason, voided_at,
+          cash_categories(name),
+          creator:users!cash_logs_created_by_fkey(name),
+          voider:users!cash_logs_voided_by_fkey(name)
+        `)
+        .eq('branch_id', branchId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (sessionId)      q = q.eq('session_id', sessionId);
+      if (!includeVoided) q = q.eq('is_void', false);
+      if (dateFrom)       q = q.gte('created_at', dateFrom + 'T00:00:00');
+      if (dateTo)         q = q.lte('created_at', dateTo   + 'T23:59:59');
+
+      const { data, error } = await q;
+      if (!error) return data || [];
+      // fallthrough to robust fallback on error
+    } catch (err) {
+      // fallthrough to robust fallback
+    }
+
+    // Robust fallback: fetch basic fields + creator/voider IDs, then resolve user names
+    try {
+      let q2 = db.from('cash_logs')
+        .select('id, type, amount, note, created_at, reference_type, reference_id, is_void, void_reason, voided_at, cash_categories(name), created_by, voided_by')
+        .eq('branch_id', branchId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (sessionId)      q2 = q2.eq('session_id', sessionId);
+      if (!includeVoided) q2 = q2.eq('is_void', false);
+      if (dateFrom)       q2 = q2.gte('created_at', dateFrom + 'T00:00:00');
+      if (dateTo)         q2 = q2.lte('created_at', dateTo   + 'T23:59:59');
+
+      const { data: rows, error: e2 } = await q2;
+      if (e2) throw e2;
+      const out = rows || [];
+
+      // Resolve creator/voider names in batch
+      const userIds = Array.from(new Set(out.flatMap(r => [r.created_by, r.voided_by].filter(Boolean))));
+      const usersMap = {};
+      if (userIds.length) {
+        const { data: users } = await db.from('users').select('id, name').in('id', userIds);
+        (users || []).forEach(u => { usersMap[u.id] = u.name; });
+      }
+
+      return out.map(r => ({
+        id: r.id,
+        type: r.type,
+        amount: r.amount,
+        note: r.note,
+        created_at: r.created_at,
+        reference_type: r.reference_type,
+        reference_id: r.reference_id,
+        is_void: r.is_void,
+        void_reason: r.void_reason,
+        voided_at: r.voided_at,
+        cash_categories: r.cash_categories || null,
+        creator: r.created_by ? { name: usersMap[r.created_by] || '—' } : null,
+        voider:  r.voided_by  ? { name: usersMap[r.voided_by]  || '—' } : null
+      }));
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // ── Load cash categories by type ──────────────────────────────
+  async getCategories(type = null) {
+    let q = db.from('cash_categories').select('*').order('name');
+    if (type) q = q.eq('type', type);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  },
+
+  // ── Save a cash category (create or update) ───────────────────
+  async saveCategory({ id = null, name, type }) {
+    if (!name?.trim() || !type) throw new Error('Nama dan tipe kategori wajib diisi');
+    const payload = { name: name.trim(), type };
+    const { error } = id
+      ? await db.from('cash_categories').update(payload).eq('id', id)
+      : await db.from('cash_categories').insert(payload);
+    if (error) throw error;
+  },
+
+  // ── Delete a cash category ────────────────────────────────────
+  async deleteCategory(id) {
+    const { error } = await db.from('cash_categories').delete().eq('id', id);
+    if (error) throw error;
+  }
+};

@@ -1,0 +1,182 @@
+'use strict';
+
+const transactionService = {
+
+  // ── Process full checkout (ATOMIC) ────────────────────────────
+  async processTransaction({
+    cart, branchId, staffId, sessionId,
+    paymentMethod, paymentAmount,
+    discountAmount = 0, taxAmount = 0,
+    feeAmount = 0, notes = '', clientTxId
+  }) {
+    // Basic validation to avoid calling RPC with invalid payload
+    if (!Array.isArray(cart) || cart.length === 0) throw new Error('Cart kosong');
+    if (!branchId) throw new Error('branchId wajib diisi');
+    if (!staffId) throw new Error('staffId wajib diisi');
+    if (!paymentMethod) throw new Error('Metode pembayaran wajib diisi');
+    const { data, error } = await db.rpc('process_transaction', {
+      p_cart: cart,
+      p_branch_id: branchId,
+      p_staff_id: staffId,
+      p_session_id: sessionId || null,
+      p_payment_method: paymentMethod,
+      p_payment_amount: safeNum(paymentAmount, 'Payment Amount'),
+      p_discount_amount: safeNum(discountAmount, 'Discount'),
+      p_tax_amount: safeNum(taxAmount, 'Tax'),
+      p_fee_amount: safeNum(feeAmount, 'Fee'),
+      p_notes: notes || null,
+      p_client_tx_id: clientTxId || null
+    });
+
+    if (error) throw new Error(error.message);
+
+    return { 
+      trx: data, 
+      subtotal: data.subtotal, 
+      total: data.total, 
+      change: data.change_amount, 
+      discountAmount: data.discount_amount, 
+      taxAmount: data.tax_amount, 
+      feeAmount 
+    };
+  },
+
+  // ── Open cashier shift ────────────────────────────────────────
+  async openShift({ branchId, staffId, openingCash }) {
+    // Basic param checks
+    if (!branchId) throw new Error('branchId wajib diisi');
+    if (!staffId) throw new Error('staffId wajib diisi — silakan login ulang');
+
+    // Verify branch exists
+    try {
+      const { data: branch } = await db.from('branches').select('id').eq('id', branchId).maybeSingle();
+      if (!branch) throw new Error('Cabang tidak ditemukan di database');
+    } catch (e) {
+      // surface DB errors
+      throw new Error('Gagal memverifikasi cabang: ' + (e.message || e));
+    }
+
+    // Verify staff/user exists (prevent FK violation)
+    try {
+      const { data: user } = await db.from('users').select('id').eq('id', staffId).maybeSingle();
+      if (!user) throw new Error('Staff tidak ditemukan di database — silakan login ulang atau hubungi admin');
+    } catch (e) {
+      throw new Error('Gagal memverifikasi staff: ' + (e.message || e));
+    }
+
+    // Prevent opening duplicate open shifts for same staff+branch
+    const { data: existing } = await db.from('cashier_sessions')
+      .select('id')
+      .eq('branch_id', branchId)
+      .eq('staff_id', staffId)
+      .eq('status', 'open')
+      .maybeSingle();
+    if (existing) throw new Error('Shift sudah dibuka. Tutup shift sebelumnya dulu.');
+
+    // Insert session with guarded error handling for FK violations
+    try {
+      const { data, error } = await db.from('cashier_sessions').insert({
+        branch_id:    branchId,
+        staff_id:     staffId,
+        opening_cash: openingCash || 0,
+        status:       'open'
+      }).select().single();
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      // Postgres foreign-key violation code is 23503 — provide clearer message
+      const msg = (err && err.message) ? String(err.message) : '';
+      if (msg.toLowerCase().includes('violates foreign key') || (err && err.code === '23503')) {
+        throw new Error('Gagal membuka shift: referensi staff atau cabang tidak valid. Silakan periksa data akun dan cabang.');
+      }
+      throw err;
+    }
+  },
+
+  // ── Close cashier shift ───────────────────────────────────────
+  async closeShift({ sessionId, closingCash }) {
+    const { data: sess } = await db.from('cashier_sessions')
+      .select('*').eq('id', sessionId).single();
+    if (!sess) throw new Error('Sesi tidak ditemukan');
+    if (sess.status === 'closed') throw new Error('Shift sudah ditutup');
+
+    // Compute expected cash using cashService if available
+    let expectedCash = safeNum(sess.opening_cash || 0, 'Opening Cash') + safeNum(sess.total_sales || 0, 'Total Sales');
+    if (typeof cashService !== 'undefined') {
+      try {
+        const summary = await cashService.getSummary({ branchId: sess.branch_id, sessionId });
+        expectedCash  = summary.expectedCash;
+      } catch (e) {
+        // fallback to simple calc
+      }
+    }
+
+    const { error } = await db.from('cashier_sessions').update({
+      status:        'closed',
+      closing_cash:  closingCash,
+      expected_cash: expectedCash,
+      closed_at:     new Date().toISOString()
+    }).eq('id', sessionId);
+    if (error) throw error;
+
+    return { ...sess, closing_cash: closingCash, expected_cash: expectedCash };
+  },
+
+  // ── Process refund (ATOMIC) ───────────────────────────────────
+  async processRefund({ transactionId, refundAmount, reason, type, userId }) {
+    const { data, error } = await db.rpc('refund_transaction', {
+      p_transaction_id: transactionId,
+      p_refund_amount: safeNum(refundAmount, 'Refund Amount'),
+      p_reason: reason,
+      p_type: type,
+      p_user_id: userId
+    });
+
+    if (error) throw new Error(error.message);
+
+    return { id: data.refund_id };
+  },
+
+  // ── Find transaction by clientTxId (used for recovery/idempotency) ──
+  async getTransactionByClientTxId(clientTxId) {
+    if (!clientTxId) return null;
+    const { data, error } = await db.from('transactions').select('*').eq('client_tx_id', clientTxId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+    return {
+      trx: data,
+      subtotal: data.subtotal,
+      total: data.total,
+      change: data.change_amount || 0,
+      discountAmount: data.discount_amount || 0,
+      taxAmount: data.tax_amount || 0,
+      feeAmount: data.fee_amount || 0
+    };
+  },
+
+  // ── Void transaction (ATOMIC) ─────────────────────────────────
+  async voidTransaction({ transactionId, reason, userId }) {
+    if (!reason?.trim()) throw new Error('Alasan void wajib diisi');
+
+    const { data, error } = await db.rpc('void_transaction', {
+      p_transaction_id: transactionId,
+      p_reason: reason.trim(),
+      p_user_id: userId
+    });
+
+    if (error) throw new Error(error.message);
+
+    // Otomatis membatalkan log kas yang terkait dengan penjualan ini
+    await db.from('cash_logs')
+      .update({
+        is_void: true,
+        void_reason: reason.trim(),
+        voided_by: userId,
+        voided_at: new Date().toISOString()
+      })
+      .eq('reference_type', 'sale')
+      .eq('reference_id', transactionId);
+
+    return { transactionId, status: data?.status || 'void' };
+  }
+};

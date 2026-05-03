@@ -1,0 +1,3148 @@
+'use strict';
+
+const ADMIN = {
+  user:        null,
+  branches:    [],
+  products:    [],
+  ingredients: [],
+  suppliers:   [],
+  productCategories: [],
+  purchaseItems: [],   // temp items for PO being built
+  currentSection: 'dashboard',
+  currentReportTab: 'sales',
+  _bulkImportData: null,  // parsed rows waiting for confirmation
+
+  // ── Init ─────────────────────────────────────────────────────
+  async init() {
+    this.user = auth.requireRole('admin');
+    if (!this.user) return;
+    this.user = await auth.validateCurrentUser();
+    if (!this.user) return;
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-admin-action]');
+      if (!btn) return;
+      const action = btn.dataset.adminAction;
+      switch (action) {
+        case 'navigate': this.navigate(btn.dataset.section, btn); break;
+        case 'confirm-logout': this.confirmLogout(); break;
+        case 'toggle-sidebar-collapse': this.toggleSidebarCollapse(); break;
+        case 'close-sidebar': this.closeSidebar(); break;
+        case 'toggle-sidebar': this.toggleSidebar(); break;
+        case 'open-pos-window': window.open('pos.html', '_blank'); break;
+        case 'close-modal': this.closeModal(btn.dataset.modalId); break;
+        case 'close-generic-modal': closeModal(btn.dataset.modalId); break;
+        case 'open-branch-modal': this.openBranchModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
+        case 'delete-branch': this.deleteBranch(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-product-modal': this.openProductModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
+        case 'delete-product': this.deleteProduct(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-product-category-modal': this.openProductCategoryModal(btn.dataset.id ? Number(btn.dataset.id) : null, btn.dataset.name || ''); break;
+        case 'delete-product-category': this.deleteProductCategory(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-recipe-item-modal': this.openRecipeItemModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
+        case 'delete-recipe-item': this.deleteRecipeItem(Number(btn.dataset.id)); break;
+        case 'create-recipe': this.createRecipe(btn.dataset.variantId, btn.dataset.variantName || 'Resep'); break;
+        case 'open-staff-modal': this.openStaffModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
+        case 'delete-staff': this.deleteStaff(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-ingredient-modal': this.openIngredientModal(); break;
+        case 'open-edit-ingredient-modal': this.openEditIngredientModal(Number(btn.dataset.id)); break;
+        case 'delete-ingredient': this.deleteIngredient(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-ingredient-products': this.openIngredientProductsModal(Number(btn.dataset.id)); break;
+        case 'view-transaction': this.viewTransaction(Number(btn.dataset.id)); break;
+        case 'void-cash-log': this.voidCashLog(Number(btn.dataset.id)); break;
+        case 'open-variant-modal': this.openVariantModal(Number(btn.dataset.id)); break;
+        case 'delete-variant': this.deleteVariant(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'edit-product-variant': this.editProductVariant(Number(btn.dataset.id), btn.dataset.name || '', safeNum(btn.dataset.price || 0, 'Variant Price')); break;
+        case 'delete-product-variant': this.deleteProductVariant(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'remove-pending-variant': this.removePendingVariant(Number(btn.dataset.index)); break;
+        case 'edit-payment-method': this.editPaymentMethod(Number(btn.dataset.index)); break;
+        case 'delete-payment-method': this.deletePaymentMethod(Number(btn.dataset.index)); break;
+        case 'open-cash-category-modal': this.openCashCategoryModal(btn.dataset.id ? Number(btn.dataset.id) : null, btn.dataset.name || '', btn.dataset.type || 'in'); break;
+        case 'delete-cash-category': this.deleteCashCategory(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-inventory-modal': this.openInventoryModal(btn.dataset.type); break;
+        case 'set-trx-quick-filter': this.setTrxQuickFilter(btn.dataset.filter, btn); break;
+        case 'run-report': this.runReport(this.currentReportTab || 'sales'); break;
+        case 'switch-report-tab': this.switchReportTab(btn.dataset.tab, btn); break;
+        case 'save-receipt-settings': this.saveReceiptSettings(); break;
+        case 'render-receipt-preview': this.renderReceiptPreview(); break;
+        case 'add-payment-method': this.addPaymentMethod(); break;
+        case 'open-reset-modal': this.openResetModal(); break;
+        case 'load-cash-report': this.loadCashReport(); break;
+        case 'switch-cash-tab': this.switchCashTab(btn.dataset.tab, btn); break;
+        case 'save-branch': this.saveBranch(); break;
+        case 'trigger-product-image-file': document.getElementById('product-image-file')?.click(); break;
+        case 'save-product': this.saveProduct(); break;
+        case 'add-pending-variant': this.addPendingVariant(); break;
+        case 'add-product-variant': this.addProductVariant(); break;
+        case 'save-variant': this.saveVariant(); break;
+        case 'save-ingredient': this.saveIngredient(); break;
+        case 'save-recipe-item': this.saveRecipeItem(); break;
+        case 'save-inventory-adjust': this.saveInventoryAdjust(); break;
+        case 'save-staff': this.saveStaff(); break;
+        case 'confirm-refund': this.confirmRefund(); break;
+        case 'confirm-void': this.confirmVoid(); break;
+        case 'save-cash-category': this.saveCashCategory(); break;
+        case 'save-product-category': this.saveProductCategory(); break;
+        case 'confirm-reset': this.confirmReset(); break;
+        case 'open-branch-product-price-modal': this.openBranchProductPriceModal(Number(btn.dataset.productId), btn.dataset.productName||''); break;
+        case 'save-branch-product-price': this.saveBranchProductPrice(); break;
+        case 'download-menu-template': this.downloadMenuTemplate(); break;
+        case 'trigger-bulk-import-file': document.getElementById('bulk-import-file')?.click(); break;
+        case 'confirm-bulk-import': this.confirmBulkImport(); break;
+        case 'open-topping-modal': this.openToppingModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
+        case 'save-topping': this.saveTopping(); break;
+        case 'delete-topping': this.deleteTopping(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'toggle-topping-active': this.toggleToppingActive(Number(btn.dataset.id), btn.dataset.active === 'true'); break;
+        case 'open-api-key-modal': this.openApiKeyModal(); break;
+        case 'confirm-generate-api-key': this.confirmGenerateApiKey(); break;
+        case 'delete-api-key': this.deleteApiKey(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'toggle-api-key': this.toggleApiKey(Number(btn.dataset.id), btn.dataset.active === 'true'); break;
+        case 'copy-api-key': this.copyApiKey(btn.dataset.key || ''); break;
+      }
+    });
+    document.addEventListener('change', (e) => {
+      const node = e.target.closest('[data-admin-change]');
+      if (!node) return;
+      const action = node.dataset.adminChange;
+      switch (action) {
+        case 'load-dashboard': this.loadDashboard(); break;
+        case 'load-recipe-variants': this.loadRecipeVariants(); break;
+        case 'load-recipe-items': this.loadRecipeItems(); break;
+        case 'load-inventory': this.loadInventory(); break;
+        case 'load-transactions': this.loadTransactions(); break;
+        case 'load-inventory-logs': this.loadInventoryLogs(); break;
+        case 'load-branch-pricing': this.loadBranchPricing(); break;
+        case 'toggle-add-fee':
+          document.getElementById('pm-add-fee-container').style.display = node.checked ? 'flex' : 'none';
+          break;
+        case 'preview-image': this.previewImage(node); break;
+        case 'toggle-inventory-modal-type': this.toggleInventoryModalType(); break;
+        case 'import-menu-file': this.handleImportMenuFile(node); break;
+        case 'load-topping-mapping': this.loadToppingMapping(node.value); break;
+      }
+    });
+    document.addEventListener('input', (e) => {
+      const node = e.target.closest('[data-admin-input]');
+      if (!node) return;
+      const action = node.dataset.adminInput;
+      if (action === 'preview-image-url') this.previewImageUrl(node.value);
+      else if (action === 'update-pending-variant') this.updatePendingVariant(Number(node.dataset.index), node.dataset.field, node.value);
+    });
+
+    document.getElementById('sidebar-user-name').textContent = this.user.name;
+    const avatarEl = document.getElementById('sidebar-user-avatar');
+    if (avatarEl) avatarEl.textContent = this.user.name.charAt(0).toUpperCase();
+
+    // BUG-16 FIX: Update topbar date at midnight instead of only once at init
+    function updateTopbarDate() {
+      const el = document.getElementById('topbar-date');
+      if (el) el.textContent = new Date().toLocaleDateString('id-ID', {
+        weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+      });
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      setTimeout(updateTopbarDate, midnight - now);
+    }
+    updateTopbarDate();
+
+    // Restore sidebar collapse state
+    if (localStorage.getItem('sidebar-collapsed') === 'true') {
+      document.getElementById('admin-sidebar')?.classList.add('collapsed');
+      const btn = document.getElementById('sidebar-collapse-btn');
+      if (btn) btn.textContent = '›';
+    }
+
+    // Set today's date for transactions
+    const today = new Date().toISOString().slice(0,10);
+    const dateInput = document.getElementById('trx-date-filter');
+    if (dateInput) dateInput.value = today;
+
+    await this.loadMasterData();
+    // Load settings (includes payment methods)
+    await this.loadSettings();
+    await this.loadDashboard();
+    this.hideLoader();
+
+    // Init Lucide icons (after DOM is ready)
+    if (window.lucide) lucide.createIcons();
+    this._bulkModalInit();
+  },
+
+  // ── Sidebar Collapse ──────────────────────────────────────────
+  toggleSidebarCollapse() {
+    const sidebar = document.getElementById('admin-sidebar');
+    const btn     = document.getElementById('sidebar-collapse-btn');
+    sidebar.classList.toggle('collapsed');
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    localStorage.setItem('sidebar-collapsed', isCollapsed);
+    if (btn) btn.textContent = isCollapsed ? '‹' : '›';
+  },
+
+  // ── Master data ───────────────────────────────────────────────
+  async loadMasterData() {
+    // product_categories is loaded separately with a graceful fallback in case
+    // the table doesn't exist yet (run schema_v4.sql in Supabase SQL Editor to create it).
+    const [branchRes, productRes, ingRes, supRes] = await Promise.all([
+      db.from('branches').select('*').order('name'),
+      db.from('products').select('*').order('name'),
+      db.from('ingredients').select('*').order('name'),
+      db.from('suppliers').select('*').order('name')
+    ]);
+    this.branches    = branchRes.data  || [];
+    this.products    = productRes.data || [];
+    this.ingredients = ingRes.data     || [];
+    this.suppliers   = supRes.data     || [];
+
+    // Graceful load: product_categories may not exist if schema_v4.sql hasn't been run
+    try {
+      const catRes = await db.from('product_categories').select('*').order('name');
+      if (catRes.error) {
+        // Table missing — warn but don't crash
+        console.warn('[RBN] product_categories table not found. Run schema_v4.sql to create it.', catRes.error.message);
+        this.productCategories = this.productCategories || [];
+      } else {
+        this.productCategories = catRes.data || [];
+      }
+    } catch (e) {
+      console.warn('[RBN] Failed to load product_categories:', e.message);
+      this.productCategories = this.productCategories || [];
+    }
+
+    this.populateBranchSelects();
+    this.populateProductSelects();
+    this.populateProductCategorySelects();
+  },
+
+  populateBranchSelects() {
+    const opts    = this.branches.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
+    const allOpts = `<option value="">Semua Cabang</option>${opts}`;
+    setSelect('dash-branch-filter',    allOpts);
+    setSelect('trx-branch-filter',     allOpts);
+    setSelect('report-branch-filter',  allOpts);
+    setSelect('inv-branch-filter',     `<option value="">Pilih Cabang</option>${opts}`);
+    setSelect('assign-branch-filter',  `<option value="">Pilih Cabang</option>${opts}`);
+    setSelect('inv-adj-branch-id',     opts);
+    setSelect('inv-transfer-from',     opts);
+    setSelect('inv-transfer-to',       opts);
+    setSelect('staff-branch-id',       `<option value="">— Tidak Ditentukan —</option>${opts}`);
+    setSelect('po-branch-id',          opts);
+    setSelect('inv-log-branch-filter', `<option value="">Semua Cabang</option>${opts}`);
+    setSelect('branch-pricing-filter', `<option value="">— Pilih Cabang —</option>${opts}`);
+  },
+
+  populateProductSelects() {
+    const opts = this.products.map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('');
+    setSelect('variant-product-filter',    `<option value="">Pilih Produk</option>${opts}`);
+    setSelect('variant-product-id',        opts);
+    setSelect('recipe-product-filter',     `<option value="">Pilih Produk</option>${opts}`);
+    setSelect('topping-mapping-product',   `<option value="">— Pilih Produk —</option>${opts}`);
+  },
+
+  populateProductCategorySelects() {
+    const opts = this.productCategories.map(c => `<option value="${escHtml(c.name)}">${escHtml(c.name)}</option>`).join('');
+    setSelect('product-category', `<option value="">-- Pilih Kategori --</option>${opts}`);
+  },
+
+  // ── Navigation ────────────────────────────────────────────────
+  navigate(section, btn) {
+    this.closeSidebar();
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
+    document.getElementById(`section-${section}`).classList.add('active');
+
+    const titles = {
+      dashboard:   'Dashboard',         branches:     'Manajemen Cabang',
+      products:    'Manajemen Produk',  recipes:      'Resep / BOM',
+      'product-categories': 'Kategori Produk',
+      'branch-pricing': 'Harga Per-Cabang',
+      inventory:   'Inventori',         transactions: 'Riwayat Transaksi',
+      staff:       'Manajemen Staff',
+      reports:     'Laporan',           'inv-logs':   'Log Inventori',
+      ingredients: 'Bahan Baku',        settings:     'Pengaturan',
+      'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
+      'toppings':    'Manajemen Topping', 'api-keys': 'API Keys'
+    };
+    document.getElementById('topbar-title').textContent = titles[section] || section;
+    this.currentSection = section;
+
+    switch (section) {
+      case 'branches':        this.loadBranches();        break;
+      case 'products':        this.loadProducts();        break;
+      case 'product-categories': this.loadProductCategories(); break;
+      case 'branch-pricing':  this.loadBranchPricing();   break;
+      case 'transactions':    this.loadTransactions();    break;
+      case 'staff':           this.loadStaff();           break;
+      case 'reports':         this.loadReports();         break;
+      case 'inv-logs':        this.loadInventoryLogs();   break;
+      case 'ingredients':     this.loadIngredients();     break;
+      case 'settings':        this.loadSettings();        break;
+      case 'cash-report':     this.loadCashReport();      break;
+      case 'cash-categories': this.loadCashCategories();  break;
+      case 'toppings':        this.loadToppingSection();  break;
+      case 'api-keys':        this.loadApiKeysSection();  break;
+    }
+  },
+
+  toggleSidebar() {
+    document.getElementById('admin-sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('show');
+  },
+  closeSidebar() {
+    document.getElementById('admin-sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('show');
+  },
+
+  // ── Dashboard ─────────────────────────────────────────────────
+  async loadDashboard() {
+    const branchId   = document.getElementById('dash-branch-filter').value;
+    // BUG-H3 FIX: Use business date range (cutoff jam 03:00) agar konsisten dengan POS summary
+    const today      = fmt.getBusinessDate();
+    const { from: todayFrom, to: todayTo } = fmt.getBusinessDateRange(today);
+    const monthStart = today.slice(0, 7) + '-01';
+    const { from: monthFrom } = fmt.getBusinessDateRange(monthStart);
+
+    let qToday  = db.from('transactions').select('total, branch_id').eq('status','completed').gte('created_at', todayFrom).lte('created_at', todayTo);
+    let qMonth  = db.from('transactions').select('total').eq('status','completed').gte('created_at', monthFrom);
+    let qRecent = db.from('transactions')
+      .select('id, created_at, total, payment_method, branch_id, status, branches(name), users!staff_id(name)')
+      .order('created_at', { ascending: false }).limit(10);
+
+    if (branchId) {
+      qToday  = qToday.eq('branch_id', branchId);
+      qMonth  = qMonth.eq('branch_id', branchId);
+      qRecent = qRecent.eq('branch_id', branchId);
+    }
+
+    const [todayRes, monthRes, recentRes, prodCount, lowStockRes] = await Promise.all([
+      qToday, qMonth, qRecent,
+      db.from('products').select('id', { count:'exact', head:true }),
+      db.from('branch_inventory').select('stock, ingredients(name), branches(name)').lt('stock', 5).limit(5)
+    ]);
+
+    const todayData  = todayRes.data  || [];
+    const monthData  = monthRes.data  || [];
+    const recentData = recentRes.data || [];
+
+    document.getElementById('stat-sales').textContent        = fRp(todayData.reduce((s,t)=>s+parseFloat(t.total),0));
+    document.getElementById('stat-transactions').textContent  = todayData.length;
+    document.getElementById('stat-monthly').textContent       = fRp(monthData.reduce((s,t)=>s+parseFloat(t.total),0));
+    document.getElementById('stat-products').textContent      = prodCount.count || 0;
+
+    const tbody = document.getElementById('recent-trx-body');
+    tbody.innerHTML = recentData.length ? recentData.map((t, i) => `
+      <tr>
+        <td>${i+1}</td>
+        <td class="nowrap">${fDate(t.created_at)}</td>
+        <td>${escHtml(t.branches?.name||'—')}</td>
+        <td>${escHtml(t.users?.name||'—')}</td>
+        <td><span class="badge badge-orange">${t.payment_method||'cash'}</span></td>
+        <td><span class="badge ${t.status==='completed'?'badge-green':t.status==='refunded'?'badge-red':'badge-orange'}">${t.status||'completed'}</span></td>
+        <td class="fw-700">${fRp(t.total)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="7" class="text-center text-muted p-6">Belum ada transaksi hari ini</td></tr>`;
+
+    // Low stock alerts
+    const alertEl = document.getElementById('low-stock-alerts');
+    if (alertEl) {
+      const low = lowStockRes.data || [];
+      alertEl.innerHTML = low.length
+        ? low.map(r => `<div class="alert-row"><span class="text-danger fw-700">!</span> <strong>${escHtml(r.ingredients?.name)}</strong> — stok ${parseFloat(r.stock)} (${escHtml(r.branches?.name||'?')})</div>`).join('')
+        : '<div class="text-muted text-sm">Semua stok aman</div>';
+    }
+
+    // BUG-12 FIX: Wire up dashboard refresh button (added to admin.html)
+    const refreshBtn = document.getElementById('dashboard-refresh-btn');
+    if (refreshBtn && !refreshBtn._bound) {
+      refreshBtn.addEventListener('click', () => ADMIN.loadDashboard());
+      refreshBtn._bound = true;
+    }
+  },
+
+  // ── Branches ─────────────────────────────────────────────────
+  async loadBranches() {
+    const { data } = await db.from('branches').select('*').order('created_at', { ascending:false });
+    const container = document.getElementById('branches-list');
+    container.innerHTML = data?.length
+      ? `<div class="admin-list">${data.map(b => `
+          <div class="admin-list-card">
+            <div class="list-card-icon"><i data-lucide="store" class="icon"></i></div>
+            <div class="list-card-info">
+              <div class="list-card-title">${escHtml(b.name)}</div>
+              <div class="list-card-sub">${escHtml(b.address||'Tidak ada alamat')}</div>
+            </div>
+            <div class="list-card-meta">${fDate(b.created_at)}</div>
+            <div class="list-card-actions">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-branch-modal" data-id="${b.id}">Edit</button>
+              <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-branch" data-id="${b.id}" data-name="${escHtml(b.name)}">Hapus</button>
+            </div>
+          </div>`).join('')}</div>`
+      : `<div class="empty-state">
+          <div class="empty-icon"><i data-lucide="store" class="icon"></i></div>
+          <div class="empty-title">Belum ada cabang</div>
+          <div class="empty-desc">Tambahkan cabang pertama untuk mulai menggunakan sistem</div>
+          <div class="empty-cta"><button class="btn btn-primary" data-admin-action="open-branch-modal">+ Tambah Cabang</button></div>
+        </div>`;
+  },
+
+  openBranchModal(id = null) {
+    document.getElementById('branch-id').value       = id || '';
+    document.getElementById('branch-name').value     = '';
+    document.getElementById('branch-address').value  = '';
+    document.getElementById('branch-modal-title').textContent = id ? 'Edit Cabang' : 'Tambah Cabang';
+    if (id) {
+      const b = this.branches.find(x => x.id === id) || {};
+      document.getElementById('branch-name').value    = b.name    || '';
+      document.getElementById('branch-address').value = b.address || '';
+    }
+    openModal('modal-branch');
+  },
+
+  async saveBranch() {
+    const id      = document.getElementById('branch-id').value;
+    const name    = document.getElementById('branch-name').value.trim();
+    const address = document.getElementById('branch-address').value.trim();
+    if (!name) { showToast('Nama cabang wajib diisi', 'error'); return; }
+
+    const { error } = id
+      ? await db.from('branches').update({ name, address }).eq('id', id)
+      : await db.from('branches').insert({ name, address });
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+
+    showToast('Cabang berhasil disimpan', 'success');
+    this.closeModal('modal-branch');
+    await this.loadMasterData();
+    this.loadBranches();
+  },
+
+  async deleteBranch(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Cabang "${name}"?`,
+      message:     'Cabang ini akan dihapus permanen.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    const { error } = await db.from('branches').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Cabang dihapus', 'success');
+    await this.loadMasterData();
+    this.loadBranches();
+  },
+
+  // ── Branch Pricing ──────────────────────────────────────────────
+  // ── Branch Pricing ──────────────────────────────────────────────
+  async loadBranchPricing() {
+    const branchId = document.getElementById('branch-pricing-filter')?.value;
+    const tbody    = document.getElementById('branch-pricing-body');
+    const hintEl   = document.getElementById('branch-pricing-hint');
+    if (!tbody) return;
+
+    if (!branchId) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Pilih cabang untuk melihat daftar harga</td></tr>';
+      if (hintEl) hintEl.textContent = 'Pilih cabang untuk melihat dan mengatur harga';
+      return;
+    }
+
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Memuat...</td></tr>';
+    const branch = this.branches.find(b => b.id === parseInt(branchId));
+    if (hintEl) hintEl.textContent = branch ? `Cabang: ${branch.name}` : '';
+
+    try {
+      // Fetch all variants with their product names
+      const { data: variants, error: vErr } = await db
+        .from('product_variants')
+        .select('id, name, price, product_id, products(id, name)')
+        .order('id');
+      if (vErr) throw vErr;
+
+      // Fetch existing overrides for this branch
+      const { data: overrides, error: oErr } = await db
+        .from('branch_variant_prices')
+        .select('variant_id, price')
+        .eq('branch_id', branchId);
+      // If table doesn't exist yet, gracefully degrade
+      if (oErr && /does not exist|relation.*not found/i.test(oErr.message)) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-td text-danger">Tabel branch_variant_prices belum ada. Jalankan schema_v6.sql terlebih dahulu.</td></tr>';
+        return;
+      }
+      if (oErr) throw oErr;
+
+      const overrideMap = {};
+      (overrides || []).forEach(o => { overrideMap[o.variant_id] = parseFloat(o.price); });
+
+      if (!variants?.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Belum ada varian produk</td></tr>';
+        return;
+      }
+
+      // Group variants by product
+      const productsMap = {};
+      variants.forEach(v => {
+        const pId = v.product_id;
+        if (!productsMap[pId]) {
+          productsMap[pId] = { id: pId, name: v.products?.name || 'Unknown', variants: [], overrideCount: 0 };
+        }
+        productsMap[pId].variants.push(v);
+        if (overrideMap[v.id] !== undefined) productsMap[pId].overrideCount++;
+      });
+
+      const productRows = Object.values(productsMap).map(p => {
+        return `
+          <tr>
+            <td class="fw-700">📦 ${escHtml(p.name)}</td>
+            <td style="text-align:center">${p.variants.length}</td>
+            <td style="text-align:center">
+              ${p.overrideCount > 0 
+                ? `<span class="badge badge-orange">${p.overrideCount} Override</span>` 
+                : `<span class="text-muted text-sm">Semua Default</span>`}
+            </td>
+            <td style="text-align:center">
+              <button class="btn btn-outline btn-sm"
+                data-admin-action="open-branch-product-price-modal"
+                data-product-id="${p.id}"
+                data-product-name="${escHtml(p.name)}">Atur Harga</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      tbody.innerHTML = productRows;
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-td text-danger">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
+      showToast('Gagal memuat data harga cabang: ' + e.message, 'error');
+    }
+  },
+
+  async openBranchProductPriceModal(productId, productName) {
+    const branchId = document.getElementById('branch-pricing-filter')?.value;
+    if (!branchId) { showToast('Pilih cabang terlebih dahulu', 'warning'); return; }
+
+    document.getElementById('bprice-branch-id').value   = branchId;
+    document.getElementById('bprice-product-id').value  = productId;
+    
+    const branch = this.branches.find(b => b.id === parseInt(branchId));
+    document.getElementById('bprice-product-name-label').textContent = `${productName} di cabang ${branch?.name || ''}`;
+
+    const tbody = document.getElementById('bprice-variants-body');
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center p-4">Memuat varian...</td></tr>';
+    
+    openModal('modal-branch-product-price');
+
+    try {
+      const { data: variants, error: vErr } = await db
+        .from('product_variants')
+        .select('id, name, price')
+        .eq('product_id', productId)
+        .order('id');
+      if (vErr) throw vErr;
+
+      const { data: overrides, error: oErr } = await db
+        .from('branch_variant_prices')
+        .select('variant_id, price')
+        .eq('branch_id', branchId);
+      if (oErr && !/does not exist|relation.*not found/i.test(oErr.message)) throw oErr;
+
+      const overrideMap = {};
+      (overrides || []).forEach(o => { overrideMap[o.variant_id] = parseFloat(o.price); });
+
+      if (!variants?.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center p-4">Produk ini tidak memiliki varian.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = variants.map(v => {
+        const defaultPrice = parseFloat(v.price || 0);
+        const override = overrideMap[v.id];
+        const val = override !== undefined ? override : '';
+        return `
+          <tr>
+            <td class="fw-600">${escHtml(v.name)}</td>
+            <td style="text-align:right" class="text-muted">${fRp(defaultPrice)}</td>
+            <td>
+              <input type="number" class="form-control bprice-input w-full" 
+                data-variant-id="${v.id}" 
+                placeholder="Kosongkan = default" 
+                min="0" 
+                value="${val}" />
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger p-4">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
+    }
+  },
+
+  async saveBranchProductPrice() {
+    const branchId  = parseInt(document.getElementById('bprice-branch-id').value);
+    const productId = parseInt(document.getElementById('bprice-product-id').value);
+    if (!branchId || !productId) return;
+
+    const btn = document.querySelector('#modal-branch-product-price .btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+
+    try {
+      const inputs = document.querySelectorAll('#bprice-variants-body .bprice-input');
+      const upserts = [];
+      const deletes = [];
+
+      inputs.forEach(input => {
+        const vId = parseInt(input.dataset.variantId);
+        const valStr = input.value.trim();
+        if (valStr === '') {
+          deletes.push(vId);
+        } else {
+          const price = parseFloat(valStr);
+          if (!isNaN(price) && price >= 0) {
+            upserts.push({ branch_id: branchId, variant_id: vId, price, updated_at: new Date().toISOString() });
+          }
+        }
+      });
+
+      // Execute deletes for cleared inputs
+      if (deletes.length > 0) {
+        const { error: dErr } = await db.from('branch_variant_prices')
+          .delete()
+          .eq('branch_id', branchId)
+          .in('variant_id', deletes);
+        if (dErr) throw dErr;
+      }
+
+      // Execute upserts for filled inputs
+      if (upserts.length > 0) {
+        const { error: uErr } = await db.from('branch_variant_prices')
+          .upsert(upserts, { onConflict: 'branch_id,variant_id' });
+        if (uErr) throw uErr;
+      }
+
+      showToast('Harga cabang berhasil disimpan', 'success');
+      closeModal('modal-branch-product-price');
+      this.loadBranchPricing();
+    } catch (e) {
+      showToast('Gagal menyimpan: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Simpan Semua'; }
+    }
+  },
+
+  // ── Products ─────────────────────────────────────────────────
+  async loadProducts() {
+    const { data } = await db.from('products').select('*').order('created_at', { ascending:false });
+    const container = document.getElementById('products-grid-container');
+    if (!container) return;
+    container.innerHTML = data?.length
+      ? `<div class="product-admin-grid">${data.map(p => `
+          <div class="product-admin-card">
+            <div class="product-admin-img">
+              ${p.image_url ? `<img loading="lazy" src="${escHtml(p.image_url)}" alt="${escHtml(p.name)}" class="img-cover" onerror="this.outerHTML='<div class=&quot;product-img-placeholder&quot;><i data-lucide=&quot;package&quot; class=&quot;icon-xl&quot;></i></div>'; if(window.lucide) lucide.createIcons();" />` : '<i data-lucide="package" class="icon-xl"></i>'}
+            </div>
+            <div class="product-admin-body">
+              <div class="product-admin-name">${escHtml(p.name)}</div>
+              ${p.category ? `<span class="badge badge-orange mt-1">${escHtml(p.category)}</span>` : ''}
+            </div>
+            <div class="product-admin-footer">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-product-modal" data-id="${p.id}">Edit</button>
+              <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-product" data-id="${p.id}" data-name="${escHtml(p.name)}">Hapus</button>
+            </div>
+          </div>`).join('')}</div>`
+      : `<div class="empty-state">
+          <div class="empty-icon"><i data-lucide="package-2" class="icon"></i></div>
+          <div class="empty-title">Belum ada produk</div>
+          <div class="empty-desc">Tambahkan produk pertama untuk mulai berjualan</div>
+          <div class="empty-cta"><button class="btn btn-primary" data-admin-action="open-product-modal">+ Tambah Produk</button></div>
+        </div>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+
+  previewImage(input) {
+    if (!input.files?.[0]) return;
+    const file = input.files[0];
+    if (file.size > 1024*1024) { showToast('Ukuran gambar maks 1 MB', 'error'); input.value=''; return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = document.getElementById('img-preview');
+      img.src = e.target.result;
+      img.classList.remove('hidden');
+      img.style.display = 'block';
+      document.getElementById('upload-placeholder').style.display  = 'none';
+      document.getElementById('product-image-url').value   = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  },
+
+  previewImageUrl(url) {
+    if (!url) return;
+    const img = document.getElementById('img-preview');
+    img.src = url;
+    img.classList.remove('hidden');
+    img.style.display = 'block';
+    document.getElementById('upload-placeholder').style.display  = 'none';
+  },
+
+  async saveProduct() {
+    const id        = document.getElementById('product-id').value;
+    const name      = document.getElementById('product-name').value.trim();
+    const category  = document.getElementById('product-category').value.trim();
+    const fileInput = document.getElementById('product-image-file');
+    let   imageUrl  = document.getElementById('product-image-url').value.trim();
+    if (!name) { showToast('Nama produk wajib diisi', 'error'); return; }
+
+    // For new products: validate pending variants (at least 1 required)
+    if (!id) {
+      const valid = this._pendingVariants.filter(v => v.name?.trim() && v.price !== '' && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0);
+      if (!valid.length) { showToast('Tambahkan minimal 1 varian dengan nama dan harga', 'error'); return; }
+    }
+
+    if (fileInput.files?.[0]) {
+      const file = fileInput.files[0];
+      const path = `products/${Date.now()}.${file.name.split('.').pop()}`;
+      const { data: upData, error: upErr } = await db.storage.from('product-images').upload(path, file, { upsert:true });
+      if (!upErr && upData) {
+        const { data: urlData } = db.storage.from('product-images').getPublicUrl(path);
+        imageUrl = urlData.publicUrl;
+      }
+    }
+
+    const payload = { name, category, image_url: imageUrl || null };
+    let savedId = parseInt(id) || null;
+
+    if (id) {
+      const { error } = await db.from('products').update(payload).eq('id', id);
+      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    } else {
+      // Insert product
+      const { data: inserted, error } = await db.from('products').insert(payload).select().single();
+      if (error) { showToast('Gagal menyimpan produk: ' + error.message, 'error'); return; }
+      savedId = inserted.id;
+      document.getElementById('product-id').value = savedId;
+      document.getElementById('product-modal-title').textContent = 'Edit Produk';
+
+      // Bulk insert pending variants
+      const variantRows = this._pendingVariants
+        .filter(v => v.name?.trim() && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0)
+        .map(v => ({ product_id: savedId, name: v.name.trim(), price: parseFloat(v.price) }));
+      if (variantRows.length) {
+        const { error: vErr } = await db.from('product_variants').insert(variantRows);
+        if (vErr) { showToast('Produk tersimpan, tapi gagal menyimpan varian: ' + vErr.message, 'warning'); }
+      }
+      this._pendingVariants = [];
+    }
+
+    // Sync branch_products
+    const checkedBranches = Array.from(document.querySelectorAll('.product-branch-cb:checked')).map(cb => parseInt(cb.value));
+    await db.from('branch_products').update({ is_active: false }).eq('product_id', savedId);
+    
+    for (const bId of checkedBranches) {
+      const { data: existing } = await db.from('branch_products').select('id').eq('branch_id', bId).eq('product_id', savedId).maybeSingle();
+      if (existing) {
+        await db.from('branch_products').update({ is_active: true }).eq('id', existing.id);
+      } else {
+        await db.from('branch_products').insert({ branch_id: bId, product_id: savedId, is_active: true });
+      }
+    }
+
+    showToast('Produk berhasil disimpan', 'success');
+    this.closeModal('modal-product');
+    await this.loadMasterData();
+    this.loadProducts();
+    if (savedId) await this.loadProductModalVariants(savedId);
+  },
+
+  async deleteProduct(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Produk "${name}"?`,
+      message:     'Produk ini akan dihapus permanen.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    const { error } = await db.from('products').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Produk dihapus', 'success');
+    await this.loadMasterData();
+    this.loadProducts();
+  },
+
+  // ── Product Categories ───────────────────────────────────────
+  async loadProductCategories() {
+    const list = document.getElementById('product-categories-list');
+    if (!list) return;
+    await this.loadMasterData();
+    const data = this.productCategories || [];
+    list.innerHTML = data.length ? `<div class="admin-list">${data.map(c => `
+      <div class="admin-list-card">
+        <div class="list-card-icon blue"><i data-lucide="tags" class="icon"></i></div>
+        <div class="list-card-info">
+          <div class="list-card-title">${escHtml(c.name)}</div>
+        </div>
+        <div class="list-card-actions">
+          <button class="btn btn-outline btn-sm" data-admin-action="open-product-category-modal" data-id="${c.id}" data-name="${escHtml(c.name)}">Edit</button>
+          <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-product-category" data-id="${c.id}" data-name="${escHtml(c.name)}">Hapus</button>
+        </div>
+      </div>`).join('')}</div>`
+    : `<div class="empty-state"><div class="empty-icon"><i data-lucide="tags" class="icon"></i></div><div class="empty-title">Belum ada kategori</div><div class="empty-cta"><button class="btn btn-primary" data-admin-action="open-product-category-modal">+ Tambah Kategori</button></div></div>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  openProductCategoryModal(id = null, name = '') {
+    document.getElementById('product-category-id').value = id || '';
+    document.getElementById('product-category-name').value = name || '';
+    document.getElementById('product-category-modal-title').textContent = id ? 'Edit Kategori Produk' : 'Tambah Kategori Produk';
+    openModal('modal-product-category');
+  },
+
+  async saveProductCategory() {
+    const id = document.getElementById('product-category-id').value;
+    const name = document.getElementById('product-category-name').value.trim();
+    if (!name) { showToast('Nama kategori wajib diisi', 'error'); return; }
+
+    const payload = { name };
+    try {
+      const { error } = id
+        ? await db.from('product_categories').update(payload).eq('id', id)
+        : await db.from('product_categories').insert(payload);
+      if (error) {
+        // Detect missing table — give actionable guidance
+        const msg = error.message || '';
+        if (msg.includes('product_categories') && (msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('relation'))) {
+          showToast('Tabel product_categories belum ada. Jalankan schema_v4.sql di Supabase SQL Editor terlebih dahulu.', 'error');
+        } else {
+          showToast('Gagal: ' + msg, 'error');
+        }
+        return;
+      }
+    } catch (e) {
+      showToast('Gagal: ' + e.message, 'error');
+      return;
+    }
+    showToast('Kategori produk disimpan', 'success');
+    closeModal('modal-product-category');
+    await this.loadMasterData();
+    this.loadProductCategories();
+  },
+
+  async deleteProductCategory(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Kategori "${name}"?`,
+      message:     'Kategori ini akan dihapus permanen. Produk dengan kategori ini tidak akan terhapus, namun tidak akan memiliki kategori.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    try {
+      const { error } = await db.from('product_categories').delete().eq('id', id);
+      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    } catch (e) {
+      showToast('Gagal: ' + e.message, 'error');
+      return;
+    }
+    showToast('Kategori dihapus', 'success');
+    await this.loadMasterData();
+    this.loadProductCategories();
+  },
+
+  // ── Variants ─────────────────────────────────────────────────
+  async loadVariants() {
+    const productId = document.getElementById('variant-product-filter').value;
+    const tbody     = document.getElementById('variants-body');
+
+    let q = db.from('product_variants').select('*, products(name)').order('name');
+    if (productId) q = q.eq('product_id', productId);
+
+    const { data, error } = await q;
+    if (error) { showToast('Gagal memuat varian: ' + error.message, 'error'); return; }
+    tbody.innerHTML = data?.length ? data.map((v, i) => `
+      <tr>
+        <td>${i+1}</td>
+        <td>${escHtml(v.products?.name||'—')}</td>
+        <td class="fw-600">${escHtml(v.name)}</td>
+        <td class="fw-700 text-orange">${fRp(v.price)}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" data-admin-action="open-variant-modal" data-id="${v.id}">Edit</button>
+          <button class="btn btn-sm btn-danger" data-admin-action="delete-variant" data-id="${v.id}" data-name="${escHtml(v.name)}">Hapus</button>
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="5" class="empty-td">Belum ada varian</td></tr>`;
+  },
+
+  async openVariantModal(id = null) {
+    document.getElementById('variant-id').value    = id || '';
+    document.getElementById('variant-name').value  = '';
+    document.getElementById('variant-price').value = '';
+    document.getElementById('variant-modal-title').textContent = id ? 'Edit Varian' : 'Tambah Varian';
+    setSelect('variant-product-id', this.products.map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join(''));
+    if (id) {
+      const { data: v } = await db.from('product_variants').select('*').eq('id', id).maybeSingle();
+      if (v) {
+        document.getElementById('variant-name').value      = v.name;
+        document.getElementById('variant-price').value     = v.price;
+        document.getElementById('variant-product-id').value = v.product_id;
+      }
+    } else {
+      const sel = document.getElementById('variant-product-filter').value;
+      if (sel) document.getElementById('variant-product-id').value = sel;
+    }
+    openModal('modal-variant');
+  },
+
+  async saveVariant() {
+    const id        = document.getElementById('variant-id').value;
+    const productId = document.getElementById('variant-product-id').value;
+    const name      = document.getElementById('variant-name').value.trim();
+    const price     = parseFloat(document.getElementById('variant-price').value);
+    if (!productId || !name || isNaN(price) || price < 0) { showToast('Lengkapi semua field', 'error'); return; }
+    const payload = { product_id: productId, name, price };
+    const { error } = id
+      ? await db.from('product_variants').update(payload).eq('id', id)
+      : await db.from('product_variants').insert(payload);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Varian berhasil disimpan', 'success');
+    this.closeModal('modal-variant');
+    this.loadVariants();
+  },
+
+  async deleteVariant(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Varian "${name}"?`,
+      message:     'Varian ini akan dihapus permanen.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    const { error } = await db.from('product_variants').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Varian dihapus', 'success');
+    this.loadVariants();
+  },
+
+
+  // ── Recipes ───────────────────────────────────────────────────
+  async loadRecipeVariants() {
+    const productId = document.getElementById('recipe-product-filter').value;
+    if (!productId) { setSelect('recipe-variant-filter', '<option value="">Pilih Varian</option>'); return; }
+    const { data } = await db.from('product_variants').select('id, name').eq('product_id', productId).order('name');
+    setSelect('recipe-variant-filter', `<option value="">Pilih Varian</option>${(data||[]).map(v=>`<option value="${v.id}">${escHtml(v.name)}</option>`).join('')}`);
+  },
+
+  async loadRecipeItems() {
+    const variantId = document.getElementById('recipe-variant-filter').value;
+    const tbody     = document.getElementById('recipe-items-body');
+    const titleEl   = document.getElementById('recipe-card-title');
+    if (!variantId) { tbody.innerHTML = `<tr><td colspan="5" class="empty-td">Pilih varian di atas</td></tr>`; return; }
+
+    const vName = document.getElementById('recipe-variant-filter').selectedOptions[0]?.text || 'Varian';
+    let { data: recipe } = await db.from('recipes').select('id, name').eq('variant_id', variantId).maybeSingle();
+    if (!recipe) {
+      // Jangan auto-create — tampilkan empty state dengan tombol buat resep
+      titleEl.textContent = `Resep: ${vName}`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-td">
+        Belum ada resep untuk varian ini.
+        <br><br>
+        <button class="btn btn-primary btn-sm" data-admin-action="create-recipe" data-variant-id="${variantId}" data-variant-name="${escHtml(vName)}">+ Buat Resep</button>
+      </td></tr>`;
+      return;
+    }
+    titleEl.textContent = `Resep: ${vName}`;
+
+    const { data: items } = await db.from('recipe_items').select('id, quantity, ingredients(id, name, unit)').eq('recipe_id', recipe.id).order('id');
+    tbody.innerHTML = items?.length ? items.map((item, i) => `
+      <tr>
+        <td>${i+1}</td>
+        <td class="fw-600">${escHtml(item.ingredients?.name||'—')}</td>
+        <td>${escHtml(item.ingredients?.unit||'—')}</td>
+        <td>${item.quantity}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" data-admin-action="open-recipe-item-modal" data-id="${item.id}">Edit</button>
+          <button class="btn btn-sm btn-danger" data-admin-action="delete-recipe-item" data-id="${item.id}">Hapus</button>
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="5" class="empty-td">Belum ada bahan. Tambahkan bahan resep.</td></tr>`;
+  },
+
+  async createRecipe(variantId, variantName) {
+    const { data: nr, error } = await db.from('recipes').insert({ variant_id: variantId, name: variantName }).select().single();
+    if (error) { showToast('Gagal membuat resep: ' + error.message, 'error'); return; }
+    showToast('Resep berhasil dibuat', 'success');
+    this.loadRecipeItems();
+  },
+
+  async openRecipeItemModal(id = null) {
+    const variantId = document.getElementById('recipe-variant-filter').value;
+    if (!variantId && !id) { showToast('Pilih varian terlebih dahulu', 'warning'); return; }
+    document.getElementById('recipe-item-id').value  = id || '';
+    document.getElementById('recipe-item-qty').value = '';
+    document.getElementById('recipe-item-modal-title').textContent = id ? 'Edit Bahan' : 'Tambah Bahan';
+    setSelect('recipe-ingredient-id', this.ingredients.map(i=>`<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`).join(''));
+    if (id) {
+      const { data } = await db.from('recipe_items').select('*').eq('id', id).maybeSingle();
+      if (data) { document.getElementById('recipe-ingredient-id').value = data.ingredient_id; document.getElementById('recipe-item-qty').value = data.quantity; }
+    }
+    openModal('modal-recipe-item');
+  },
+
+  async saveRecipeItem() {
+    const id           = document.getElementById('recipe-item-id').value;
+    const variantId    = document.getElementById('recipe-variant-filter').value;
+    const ingredientId = document.getElementById('recipe-ingredient-id').value;
+    const qty          = parseFloat(document.getElementById('recipe-item-qty').value);
+    if (!ingredientId || isNaN(qty) || qty <= 0) { showToast('Lengkapi semua field', 'error'); return; }
+
+    if (id) {
+      const { error } = await db.from('recipe_items').update({ ingredient_id: ingredientId, quantity: qty }).eq('id', id);
+      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    } else {
+      let { data: recipe } = await db.from('recipes').select('id').eq('variant_id', variantId).maybeSingle();
+      if (!recipe) {
+        const { data: nr } = await db.from('recipes').insert({ variant_id: variantId }).select().single();
+        recipe = nr;
+      }
+      const { error } = await db.from('recipe_items').insert({ recipe_id: recipe.id, ingredient_id: ingredientId, quantity: qty });
+      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    }
+    showToast('Bahan resep disimpan', 'success');
+    this.closeModal('modal-recipe-item');
+    this.loadRecipeItems();
+  },
+
+  async deleteRecipeItem(id) {
+    const ok = await showConfirm({
+      title:       'Hapus Bahan Ini?',
+      message:     'Bahan resep ini akan dihapus.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    // BUG-C4 FIX: cek error dari delete
+    const { error } = await db.from('recipe_items').delete().eq('id', id);
+    if (error) { showToast('Gagal menghapus: ' + error.message, 'error'); return; }
+    showToast('Bahan dihapus', 'success');
+    this.loadRecipeItems();
+  },
+
+  // ── Ingredients ───────────────────────────────────────────────
+  openIngredientModal() {
+    document.getElementById('ing-id').value        = '';
+    document.getElementById('ing-name').value      = '';
+    document.getElementById('ing-unit').value      = '';
+    document.getElementById('ing-cost-price').value = '';
+    document.getElementById('ing-modal-title').textContent = 'Tambah Bahan';
+    openModal('modal-ingredient');
+  },
+
+  async openEditIngredientModal(id) {
+    const ing = this.ingredients.find(i => i.id === id);
+    if (!ing) return;
+    document.getElementById('ing-id').value         = ing.id;
+    document.getElementById('ing-name').value       = ing.name;
+    document.getElementById('ing-unit').value       = ing.unit;
+    document.getElementById('ing-cost-price').value = ing.cost_price || '';
+    document.getElementById('ing-modal-title').textContent = 'Edit Bahan';
+    openModal('modal-ingredient');
+  },
+
+  // BUG-11 FIX: Only show products that actually use this ingredient via recipe_items
+  async openIngredientProductsModal(id) {
+    const ing = this.ingredients.find(i => i.id === id) || {};
+    const body = document.getElementById('ingredient-products-body');
+    if (!body) {
+      console.warn('Ingredient products modal body not found');
+      return;
+    }
+    body.innerHTML = '<div class="p-4 text-muted text-center">Memuat...</div>';
+    openModal('modal-ingredient-products');
+
+    try {
+      const { data: recipeItems } = await db
+        .from('recipe_items')
+        .select('recipes(product_variants(products(id, name)))')
+        .eq('ingredient_id', id);
+
+      const productSet = new Map();
+      (recipeItems || []).forEach(ri => {
+        const p = ri.recipes?.product_variants?.products;
+        if (p) productSet.set(p.id, p.name);
+      });
+
+      body.innerHTML = productSet.size
+        ? [...productSet.entries()].map(([pid, pname]) => `
+            <div class="admin-list-card flex items-center justify-between p-3 border-b">
+              <div class="fw-700">${escHtml(pname)}</div>
+              <button class="btn btn-outline btn-sm" data-admin-action="open-product-modal" data-id="${pid}">Edit</button>
+            </div>`).join('')
+        : `<div class="p-4 text-muted">Bahan ini belum digunakan di resep manapun</div>`;
+    } catch (e) {
+      body.innerHTML = `<div class="p-4 text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
+    }
+
+    document.getElementById('ingredient-products-modal-title').textContent =
+      `Produk yang menggunakan: ${escHtml(ing.name || '')}`;
+  },
+
+  async saveIngredient() {
+    const id        = document.getElementById('ing-id').value;
+    const name      = document.getElementById('ing-name').value.trim();
+    const unit      = document.getElementById('ing-unit').value.trim();
+    const costPrice = parseFloat(document.getElementById('ing-cost-price').value) || 0;
+    if (!name || !unit) { showToast('Nama dan satuan wajib diisi', 'error'); return; }
+
+    const payload = { name, unit, cost_price: costPrice };
+    const { error } = id
+      ? await db.from('ingredients').update(payload).eq('id', id)
+      : await db.from('ingredients').insert(payload);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Bahan berhasil disimpan', 'success');
+    this.closeModal('modal-ingredient');
+    await this.loadMasterData();
+    if (this.currentSection === 'ingredients') this.loadIngredients();
+    else this.loadInventory();
+  },
+
+  // ── Inventory ─────────────────────────────────────────────────
+  async loadInventory() {
+    const branchId = document.getElementById('inv-branch-filter').value;
+    const grid     = document.getElementById('inv-grid');
+    if (!branchId) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="package" class="icon"></i></div><div class="empty-title">Pilih cabang untuk melihat stok</div></div>'; lucide.createIcons(); return; }
+
+    const { data: inv } = await db.from('branch_inventory')
+      .select('stock, updated_at, ingredients(id, name, unit)')
+      .eq('branch_id', branchId);
+
+    const invMap = {};
+    (inv||[]).forEach(i => { if (i.ingredients) invMap[i.ingredients.id] = i; });
+
+    grid.innerHTML = this.ingredients.length
+      ? this.ingredients.map(ing => {
+          const record  = invMap[ing.id];
+          const stock   = record ? parseFloat(record.stock) : 0;
+          const level   = stock < 5 ? 'low' : 'good';
+          const updated = record ? fDate(record.updated_at) : 'Belum ada';
+          return `<div class="inv-card">
+            <div class="inv-name">${escHtml(ing.name)}</div>
+            <div class="inv-unit">${escHtml(ing.unit)}</div>
+            <div class="inv-stock ${level}">${stock.toLocaleString('id-ID')} ${escHtml(ing.unit)}</div>
+            <div class="text-xs text-muted">Update: ${updated}</div>
+            <div class="flex gap-1 mt-2 flex-wrap">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-edit-ingredient-modal" data-id="${ing.id}">Edit</button>
+            </div>
+          </div>`;
+        }).join('')
+      : '<div class="empty-state"><div class="empty-icon"><i data-lucide="package" class="icon"></i></div><div class="empty-title">Belum ada bahan</div></div>';
+  },
+
+  openInventoryModal(type = 'stock_in') {
+    document.getElementById('inv-adj-qty').value   = '';
+    document.getElementById('inv-adj-notes').value = '';
+    document.getElementById('inv-adj-type').value  = type;
+    setSelect('inv-adj-branch-id', this.branches.map(b=>`<option value="${b.id}">${escHtml(b.name)}</option>`).join(''));
+    setSelect('inv-adj-ingredient-id', this.ingredients.map(i=>`<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`).join(''));
+    const currentBranch = document.getElementById('inv-branch-filter').value;
+    if (currentBranch) document.getElementById('inv-adj-branch-id').value = currentBranch;
+    this.toggleInventoryModalType();
+    openModal('modal-inventory');
+  },
+
+  toggleInventoryModalType() {
+    const type       = document.getElementById('inv-adj-type').value;
+    const labels     = { stock_in:'Jumlah Masuk', stock_out:'Jumlah Keluar', opname:'Stok Aktual (Fisik)', transfer:'Jumlah Transfer' };
+    const qtyLabel   = document.getElementById('inv-adj-qty-label');
+    const transferRow = document.getElementById('inv-transfer-row');
+    if (qtyLabel)    qtyLabel.textContent  = labels[type] || 'Jumlah';
+    if (transferRow) transferRow.style.display = type === 'transfer' ? 'block' : 'none';
+  },
+
+  async saveInventoryAdjust() {
+    const branchId     = document.getElementById('inv-adj-branch-id').value;
+    const ingredientId = document.getElementById('inv-adj-ingredient-id').value;
+    const type         = document.getElementById('inv-adj-type').value;
+    const qty          = parseFloat(document.getElementById('inv-adj-qty').value);
+    const notes        = document.getElementById('inv-adj-notes').value.trim();
+    if (!branchId || !ingredientId || isNaN(qty) || qty < 0) { showToast('Lengkapi semua field', 'error'); return; }
+
+    try {
+      if (type === 'transfer') {
+        const toBranchId = document.getElementById('inv-transfer-to').value;
+        if (!toBranchId || toBranchId === branchId) { showToast('Pilih cabang tujuan yang berbeda', 'error'); return; }
+        await inventoryService.transferStock({
+          fromBranchId: parseInt(branchId), toBranchId: parseInt(toBranchId),
+          ingredientId: parseInt(ingredientId), qty, notes, userId: this.user.id
+        });
+      } else {
+        const invType = { stock_in:'in', stock_out:'out', opname:'opname' }[type] || 'in';
+        await inventoryService.adjustStock({
+          branchId: parseInt(branchId), ingredientId: parseInt(ingredientId),
+          qty, type: invType, referenceType: 'manual', notes, createdBy: this.user.id
+        });
+      }
+      showToast('Stok berhasil diperbarui', 'success');
+      this.closeModal('modal-inventory');
+      this.loadInventory();
+    } catch (e) {
+      showToast('Gagal: ' + e.message, 'error');
+    }
+  },
+
+  // ── Transactions ─────────────────────────────────────────────
+  setTrxQuickFilter(type, el) {
+    document.querySelectorAll('.quick-filter-btn').forEach(b => b.classList.remove('active'));
+    if (el) el.classList.add('active');
+    const today     = new Date();
+    // BUG FIX: renamed local helper to fmtDate to avoid shadowing global fmt object
+    const fmtDate   = d => d.toISOString().slice(0, 10);
+    const dateInput = document.getElementById('trx-date-filter');
+    if (type === 'today') {
+      if (dateInput) dateInput.value = fmtDate(today);
+    } else if (type === 'yesterday') {
+      const y = new Date(today); y.setDate(y.getDate() - 1);
+      if (dateInput) dateInput.value = fmtDate(y);
+    } else if (type === 'week') {
+      const w = new Date(today); w.setDate(w.getDate() - 6);
+      if (dateInput) dateInput.value = fmtDate(w);
+    } else if (type === 'month') {
+      if (dateInput) dateInput.value = fmtDate(today).slice(0, 7) + '-01';
+    }
+    this.loadTransactions();
+  },
+
+  async loadTransactions() {
+    const branchId = document.getElementById('trx-branch-filter').value;
+    const date     = document.getElementById('trx-date-filter').value;
+    const tbody    = document.getElementById('trx-body');
+
+    let q = db.from('transactions')
+      .select('id, created_at, total, payment_method, status, branches(name), users!staff_id(name)')
+      .order('created_at', { ascending:false }).limit(200);
+    if (branchId) q = q.eq('branch_id', branchId);
+    if (date) {
+      // BUG-H4 FIX: gunakan fmt.getBusinessDateRange agar timezone WIB (UTC+8) ditangani
+      const { from, to } = fmt.getBusinessDateRange(date);
+      q = q.gte('created_at', from).lte('created_at', to);
+    }
+
+    const { data, error } = await q;
+    if (error) { tbody.innerHTML = `<tr><td colspan="8" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}</td></tr>`; return; }
+    const badgeClass = s => {
+      if (s === 'void' || s === 'voided') return 'badge-danger';
+      if (s === 'refunded') return 'badge-red';
+      if (s === 'completed') return 'badge-green';
+      return 'badge-orange';
+    };
+    tbody.innerHTML = data?.length ? data.map((t, i) => `
+      <tr>
+        <td class="text-muted text-xs">#${t.id}</td>
+        <td class="nowrap text-sm">${fDate(t.created_at)}</td>
+        <td>${escHtml(t.branches?.name||'—')}</td>
+        <td>${escHtml(t.users?.name||'—')}</td>
+        <td><span class="badge badge-orange">${t.payment_method||'cash'}</span></td>
+        <td><span class="badge ${badgeClass(t.status)}">${t.status||'completed'}</span></td>
+        <td class="fw-700">${fRp(t.total)}</td>
+        <td><button class="btn btn-outline btn-sm" data-admin-action="view-transaction" data-id="${t.id}">Detail</button></td>
+      </tr>`).join('')
+    : `<tr><td colspan="8" class="empty-td">Tidak ada transaksi</td></tr>`;
+  },
+
+  async viewTransaction(id) {
+    const body = document.getElementById('trx-detail-body');
+    try {
+    const { data: t, error: tErr } = await db.from('transactions').select('*, branches(name), users!staff_id(name)').eq('id', id).single();
+    if (tErr || !t) { body.innerHTML = `<div class="text-danger p-4">Transaksi tidak ditemukan.</div>`; openModal('modal-trx-detail'); return; }
+    const { data: items } = await db.from('transaction_items').select('*').eq('transaction_id', id);
+    const { data: refunds } = await db.from('refund_transactions').select('*').eq('transaction_id', id).order('created_at', { ascending:false });
+    body.innerHTML = `
+      <div class="grid-2-col-s2 mb-4">
+        <div><div class="form-label">ID Transaksi</div><div class="fw-700">#${t.id}</div></div>
+        <div><div class="form-label">Status</div><div><span class="badge ${t.status==='void'||t.status==='voided'?'badge-danger':t.status==='refunded'?'badge-red':'badge-green'}">${t.status||'completed'}</span></div></div>
+        <div><div class="form-label">Tanggal</div><div>${fDate(t.created_at)}</div></div>
+        <div><div class="form-label">Cabang</div><div>${escHtml(t.branches?.name||'—')}</div></div>
+        <div><div class="form-label">Kasir</div><div>${escHtml(t.users?.name||'—')}</div></div>
+        <div><div class="form-label">Metode</div><div><span class="badge badge-orange">${t.payment_method||'cash'}</span></div></div>
+        <div><div class="form-label">Subtotal</div><div>${fRp(t.subtotal||t.total)}</div></div>
+        <div><div class="form-label">Diskon</div><div class="text-danger">${t.discount_amount > 0 ? '−'+fRp(t.discount_amount) : '—'}</div></div>
+        <div><div class="form-label">Total</div><div class="fw-800 text-danger">${fRp(t.total)}</div></div>
+        ${t.payment_method==='cash' ? `
+        <div><div class="form-label">Diterima</div><div>${fRp(t.payment_amount)}</div></div>
+        <div><div class="form-label">Kembalian</div><div>${fRp(t.change_amount)}</div></div>` : ''}
+      </div>
+      <div class="divider"></div>
+      <div class="card-title mb-2">Item Pesanan</div>
+      <table class="w-full text-sm">
+        <thead><tr><th>Produk</th><th>Varian</th><th>Qty</th><th>Harga</th><th>Subtotal</th></tr></thead>
+        <tbody>${(items||[]).map(i=>`
+          <tr>
+            <td>${escHtml(i.product_name)}</td><td>${escHtml(i.variant_name)}</td>
+            <td>${i.quantity}</td><td>${fRp(i.price)}</td>
+            <td class="fw-700">${fRp(i.subtotal)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      ${refunds?.length ? `
+      <div class="divider mt-3"></div>
+      <div class="card-title mb-2">Riwayat Refund</div>
+      ${refunds.map(r=>`<div class="text-sm py-1 border-b">
+        <strong>${fRp(r.refund_amount)}</strong> (${r.type}) — ${escHtml(r.reason||'—')} — ${fDate(r.created_at)}
+      </div>`).join('')}` : ''}`;
+
+    const refundBtn = document.getElementById('btn-refund-trx');
+    if (refundBtn) {
+      refundBtn.classList.toggle('hidden', (t.status === 'refunded' || t.status === 'void' || t.status === 'voided'));
+      const clonedRefundBtn = refundBtn.cloneNode(true);
+      refundBtn.parentNode.replaceChild(clonedRefundBtn, refundBtn);
+      clonedRefundBtn.addEventListener('click', () => this.openRefundModal(id, parseFloat(t.total)));
+    }
+    const voidBtn = document.getElementById('btn-void-trx');
+    if (voidBtn) {
+      voidBtn.classList.toggle('hidden', (t.status === 'refunded' || t.status === 'void' || t.status === 'voided'));
+      const clonedVoidBtn = voidBtn.cloneNode(true);
+      voidBtn.parentNode.replaceChild(clonedVoidBtn, voidBtn);
+      clonedVoidBtn.addEventListener('click', () => this.openVoidModal(id));
+    }
+    openModal('modal-trx-detail');
+    } catch(e) {
+      body.innerHTML = `<div class="text-danger p-4">Gagal memuat transaksi: ${escHtml(e.message)}</div>`;
+      openModal('modal-trx-detail');
+    }
+  },
+
+  openRefundModal(transactionId, maxAmount) {
+    document.getElementById('refund-trx-id').value   = transactionId;
+    // BUG-H7 FIX: simpan maxAmount di data-amount agar confirmRefund() bisa validasi
+    const maxEl = document.getElementById('refund-max');
+    if (maxEl) { maxEl.textContent = fRp(maxAmount); maxEl.dataset.amount = maxAmount; }
+    document.getElementById('refund-amount').value    = maxAmount;
+    document.getElementById('refund-type').value      = 'full';
+    document.getElementById('refund-reason').value    = '';
+    openModal('modal-refund');
+  },
+
+  // ── Void Transaction (NEW) ──────────────────────────────────
+  openVoidModal(transactionId) {
+    document.getElementById('void-trx-id').value  = transactionId;
+    document.getElementById('void-reason').value  = '';
+    openModal('modal-void-trx');
+  },
+
+  async confirmVoid() {
+    const transactionId = parseInt(document.getElementById('void-trx-id').value);
+    const reason        = document.getElementById('void-reason').value.trim();
+    if (!reason) { showToast('Alasan void wajib diisi', 'error'); return; }
+    const btn = document.getElementById('btn-confirm-void');
+    btn.disabled = true;
+    try {
+      await transactionService.voidTransaction({ transactionId, reason, userId: this.user.id });
+      showToast('Transaksi berhasil di-void', 'success');
+      this.closeModal('modal-void-trx');
+      this.closeModal('modal-trx-detail');
+      this.loadTransactions();
+    } catch (e) {
+      showToast('Gagal void: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  },
+
+  async confirmRefund() {
+    const transactionId  = parseInt(document.getElementById('refund-trx-id').value);
+    const refundAmount   = parseFloat(document.getElementById('refund-amount').value);
+    const type           = document.getElementById('refund-type').value;
+    const reason         = document.getElementById('refund-reason').value.trim();
+    // BUG-H7 FIX: validasi refundAmount tidak boleh melebihi total transaksi
+    const maxAmount = parseFloat(document.getElementById('refund-max')?.dataset.amount || Infinity);
+    if (!refundAmount || refundAmount <= 0) { showToast('Jumlah refund tidak valid', 'error'); return; }
+    if (isFinite(maxAmount) && refundAmount > maxAmount) {
+      showToast(`Refund tidak boleh melebihi total transaksi (${fRp(maxAmount)})`, 'error'); return;
+    }
+
+    const btn = document.getElementById('btn-confirm-refund');
+    btn.disabled = true;
+    try {
+      await transactionService.processRefund({ transactionId, refundAmount, reason, type, userId: this.user.id });
+      showToast('Refund berhasil diproses', 'success');
+      this.closeModal('modal-refund');
+      this.closeModal('modal-trx-detail');
+      this.loadTransactions();
+    } catch (e) {
+      showToast('Gagal: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  },
+
+
+  // ── Reports ───────────────────────────────────────────────────
+  async loadReports() {
+    const today = fmt.getBusinessDate();
+    const monthStart = today.slice(0, 7) + '-01';
+    if (!document.getElementById('report-date-from').value) {
+      document.getElementById('report-date-from').value = monthStart;
+      document.getElementById('report-date-to').value   = today;
+    }
+
+    // BUG-L3 FIX: pastikan paymentMethods tersedia, fallback ke default jika belum
+    if (!this.paymentMethods?.length) {
+      try { await this.loadSettings(); } catch(e) {}
+    }
+    const methods = this.paymentMethods || [{ code:'cash', label:'Tunai' }, { code:'qris', label:'QRIS' }, { code:'transfer', label:'Transfer' }];
+    const pmOpts = methods.map(m => `<option value="${m.code}">${escHtml(m.label)}</option>`).join('');
+    setSelect('report-payment-filter', `<option value="">Semua Metode</option>${pmOpts}`);
+    
+    // Populate Staff
+    try {
+      const { data: users } = await db.from('users').select('id, name').order('name');
+      if (users) {
+        const staffOpts = users.map(u => `<option value="${u.id}">${escHtml(u.name)}</option>`).join('');
+        setSelect('report-staff-filter', `<option value="">Semua Kasir</option>${staffOpts}`);
+      }
+    } catch(e) { console.error('Failed to load staff for reports', e); }
+
+    this.switchReportTab('sales', document.querySelector('#section-reports .inner-tab.active') || document.querySelector('#section-reports .inner-tab'));
+  },
+
+  switchReportTab(tab, el) {
+    this.currentReportTab = tab;
+    document.querySelectorAll('#section-reports .inner-tab').forEach(t => t.classList.remove('active'));
+    if (el) el.classList.add('active');
+    document.getElementById('report-tab-sales').style.display     = tab === 'sales'     ? 'block' : 'none';
+    document.getElementById('report-tab-products').style.display  = tab === 'products'  ? 'block' : 'none';
+    document.getElementById('report-tab-inv-usage').style.display = tab === 'inv-usage' ? 'block' : 'none';
+    this.runReport(tab);
+  },
+
+  async runReport(tab) {
+    const dateFrom = document.getElementById('report-date-from').value;
+    const dateTo   = document.getElementById('report-date-to').value;
+    const branchId = document.getElementById('report-branch-filter').value;
+    const paymentMethod = document.getElementById('report-payment-filter')?.value || null;
+    const staffId = document.getElementById('report-staff-filter')?.value || null;
+
+    if (!dateFrom || !dateTo) { showToast('Pilih rentang tanggal', 'warning'); return; }
+
+    try {
+      if (tab === 'sales') {
+        const el = document.getElementById('report-sales-body');
+        el.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat...</td></tr>';
+        const data = await reportService.getSalesReport({ branchId, dateFrom, dateTo, paymentMethod, staffId });
+        document.getElementById('report-stat-revenue').textContent     = fRp(data.totalRevenue);
+        document.getElementById('report-stat-discount').textContent    = fRp(data.totalDiscount);
+        document.getElementById('report-stat-count').textContent       = data.count;
+        el.innerHTML = data.transactions.length
+          ? data.transactions.map((t, i) => `
+              <tr>
+                <td>${i+1}</td>
+                <td>${fDate(t.created_at)}</td>
+                <td>${escHtml(t.branches?.name||'—')}</td>
+                <td>${escHtml(t.users?.name||'—')}</td>
+                <td>${t.payment_method||'cash'}</td>
+                <td>${t.discount_amount > 0 ? fRp(t.discount_amount) : '—'}</td>
+                <td class="fw-700">${fRp(t.total)}</td>
+              </tr>`).join('')
+          : '<tr><td colspan="7" class="empty-td">Tidak ada data</td></tr>';
+
+      } else if (tab === 'products') {
+        const el = document.getElementById('report-products-body');
+        el.innerHTML = '<tr><td colspan="6" class="empty-td">Memuat...</td></tr>';
+        const data = await reportService.getProductPerformance({ branchId, dateFrom, dateTo, paymentMethod, staffId });
+
+        if (!data.length) {
+          document.getElementById('report-prod-stat-unique').textContent = '0';
+          document.getElementById('report-prod-stat-qty').textContent    = '0 pcs';
+          document.getElementById('report-prod-stat-rev').textContent    = fRp(0);
+          document.getElementById('report-top-products-cards').innerHTML = '';
+          el.innerHTML = '<tr><td colspan="6" class="empty-td">Tidak ada data produk terjual</td></tr>';
+        } else {
+          const totalQty = data.reduce((s, p) => s + p.qty, 0);
+          const totalRev = data.reduce((s, p) => s + p.revenue, 0);
+
+          // Aggregate by product name for top-cards
+          const prodMap = {};
+          for (const p of data) {
+            if (!prodMap[p.product]) prodMap[p.product] = { name: p.product, qty: 0, revenue: 0 };
+            prodMap[p.product].qty     += p.qty;
+            prodMap[p.product].revenue += p.revenue;
+          }
+          const topProds = Object.values(prodMap).sort((a, b) => b.qty - a.qty);
+
+          document.getElementById('report-prod-stat-unique').textContent = topProds.length;
+          document.getElementById('report-prod-stat-qty').textContent    = totalQty.toLocaleString('id-ID') + ' pcs';
+          document.getElementById('report-prod-stat-rev').textContent    = fRp(totalRev);
+
+          const rankColors = ['#F59E0B','#9CA3AF','#CD7C3A'];
+          document.getElementById('report-top-products-cards').innerHTML = `
+            <div class="top-products-section">
+              <div class="top-products-label">TOP PRODUK</div>
+              <div class="top-products-grid">
+                ${topProds.slice(0, 5).map((p, i) => `
+                  <div class="top-product-card ${i < 3 ? 'top-product-podium' : ''}" style="${i < 3 ? `border-left-color:${rankColors[i]}` : ''}">
+                    <div class="top-product-rank" style="${i < 3 ? `color:${rankColors[i]}` : ''}">${i + 1}</div>
+                    <div class="top-product-info">
+                      <div class="top-product-name">${escHtml(p.name)}</div>
+                      <div class="top-product-meta">
+                        <span>${p.qty.toLocaleString('id-ID')} pcs</span>
+                        <span>${fRp(p.revenue)}</span>
+                      </div>
+                    </div>
+                  </div>`).join('')}
+              </div>
+            </div>`;
+
+          el.innerHTML = data.map((p, i) => {
+            const pct   = totalQty ? ((p.qty / totalQty) * 100).toFixed(1) : '0.0';
+            const badge = i < 3
+              ? `<span class="prod-rank-badge" style="background:${rankColors[i]}20;color:${rankColors[i]};border-color:${rankColors[i]}40">#${i + 1}</span>`
+              : `<span style="color:var(--text-muted)">${i + 1}</span>`;
+            return `<tr>
+              <td>${badge}</td>
+              <td class="fw-700">${escHtml(p.product)}</td>
+              <td>${escHtml(p.variant || '—')}</td>
+              <td>${p.qty.toLocaleString('id-ID')} pcs</td>
+              <td>${fRp(p.revenue)}</td>
+              <td style="color:var(--text-muted)">${pct}%</td>
+            </tr>`;
+          }).join('');
+        }
+
+      } else if (tab === 'inv-usage') {
+        const el = document.getElementById('report-inv-usage-body');
+        el.innerHTML = '<tr><td colspan="3" class="empty-td">Memuat...</td></tr>';
+        const data = await reportService.getInventoryUsage({ branchId, dateFrom, dateTo });
+        el.innerHTML = data.length
+          ? data.map((r, i) => `
+              <tr>
+                <td>${i+1}</td>
+                <td>${escHtml(r.name)}</td>
+                <td>${r.totalUsed.toLocaleString('id-ID')} ${escHtml(r.unit)}</td>
+              </tr>`).join('')
+          : '<tr><td colspan="3" class="empty-td">Tidak ada data pemakaian</td></tr>';
+      }
+    } catch (e) {
+      showToast('Gagal memuat laporan: ' + e.message, 'error');
+    }
+  },
+
+  // ── Inventory Logs ────────────────────────────────────────────
+  async loadInventoryLogs() {
+    const branchId = document.getElementById('inv-log-branch-filter').value;
+    const tbody    = document.getElementById('inv-log-body');
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat...</td></tr>';
+
+    let q = db.from('inventory_logs')
+      .select('*, ingredients(name, unit), branches(name), users!created_by(name)')
+      .order('created_at', { ascending:false }).limit(300);
+    if (branchId) q = q.eq('branch_id', branchId);
+
+    const { data } = await q;
+    const typeLabel = { in:'Masuk', out:'Keluar', opname:'Opname', transfer_in:'Transfer Masuk', transfer_out:'Transfer Keluar' };
+    const typeBadge = { in:'badge-green', out:'badge-red', opname:'badge-orange', transfer_in:'badge-green', transfer_out:'badge-orange' };
+
+    tbody.innerHTML = data?.length ? data.map(log => `
+      <tr>
+        <td class="nowrap text-xs">${fDate(log.created_at)}</td>
+        <td>${escHtml(log.branches?.name||'—')}</td>
+        <td class="fw-600">${escHtml(log.ingredients?.name||'—')}</td>
+        <td><span class="badge ${typeBadge[log.type]||'badge-orange'}">${typeLabel[log.type]||log.type}</span></td>
+        <td class="fw-700">${log.qty > 0 ? '+'+log.qty : log.qty} ${escHtml(log.ingredients?.unit||'')}</td>
+        <td>${log.stock_before} → ${log.stock_after}</td>
+        <td class="text-xs text-muted">${escHtml(log.notes||log.reference_type||'—')}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="7" class="empty-td">Belum ada log inventori</td></tr>`;
+  },
+
+  // ── Staff ─────────────────────────────────────────────────────
+  async loadStaff() {
+    const { data, error } = await db.from('users').select('*').order('name');
+    if (error) { showToast('Gagal memuat staff: ' + error.message, 'error'); return; }
+    const container = document.getElementById('staff-list');
+    if (!container) return;
+    container.innerHTML = data?.length
+      ? `<div class="admin-list">${data.map(u => {
+          const branch = this.branches.find(b => b.id === u.branch_id);
+          const roleIconSvg = u.role === 'admin'
+            ? '<i data-lucide="shield" class="icon"></i>'
+            : '<i data-lucide="user" class="icon"></i>';
+          return `<div class="admin-list-card">
+            <div class="list-card-icon">${roleIconSvg}</div>
+            <div class="list-card-info">
+              <div class="list-card-title">${escHtml(u.name)}</div>
+              <div class="list-card-sub">${escHtml(branch?.name||'Tidak ada cabang')}</div>
+            </div>
+            <div class="list-card-meta"><span class="badge ${u.role==='admin'?'badge-red':'badge-orange'}">${u.role}</span></div>
+            <div class="list-card-actions">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-staff-modal" data-id="${u.id}">Edit</button>
+              ${u.id !== this.user.id ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="delete-staff" data-id="${u.id}" data-name="${escHtml(u.name)}">Hapus</button>` : ''}
+            </div>
+          </div>`;
+        }).join('')}</div>`
+      : `<div class="empty-state">
+          <div class="empty-icon"><i data-lucide="users" class="icon"></i></div>
+          <div class="empty-title">Belum ada staff</div>
+          <div class="empty-desc">Tambahkan staff untuk mengelola operasional</div>
+          <div class="empty-cta"><button class="btn btn-primary" data-admin-action="open-staff-modal">+ Tambah Staff</button></div>
+        </div>`;
+  },
+
+  async openStaffModal(id = null) {
+    document.getElementById('staff-id').value       = id || '';
+    document.getElementById('staff-name').value     = '';
+    document.getElementById('staff-username').value = '';
+    document.getElementById('staff-password').value = '';
+    document.getElementById('staff-role').value     = 'staff';
+    document.getElementById('staff-modal-title').textContent = id ? 'Edit Staff' : 'Tambah Staff';
+    setSelect('staff-branch-id', `<option value="">— Tidak Ditentukan —</option>${this.branches.map(b=>`<option value="${b.id}">${escHtml(b.name)}</option>`).join('')}`);
+    if (id) {
+      const { data: u } = await db.from('users').select('*').eq('id', id).maybeSingle();
+      if (u) {
+        document.getElementById('staff-name').value      = u.name;
+        document.getElementById('staff-username').value  = u.name; // username mirrors name (same DB column)
+        // BUG-C1 FIX: Jangan tampilkan password lama dalam bentuk plaintext
+        document.getElementById('staff-password').value  = '';
+        document.getElementById('staff-role').value      = u.role;
+        document.getElementById('staff-branch-id').value = u.branch_id || '';
+      }
+    }
+    openModal('modal-staff');
+  },
+
+  async saveStaff() {
+    const id       = document.getElementById('staff-id').value;
+    // BUG FIX: Read staff-username as the login name (what pos_login uses).
+    // staff-name (Nama Lengkap) is only a UI label here — the DB has one `name` column
+    // that serves as both display name and login. We use staff-username as the authoritative source.
+    const name     = document.getElementById('staff-username').value.trim();
+    const password = document.getElementById('staff-password').value || '';
+    const role     = document.getElementById('staff-role').value;
+    const branchId = document.getElementById('staff-branch-id').value || null;
+
+    if (!name) { showToast('Username wajib diisi', 'error'); return; }
+
+    const payload = { name, role, branch_id: branchId };
+    try {
+      if (!id) {
+        // Create new user — password required
+        if (!password.trim()) { showToast('Password wajib diisi', 'error'); return; }
+        payload.password = password.trim();
+        const { error } = await db.from('users').insert(payload);
+        if (error) throw error;
+      } else {
+        // Update existing user — only include password if provided
+        if (password.trim()) payload.password = password.trim();
+        const { error } = await db.from('users').update(payload).eq('id', id);
+        if (error) throw error;
+      }
+    } catch (e) {
+      if (e && e.code === '23505') {
+        showToast('Username sudah digunakan, pilih username lain', 'error');
+      } else {
+        showToast('Gagal: ' + (e.message || e.error || String(e)), 'error');
+      }
+      return;
+    }
+    showToast('Staff berhasil disimpan', 'success');
+    this.closeModal('modal-staff');
+    this.loadStaff();
+  },
+
+  async deleteStaff(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Staff "${name}"?`,
+      message:     'Akun staff ini akan dihapus.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    const { error } = await db.from('users').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Staff dihapus', 'success');
+    this.loadStaff();
+  },
+
+  // ── Bahan Baku / Ingredients ────────────────────────────────
+  async loadIngredients() {
+    const container = document.getElementById('ingredients-list');
+    if (!container) return;
+    await this.loadMasterData();
+    const data = this.ingredients;
+    container.innerHTML = data.length
+      ? `<div class="admin-list">${data.map(ing => `
+          <div class="admin-list-card">
+            <div class="list-card-icon green"><i data-lucide="leaf" class="icon"></i></div>
+            <div class="list-card-info">
+              <div class="list-card-title">${escHtml(ing.name)}</div>
+              <div class="list-card-sub">Satuan: ${escHtml(ing.unit)}${ing.cost_price > 0 ? ' · Harga beli: ' + fRp(ing.cost_price) + '/' + escHtml(ing.unit) : ''}</div>
+            </div>
+            <div class="list-card-actions">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-ingredient-products" data-id="${ing.id}">Lihat Produk</button>
+              <button class="btn btn-outline btn-sm" data-admin-action="open-edit-ingredient-modal" data-id="${ing.id}">Edit</button>
+              <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-ingredient" data-id="${ing.id}" data-name="${escHtml(ing.name)}">Hapus</button>
+            </div>
+          </div>`).join('')}</div>`
+      : `<div class="empty-state">
+          <div class="empty-icon"><i data-lucide="leaf" class="icon"></i></div>
+          <div class="empty-title">Belum ada bahan baku</div>
+          <div class="empty-desc">Tambahkan bahan baku untuk mengelola stok dan resep</div>
+          <div class="empty-cta"><button class="btn btn-primary" data-admin-action="open-ingredient-modal">+ Tambah Bahan</button></div>
+        </div>`;
+  },
+
+  async deleteIngredient(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Bahan "${name}"?`,
+      message:     'Ini akan menghapus data stok terkait.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    const { error } = await db.from('ingredients').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Bahan dihapus', 'success');
+    await this.loadMasterData();
+    if (this.currentSection === 'ingredients') this.loadIngredients();
+    if (this.currentSection === 'inventory')   this.loadInventory();
+  },
+
+  // ── Product variant management (inside product modal) ────────
+  // _pendingVariants: temp storage for new variants before product is saved
+  _pendingVariants: [],
+
+  // BUG-10 FIX: openProductModal(null) fully resets all fields including hidden id and _pendingVariants
+  async openProductModal(id = null) {
+    this._pendingVariants = [];
+    // Full reset regardless of new/edit to prevent stale data leaking between sessions
+    document.getElementById('product-id').value         = id || '';
+    document.getElementById('product-name').value       = '';
+    document.getElementById('product-image-url').value  = '';
+    document.getElementById('product-image-file').value = '';
+    document.getElementById('product-category').value   = '';
+    
+    const imgPreview = document.getElementById('img-preview');
+    imgPreview.classList.add('hidden');
+    imgPreview.style.display = 'none';
+    imgPreview.src = '';
+    document.getElementById('upload-placeholder').style.display = 'block';
+    document.getElementById('product-modal-title').textContent  = id ? 'Edit Produk' : 'Tambah Produk';
+    this.renderPendingVariantRows();
+
+    // Always show variant builder
+    document.getElementById('add-variant-form').style.display = 'block';
+    document.getElementById('product-variant-hint').textContent = '';
+
+    // Render branch checkboxes
+    const branchContainer = document.getElementById('product-branch-checkboxes');
+    let branchProducts = [];
+    if (id) {
+      const { data } = await db.from('branch_products').select('branch_id').eq('product_id', id).eq('is_active', true);
+      if (data) branchProducts = data.map(d => d.branch_id);
+    }
+    branchContainer.innerHTML = this.branches.map(b => `
+      <label class="flex items-center gap-2 cursor-pointer p-2 hover:bg-alt rounded transition-colors">
+        <input type="checkbox" class="product-branch-cb" value="${b.id}" ${(!id || branchProducts.includes(b.id)) ? 'checked' : ''} />
+        <span>${escHtml(b.name)}</span>
+      </label>
+    `).join('') || '<div class="text-sm text-muted">Belum ada cabang</div>';
+
+    if (id) {
+      const p = this.products.find(x => x.id === id) || {};
+      document.getElementById('product-name').value     = p.name     || '';
+      document.getElementById('product-category').value = p.category || '';
+      if (p.image_url) {
+        document.getElementById('product-image-url').value  = p.image_url;
+        const img = document.getElementById('img-preview');
+        img.src = p.image_url;
+        img.classList.remove('hidden');
+        img.style.display = 'block';
+        document.getElementById('upload-placeholder').style.display = 'none';
+      }
+      await this.loadProductModalVariants(id);
+    } else {
+      // New product: start with one empty pending variant row
+      this._pendingVariants = [{ name: '', price: '' }];
+      this.renderPendingVariantRows();
+    }
+    openModal('modal-product');
+  },
+
+  async loadProductModalVariants(productId) {
+    const container = document.getElementById('product-variants-list');
+    const { data, error } = await db.from('product_variants').select('*').eq('product_id', productId).order('name');
+    if (error) { container.innerHTML = '<div class="empty-td">Gagal memuat varian</div>'; return; }
+    container.innerHTML = data?.length
+      ? data.map(v => `
+          <div class="panel-surface flex items-center gap-2 p-2 mb-1">
+            <div class="flex-1">
+              <div class="fw-600 text-sm">${escHtml(v.name)}</div>
+              <div class="text-xs text-orange fw-700">${fRp(v.price)}</div>
+            </div>
+            <button class="btn btn-outline btn-sm" data-admin-action="edit-product-variant" data-id="${v.id}" data-name="${escHtml(v.name)}" data-price="${v.price}">Edit</button>
+            <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-product-variant" data-id="${v.id}" data-name="${escHtml(v.name)}">×</button>
+          </div>`).join('')
+      : '<div class="p-2 text-sm text-muted text-center">Belum ada varian — tambahkan di bawah</div>';
+  },
+
+  async addProductVariant() {
+    const productId = document.getElementById('product-id').value;
+    if (!productId) { showToast('Simpan produk dahulu', 'warning'); return; }
+    const name  = document.getElementById('new-variant-name').value.trim();
+    const price = parseFloat(document.getElementById('new-variant-price').value);
+    if (!name || isNaN(price) || price < 0) { showToast('Isi nama dan harga varian', 'error'); return; }
+
+    const { error } = await db.from('product_variants').insert({ product_id: parseInt(productId), name, price });
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    document.getElementById('new-variant-name').value  = '';
+    document.getElementById('new-variant-price').value = '';
+    showToast('Varian ditambahkan', 'success');
+    await this.loadProductModalVariants(parseInt(productId));
+    await this.loadMasterData();
+  },
+
+  editProductVariant(variantId, currentName, currentPrice) {
+    showPrompt({ title: 'Edit Nama Varian', placeholder: 'Nama varian', defaultValue: currentName })
+      .then(newName => {
+        if (newName === null) return;
+        showPrompt({ title: 'Edit Harga Varian', placeholder: 'Harga', defaultValue: String(currentPrice), inputType: 'number' })
+          .then(newPriceStr => {
+            if (newPriceStr === null) return;
+            const newPrice = parseFloat(newPriceStr);
+            if (isNaN(newPrice) || newPrice < 0) { showToast('Harga tidak valid', 'error'); return; }
+            db.from('product_variants').update({ name: newName.trim(), price: newPrice }).eq('id', variantId).then(({ error }) => {
+              if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+              showToast('Varian diperbarui', 'success');
+              const productId = document.getElementById('product-id').value;
+              if (productId) this.loadProductModalVariants(parseInt(productId));
+              this.loadMasterData();
+            });
+          });
+      });
+  },
+
+  async deleteProductVariant(variantId, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Varian "${name}"?`,
+      message:     'Varian ini akan dihapus permanen dari daftar produk.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    const { error } = await db.from('product_variants').delete().eq('id', variantId);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Varian dihapus', 'success');
+    const productId = document.getElementById('product-id').value;
+    if (productId) await this.loadProductModalVariants(parseInt(productId));
+    await this.loadMasterData();
+  },
+
+  // ── Pending variants (inline create before product saved) ─────
+  addPendingVariant() {
+    this._pendingVariants.push({ name: '', price: '' });
+    this.renderPendingVariantRows();
+  },
+
+  removePendingVariant(idx) {
+    this._pendingVariants.splice(idx, 1);
+    this.renderPendingVariantRows();
+  },
+
+  updatePendingVariant(idx, field, value) {
+    if (this._pendingVariants[idx]) this._pendingVariants[idx][field] = value;
+  },
+
+  renderPendingVariantRows() {
+    const container = document.getElementById('product-variants-list');
+    if (!container) return;
+    if (!this._pendingVariants.length) {
+      container.innerHTML = '<div class="p-2 text-sm text-muted text-center">Belum ada varian — klik "+ Tambah Varian"</div>';
+      return;
+    }
+    container.innerHTML = this._pendingVariants.map((v, i) => `
+      <div class="pending-variant-row">
+        <input type="text" class="form-control" placeholder="Nama varian (contoh: Original)" value="${escHtml(v.name)}"
+          data-admin-input="update-pending-variant" data-index="${i}" data-field="name" />
+        <div class="input-prefix-wrap" style="flex:0 0 140px">
+          <span class="input-prefix">Rp</span>
+          <input type="number" class="form-control" placeholder="0" value="${v.price}"
+            data-admin-input="update-pending-variant" data-index="${i}" data-field="price" min="0" />
+        </div>
+        <button class="btn btn-danger-soft btn-sm" data-admin-action="remove-pending-variant" data-index="${i}" title="Hapus baris">×</button>
+      </div>`).join('');
+  },
+
+  // ── Settings (receipt) ────────────────────────────────────────
+  async loadSettings() {
+    const sLocal = JSON.parse(localStorage.getItem('pos_settings') || '{}');
+    const el = id => document.getElementById(id);
+    if (el('setting-shop-name'))       el('setting-shop-name').value       = sLocal.shopName       || 'Roti Bakar Ngeunah';
+    if (el('setting-receipt-header'))  el('setting-receipt-header').value  = sLocal.receiptHeader  || '';
+    if (el('setting-receipt-footer'))  el('setting-receipt-footer').value  = sLocal.receiptFooter  || 'Terima kasih atas kunjungannya!';
+
+    const defaultMethods = [
+      { code: 'cash', label: 'Tunai', icon: '', is_active: true },
+      { code: 'qris', label: 'QRIS', icon: '', is_active: true },
+      { code: 'transfer', label: 'Transfer', icon: '', is_active: true }
+    ];
+
+    // Try load from Supabase; fall back to localStorage or defaults
+    try {
+      const { data, error } = await db.from('payment_methods').select('id, code, label, icon, fee_label, fee_percent, is_active').order('id');
+      if (error) throw error;
+      if (Array.isArray(data) && data.length) {
+        this.paymentMethods = data.map(m => ({ id: m.id, code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label, fee_percent: parseFloat(m.fee_percent||0), is_active: m.is_active }));
+      } else {
+        // No rows in DB — use localStorage if present, otherwise seed with defaults
+        this.paymentMethods = Array.isArray(sLocal.paymentMethods) && sLocal.paymentMethods.length ? sLocal.paymentMethods : defaultMethods;
+        try {
+          const payload = this.paymentMethods.map(m => ({ code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label || null, fee_percent: m.fee_percent || 0, is_active: m.is_active ?? true }));
+          await db.from('payment_methods').insert(payload);
+        } catch (seedErr) {
+          // ignore seed errors
+          console.warn('Seed payment_methods failed', seedErr);
+        }
+      }
+    } catch (e) {
+      // If DB not available, fallback
+      this.paymentMethods = Array.isArray(sLocal.paymentMethods) && sLocal.paymentMethods.length ? sLocal.paymentMethods : defaultMethods;
+    }
+
+    this.renderPaymentMethodsSettings();
+    this.renderReceiptPreview();
+  },
+
+  async saveSettings() {
+    const s = {
+      shopName:      document.getElementById('setting-shop-name')?.value.trim()      || 'Roti Bakar Ngeunah',
+      receiptHeader: document.getElementById('setting-receipt-header')?.value.trim() || '',
+      receiptFooter: document.getElementById('setting-receipt-footer')?.value.trim() || '',
+      paymentMethods: this.paymentMethods || []
+    };
+    // Keep a local copy for quick UI access (fallback)
+    localStorage.setItem('pos_settings', JSON.stringify(s));
+
+    // Persist payment methods to Supabase: remove deleted, upsert existing
+    try {
+      const methods = this.paymentMethods || [];
+      // Fetch existing codes
+      const { data: existingData, error: selErr } = await db.from('payment_methods').select('code');
+      if (selErr) throw selErr;
+      const existingCodes = (existingData || []).map(r => r.code);
+      const newCodes = methods.map(m => m.code);
+      const toDelete = existingCodes.filter(c => !newCodes.includes(c));
+      if (toDelete.length) {
+        const { error: delErr } = await db.from('payment_methods').delete().in('code', toDelete);
+        if (delErr) throw delErr;
+      }
+
+      const payloadFull = methods.map(m => ({ code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label || null, fee_percent: m.fee_percent || 0, is_active: m.is_active ?? true }));
+      try {
+        const { error: upErr } = await db.from('payment_methods').upsert(payloadFull, { onConflict: 'code' });
+        if (upErr) throw upErr;
+        showToast('Pengaturan disimpan', 'success');
+        return true;
+      } catch (upErr) {
+        // If the error mentions missing fee columns in the remote schema, retry without those fields
+        const errMsg = upErr && (upErr.message || upErr.error) ? (upErr.message || upErr.error) : String(upErr || '');
+        console.warn('Upsert failed, attempting fallback without fee fields:', errMsg);
+        if (/fee_label|fee_percent/.test(errMsg)) {
+          const payloadFallback = methods.map(m => ({ code: m.code, label: m.label, icon: m.icon, is_active: m.is_active ?? true }));
+          const { error: upErr2 } = await db.from('payment_methods').upsert(payloadFallback, { onConflict: 'code' });
+          if (!upErr2) {
+            showToast('Pengaturan disimpan (tanpa kolom fee) — DB schema belum diperbarui', 'warning');
+            return true;
+          }
+          // if fallback also failed, fall through to outer catch
+        }
+        throw upErr;
+      }
+    } catch (e) {
+      console.error('saveSettings error', e);
+      const msg = (e && (e.message || e.error)) ? (e.message || e.error) : String(e);
+      showToast('Gagal menyimpan metode ke database: ' + msg, 'error');
+      return false;
+    }
+  },
+
+  renderPaymentMethodsSettings() {
+    const list = document.getElementById('payment-methods-list');
+    if (!list) return;
+    const methods = this.paymentMethods || [];
+    if (!methods.length) { list.innerHTML = '<div class="text-muted">Belum ada metode pembayaran</div>'; return; }
+    list.innerHTML = methods.map((m, i) => `
+      <div class="flex items-center gap-2 p-2 border-b">
+        <div class="flex-1">
+          <div class="fw-700">${escHtml(m.label)}</div>
+          <div class="text-xs text-muted">${escHtml(m.code)}
+            ${m.fee_percent ? ' · +' + parseFloat(m.fee_percent).toString() + '%' : ''}
+            ${m.fee_label   ? ' · ' + escHtml(m.fee_label) : ''}
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm" data-admin-action="edit-payment-method" data-index="${i}">Edit</button>
+          <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-payment-method" data-index="${i}">Hapus</button>
+        </div>
+      </div>`).join('');
+  },
+
+  saveReceiptSettings() {
+    const sLocal = JSON.parse(localStorage.getItem('pos_settings') || '{}');
+    sLocal.shopName = document.getElementById('setting-shop-name')?.value.trim() || 'Roti Bakar Ngeunah';
+    sLocal.receiptHeader = document.getElementById('setting-receipt-header')?.value.trim() || '';
+    sLocal.receiptFooter = document.getElementById('setting-receipt-footer')?.value.trim() || 'Terima kasih atas kunjungannya!';
+    localStorage.setItem('pos_settings', JSON.stringify(sLocal));
+    showToast('Pengaturan struk disimpan', 'success');
+    this.renderReceiptPreview();
+  },
+
+  renderReceiptPreview() {
+    const preview = document.getElementById('receipt-preview');
+    if (!preview) return;
+    const settings = JSON.parse(localStorage.getItem('pos_settings') || '{}');
+    const shopName = settings.shopName || document.getElementById('setting-shop-name')?.value || 'Roti Bakar Ngeunah';
+    const headerText = settings.receiptHeader || document.getElementById('setting-receipt-header')?.value || '';
+    const footerText = settings.receiptFooter || document.getElementById('setting-receipt-footer')?.value || '';
+    const date = new Date().toLocaleDateString('id-ID');
+    // Sample items
+    const items = [ { name: 'Roti Bakar Special', variant: 'Original', qty: 2, price: 12000 }, { name: 'Es Teh', variant: '-', qty: 1, price: 5000 } ];
+    const subtotal = items.reduce((s,i)=>s + i.qty * i.price, 0);
+    const total = subtotal;
+    preview.innerHTML = `
+      <div class="fw-800 text-lg mb-1">${escHtml(shopName)}</div>
+      ${headerText ? headerText.split('\n').map(l => `<div class="text-xs text-muted">${escHtml(l)}</div>`).join('') : ''}
+      <div class="text-xs text-muted mt-2 mb-2">${date}</div>
+      <div class="dashed-border">
+        ${items.map(it => `
+          <div class="flex justify-between text-sm"><div>${escHtml(it.name)} ${escHtml(it.variant)}</div><div>${fRp(it.qty * it.price)}</div></div>
+          <div class="text-xs text-muted">${it.qty} x ${fRp(it.price)}</div>
+        `).join('')}
+      </div>
+      <div class="flex justify-between fw-700">Subtotal <span>${fRp(subtotal)}</span></div>
+      <div class="flex justify-between fw-800 text-lg mt-1">TOTAL <span>${fRp(total)}</span></div>
+      <div class="dashed-border-top text-xs text-muted">${footerText.split('\n').map(l => escHtml(l)).join('<br>')}</div>`;
+  },
+
+  async addPaymentMethod() {
+    const labelEl = document.getElementById('pm-label');
+    const toggleEl = document.getElementById('pm-add-fee-toggle');
+    const feeLabelEl = document.getElementById('pm-fee-label');
+    const feePercentEl = document.getElementById('pm-fee-percent');
+    if (!labelEl) return;
+    const label = (labelEl.value || '').trim();
+    const is_fee_enabled = toggleEl ? toggleEl.checked : false;
+    const fee_label = is_fee_enabled ? (feeLabelEl?.value || '').trim() : null;
+    const fee_percent = is_fee_enabled ? (parseFloat(feePercentEl?.value) || 0) : 0;
+    if (!label) { showToast('Label metode harus diisi', 'error'); return; }
+
+    // Slugify label to create a code, ensure uniqueness (memory + DB)
+    const slugify = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9\-\s_]/g, '').trim().replace(/[\s_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 90) || '';
+    let base = slugify(label) || ('pm_' + Date.now());
+    let code = base;
+    let suffix = 1;
+
+    this.paymentMethods = this.paymentMethods || [];
+    // avoid duplicates in-memory
+    while (this.paymentMethods.find(m => m.code === code)) {
+      code = base + '_' + suffix; suffix++;
+    }
+
+    // try ensure uniqueness in DB as well (best-effort). If DB check fails, we fall back to memory-only uniqueness.
+    try {
+      let exists = true;
+      while (exists) {
+        const { data, error } = await db.from('payment_methods').select('code').eq('code', code).maybeSingle();
+        if (error) { console.warn('payment method uniqueness check failed', error); break; }
+        if (!data) { exists = false; break; }
+        code = base + '_' + suffix; suffix++;
+      }
+    } catch (err) {
+      console.warn('Could not verify code uniqueness in DB', err);
+    }
+
+    this.paymentMethods.push({ code, label, fee_label: fee_label || null, fee_percent: fee_percent, is_fee_enabled });
+    labelEl.value = ''; 
+    if (feeLabelEl) feeLabelEl.value = ''; 
+    if (feePercentEl) feePercentEl.value = '';
+    if (toggleEl) { toggleEl.checked = false; document.getElementById('pm-add-fee-container').style.display = 'none'; }
+    this.renderPaymentMethodsSettings();
+    const saved = await this.saveSettings();
+    if (saved) showToast('Metode pembayaran ditambahkan', 'success');
+    else showToast('Metode ditambahkan (tersimpan lokal), gagal sinkron ke DB', 'warning');
+  },
+
+  // ── Danger Zone: Reset Data ──────────────────────────────────
+  openResetModal() {
+    const input = document.getElementById('reset-confirm-input');
+    if (input) input.value = '';
+    openModal('modal-reset-data');
+  },
+
+  async confirmReset() {
+    const input = document.getElementById('reset-confirm-input')?.value;
+    if (input !== 'RESET') { showToast('Ketik RESET dengan benar', 'error'); return; }
+
+    const btn = document.getElementById('btn-confirm-reset');
+    btn.disabled = true;
+    btn.textContent = 'Menghapus...';
+    showLoader();
+
+    // ────────────────────────────────────────────────────────────
+    // URUTAN: child → parent (FK dependency)
+    // Semua tabel direset.
+    // users: SEMUA dihapus KECUALI akun admin yang sedang login
+    //        (agar tidak terkunci setelah reload).
+    // ────────────────────────────────────────────────────────────
+    const tables = [
+      // ── 1. Purchase (child paling dalam) ──────────────────
+      'purchase_items',        // FK → purchase_orders, ingredients
+      // ── 2. Transaksi & Kas ────────────────────────────────
+      'refund_transactions',   // FK → transactions
+      'transaction_items',     // FK → transactions
+      'cash_logs',             // FK → cashier_sessions, cash_categories, branches, users
+      'transactions',          // FK → cashier_sessions, branches, users
+      'cashier_sessions',      // FK → branches, users
+      // ── 3. Inventori ──────────────────────────────────────
+      'inventory_logs',        // FK → branch_inventory, ingredients, branches, users
+      'branch_inventory',      // FK → branches, ingredients
+      // ── 4. Resep / BOM ────────────────────────────────────
+      'recipe_items',          // FK → recipes, ingredients
+      'recipes',               // FK → product_variants
+      // ── 5. Produk ─────────────────────────────────────────
+      'branch_variant_prices', // FK → branches, product_variants
+      'branch_products',       // FK → branches, products
+      'product_variants',      // FK → products
+      'products',              // FK → product_categories
+      'product_categories',    // independent
+      // ── 6. Purchase Orders (setelah child-nya) ────────────
+      'purchase_orders',       // FK → branches, suppliers, users
+      // ── 7. Master data independen ─────────────────────────
+      'ingredients',           // independent — dihapus setelah semua FK child
+      'cash_categories',       // independent
+      'payment_methods',       // independent
+      'suppliers',             // independent — dihapus setelah purchase_orders
+      // ── 8. Users/Staff (kecuali admin yg sedang login) ───
+      // Ditangani secara terpisah di bawah (pakai .neq filter)
+      // ── 9. Branches/Outlet (paling terakhir) ─────────────
+      'branches',              // dihapus setelah SEMUA FK child bersih
+    ];
+
+    const errors = [];
+    try {
+      // ── Step 0: Nullify nullable FKs agar tidak FK violation ──
+      // users.branch_id → branches (nullable)
+      try {
+        await db.from('users').update({ branch_id: null }).not('id', 'is', null);
+      } catch(e) { console.warn('[reset] nullify users.branch_id:', e.message); }
+
+      // ── Step 1: Hapus semua tabel dalam urutan FK ──────────────
+      for (const t of tables) {
+        btn.textContent = `Menghapus ${t}...`;
+        try {
+          const { error } = await db.from(t).delete().not('id', 'is', null);
+          if (error) {
+            const isNotExist = /does not exist|relation.*not found|undefined table/i.test(error.message);
+            if (isNotExist) {
+              console.info(`[reset] "${t}" tidak ada di DB — dilewati.`);
+            } else {
+              console.warn(`[reset] ${t}:`, error.message);
+              errors.push(`${t}: ${error.message}`);
+            }
+          }
+        } catch(e) {
+          const isNotExist = /does not exist|relation.*not found|undefined table/i.test(e.message);
+          if (isNotExist) {
+            console.info(`[reset] "${t}" tidak ada di DB — dilewati.`);
+          } else {
+            console.error(`[reset] ${t}:`, e);
+            errors.push(`${t}: ${e.message}`);
+          }
+        }
+      }
+
+      // ── Step 2: Hapus users/staff KECUALI admin yang sedang login ──
+      btn.textContent = 'Menghapus users...';
+      try {
+        const currentUserId = this.user?.id;
+        let q = db.from('users').delete();
+        // Jika ada ID admin aktif, jangan hapus dirinya sendiri
+        if (currentUserId) {
+          q = q.neq('id', currentUserId);
+        } else {
+          q = q.not('id', 'is', null);
+        }
+        const { error } = await q;
+        if (error) {
+          const isNotExist = /does not exist|relation.*not found|undefined table/i.test(error.message);
+          if (!isNotExist) { console.warn('[reset] users:', error.message); errors.push(`users: ${error.message}`); }
+        }
+      } catch(e) { console.warn('[reset] users exception:', e.message); errors.push(`users: ${e.message}`); }
+
+      // ── Toast hasil ───────────────────────────────────────────
+      if (errors.length === 0) {
+        showToast('Semua data berhasil direset ✓', 'success');
+      } else if (errors.length < tables.length + 1) {
+        showToast(`Reset selesai (${errors.length} error) — cek konsol browser`, 'warning');
+        console.warn('[reset] Error detail:', errors);
+      } else {
+        showToast('Reset gagal — cek permission RLS di Supabase Dashboard', 'error');
+        console.error('[reset] Semua tabel gagal:', errors);
+      }
+
+    } finally {
+      // Selalu jalankan cleanup agar spinner tidak stuck
+      closeModal('modal-reset-data');
+      document.getElementById('page-loader').style.display = 'none';
+      btn.disabled = false;
+      btn.textContent = 'Reset Data';
+      setTimeout(() => location.reload(), 1200);
+    }
+  },
+
+  async editPaymentMethod(idx) {
+    const m = (this.paymentMethods || [])[idx];
+    if (!m) return;
+    const newLabel = await showPrompt({ title: 'Edit Label Metode', message: 'Label yang ditampilkan di kasir', placeholder: 'Contoh: Tunai', defaultValue: m.label });
+    if (newLabel === null) return;
+    const newFeeLabel = await showPrompt({ title: 'Nama Biaya Tambahan', message: 'Kosongkan jika tidak ada biaya', placeholder: 'Contoh: Biaya Admin', defaultValue: m.fee_label || '' });
+    if (newFeeLabel === null) return;
+    const newFeePercentStr = await showPrompt({ title: 'Persentase Biaya (%)', message: 'Isi 0 jika tidak ada biaya', placeholder: '0', defaultValue: String(m.fee_percent || 0), inputType: 'number' });
+    if (newFeePercentStr === null) return;
+    const pct = parseFloat(newFeePercentStr);
+    m.label = newLabel.trim() || m.label;
+    m.fee_label = (newFeeLabel || '').trim() || null;
+    m.fee_percent = isNaN(pct) ? (m.fee_percent || 0) : pct;
+    this.renderPaymentMethodsSettings();
+    const saved = await this.saveSettings();
+    if (saved) showToast('Metode diperbarui', 'success');
+    else showToast('Perubahan disimpan lokal, gagal sinkron ke DB', 'warning');
+  },
+
+  async deletePaymentMethod(idx) {
+    const m = (this.paymentMethods || [])[idx];
+    if (!m) return;
+    const ok = await showConfirm({
+      title:       `Hapus Metode "${m.label}"?`,
+      message:     'Metode pembayaran ini akan dihapus dari sistem.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    this.paymentMethods.splice(idx, 1);
+    this.renderPaymentMethodsSettings();
+    const saved = await this.saveSettings();
+    if (saved) showToast('Metode dihapus', 'success');
+    else showToast('Perubahan disimpan lokal, gagal sinkron ke DB', 'warning');
+  },
+
+  closeModal(id) { closeModal(id); },
+  hideLoader()   { document.getElementById('page-loader').style.display = 'none'; },
+
+  // ── Cash Categories CRUD ──────────────────────────────────────
+  async loadCashCategories() {
+    const container = document.getElementById('cash-categories-list');
+    if (!container) return;
+    const cats = await cashService.getCategories();
+    container.innerHTML = cats.length
+      ? `<div class="admin-list">${cats.map(c => `
+          <div class="admin-list-card">
+            <div class="list-card-icon"><i data-lucide="${c.type === 'in' ? 'trending-up' : 'trending-down'}" class="icon"></i></div>
+            <div class="list-card-info">
+              <div class="list-card-title">${escHtml(c.name)}</div>
+              <div class="list-card-sub"><span class="badge ${c.type === 'in' ? 'badge-green' : 'badge-red'}">${c.type === 'in' ? 'Masuk' : 'Keluar'}</span></div>
+            </div>
+            <div class="list-card-actions">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-cash-category-modal" data-id="${c.id}" data-name="${escHtml(c.name)}" data-type="${c.type}">Edit</button>
+              <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-cash-category" data-id="${c.id}" data-name="${escHtml(c.name)}">Hapus</button>
+            </div>
+          </div>`).join('')}</div>`
+      : '<div class="empty-state"><div class="empty-title">Belum ada kategori kas</div></div>';
+    if (window.lucide) lucide.createIcons();
+  },
+
+  openCashCategoryModal(id = null, name = '', type = 'in') {
+    document.getElementById('cash-cat-id').value   = id || '';
+    document.getElementById('cash-cat-name').value = name;
+    document.getElementById('cash-cat-type').value = type;
+    document.getElementById('cash-cat-modal-title').textContent = id ? 'Edit Kategori' : 'Tambah Kategori';
+    openModal('modal-cash-category');
+  },
+
+  async saveCashCategory() {
+    const id   = document.getElementById('cash-cat-id').value;
+    const name = document.getElementById('cash-cat-name').value.trim();
+    const type = document.getElementById('cash-cat-type').value;
+    if (!name) { showToast('Nama kategori wajib diisi', 'error'); return; }
+    try {
+      await cashService.saveCategory({ id: id || null, name, type });
+      showToast('Kategori disimpan', 'success');
+      this.closeModal('modal-cash-category');
+      this.loadCashCategories();
+    } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async deleteCashCategory(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus Kategori "${name}"?`,
+      message:     'Kategori ini akan dihapus permanen.',
+      confirmText: 'Ya, Hapus',
+      danger:      true,
+    });
+    if (!ok) return;
+    try {
+      await cashService.deleteCategory(id);
+      showToast('Kategori dihapus', 'success');
+      this.loadCashCategories();
+    } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  // ── Cash Report ───────────────────────────────────────────────
+  // BUG-13 FIX: Show informative empty-state when no branch is selected
+  async loadCashReport() {
+    const today = new Date().toISOString().slice(0, 10);
+    const dateFromEl = document.getElementById('cash-report-date-from');
+    const dateToEl   = document.getElementById('cash-report-date-to');
+    const branchEl   = document.getElementById('cash-report-branch');
+    if (!dateFromEl) return;
+    if (!dateFromEl.value) { dateFromEl.value = today; dateToEl.value = today; }
+
+    if (branchEl && branchEl.options.length <= 1 && this.branches?.length) {
+      branchEl.innerHTML = '<option value="">-- Pilih Cabang --</option>' +
+        this.branches.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
+    }
+
+    const branchId = branchEl?.value || '';
+    const dateFrom = dateFromEl.value;
+    const dateTo   = dateToEl.value;
+
+    const balEl  = document.getElementById('cash-balance-status');
+    const sumEl  = document.getElementById('cash-report-summary');
+    const tabsEl = document.getElementById('cash-detail-tabs');
+
+    if (!branchId) {
+      if (balEl)  balEl.innerHTML  = '';
+      if (sumEl)  sumEl.innerHTML  = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Pilih cabang dan tanggal untuk melihat laporan kas</div></div>`;
+      if (tabsEl) tabsEl.style.display = 'none';
+      document.getElementById('cash-tab-in').style.display  = '';
+      document.getElementById('cash-tab-out').style.display = 'none';
+      document.getElementById('cash-tab-all').style.display = 'none';
+      ['cash-tab-in-body','cash-tab-out-body'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<tr><td colspan="6" class="empty-td">— Belum ada cabang dipilih —</td></tr>';
+      });
+      const allBody = document.getElementById('cash-report-body');
+      if (allBody) allBody.innerHTML = '<tr><td colspan="7" class="empty-td">— Belum ada cabang dipilih —</td></tr>';
+      return;
+    }
+
+    // Loading state
+    if (balEl) balEl.innerHTML = '<div class="text-muted text-sm" style="padding:8px 0">Memuat data kas...</div>';
+    ['cash-tab-in-body','cash-tab-out-body'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<tr><td colspan="6" class="empty-td">Memuat...</td></tr>';
+    });
+    const allBody = document.getElementById('cash-report-body');
+    if (allBody) allBody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat...</td></tr>';
+
+    try {
+      const [summary, logs] = await Promise.all([
+        cashService.getSummary({ branchId: parseInt(branchId), dateFrom, dateTo }),
+        cashService.getLogs({ branchId: parseInt(branchId), dateFrom, dateTo, includeVoided: true })
+      ]);
+
+      const { openingCash, salesIn, manualIn, manualOut, refundOut, voidOut, expectedCash } = summary;
+      const totalMasuk  = salesIn + manualIn;
+      const totalKeluar = manualOut + refundOut + voidOut;
+      const isOk = expectedCash >= 0;
+      const statusClass = isOk ? 'ok' : 'warn';
+
+      // ── Balance card ───────────────────────────────────────
+      if (balEl) balEl.innerHTML = `
+        <div class="cash-balance-card ${statusClass}">
+          <div class="cbc-icon">${isOk ? '✅' : '⚠️'}</div>
+          <div class="cbc-main">
+            <div class="cbc-label">${isOk ? 'Saldo Kas Berjalan' : 'Perhatian — Saldo Minus'}</div>
+            <div class="cbc-amount ${statusClass}">${fRp(expectedCash)}</div>
+          </div>
+          <div class="cbc-formula">
+            <div class="cbf-item">
+              <div class="cbf-val">${fRp(openingCash)}</div>
+              <div class="cbf-lbl">Kas Awal</div>
+            </div>
+            <div class="cbf-op">+</div>
+            <div class="cbf-item">
+              <div class="cbf-val text-green">+${fRp(totalMasuk)}</div>
+              <div class="cbf-lbl">Total Masuk</div>
+            </div>
+            <div class="cbf-op">−</div>
+            <div class="cbf-item">
+              <div class="cbf-val text-danger">−${fRp(totalKeluar)}</div>
+              <div class="cbf-lbl">Total Keluar</div>
+            </div>
+            <div class="cbf-op">=</div>
+            <div class="cbf-item">
+              <div class="cbf-val fw-700 ${statusClass === 'ok' ? 'text-green' : 'text-danger'}" style="font-size:16px">${fRp(expectedCash)}</div>
+              <div class="cbf-lbl">Saldo</div>
+            </div>
+          </div>
+        </div>`;
+
+      // ── Summary stats ──────────────────────────────────────
+      if (sumEl) sumEl.innerHTML = `
+        <div class="stat-card"><div class="stat-label">Kas Awal</div><div class="stat-value">${fRp(openingCash)}</div></div>
+        <div class="stat-card"><div class="stat-label">Penjualan Tunai</div><div class="stat-value text-green">+${fRp(salesIn)}</div></div>
+        <div class="stat-card"><div class="stat-label">Kas Masuk Manual</div><div class="stat-value text-green">+${fRp(manualIn)}</div></div>
+        <div class="stat-card"><div class="stat-label">Kas Keluar Manual</div><div class="stat-value text-danger">−${fRp(manualOut)}</div></div>
+        <div class="stat-card"><div class="stat-label">Refund</div><div class="stat-value text-danger">−${fRp(refundOut)}</div></div>
+        ${voidOut > 0 ? `<div class="stat-card"><div class="stat-label">Void</div><div class="stat-value text-danger">−${fRp(voidOut)}</div></div>` : ''}
+        <div class="stat-card stat-card-hero"><div class="stat-label">Saldo Ekspektasi</div><div class="stat-value">${fRp(expectedCash)}</div></div>`;
+
+      // ── Show tabs & reset to first tab ────────────────────
+      if (tabsEl) {
+        tabsEl.style.display = '';
+        tabsEl.querySelectorAll('.inner-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+      }
+      document.getElementById('cash-tab-in').style.display  = '';
+      document.getElementById('cash-tab-out').style.display = 'none';
+      document.getElementById('cash-tab-all').style.display = 'none';
+
+      // ── Render table rows ─────────────────────────────────
+      const validLogs = logs || [];
+      const logsIn    = validLogs.filter(l => l.type === 'in');
+      const logsOut   = validLogs.filter(l => l.type === 'out');
+
+      const rowIn = l => `
+        <tr class="${l.is_void ? 'opacity-50' : ''}">
+          <td class="text-xs nowrap">${fDate(l.created_at)}</td>
+          <td>${escHtml(l.cash_categories?.name || '—')}</td>
+          <td class="fw-700 text-green">+${fRp(l.amount)}</td>
+          <td class="text-xs">${escHtml(l.note || '—')}</td>
+          <td>${escHtml(l.creator?.name || '—')}</td>
+          <td>${l.is_void
+            ? `<span class="badge badge-red">VOID${l.voider?.name ? ' oleh ' + escHtml(l.voider.name) : ''}</span>`
+            : `<button class="btn btn-danger-soft btn-sm" data-admin-action="void-cash-log" data-id="${l.id}">Void</button>`}</td>
+        </tr>`;
+
+      const rowOut = l => `
+        <tr class="${l.is_void ? 'opacity-50' : ''}">
+          <td class="text-xs nowrap">${fDate(l.created_at)}</td>
+          <td>${escHtml(l.cash_categories?.name || '—')}</td>
+          <td class="fw-700 text-danger">−${fRp(l.amount)}</td>
+          <td class="text-xs">${escHtml(l.note || '—')}</td>
+          <td>${escHtml(l.creator?.name || '—')}</td>
+          <td>${l.is_void
+            ? `<span class="badge badge-red">VOID${l.voider?.name ? ' oleh ' + escHtml(l.voider.name) : ''}</span>`
+            : `<button class="btn btn-danger-soft btn-sm" data-admin-action="void-cash-log" data-id="${l.id}">Void</button>`}</td>
+        </tr>`;
+
+      const rowAll = l => `
+        <tr class="${l.is_void ? 'opacity-50' : ''}">
+          <td class="text-xs nowrap">${fDate(l.created_at)}</td>
+          <td><span class="badge ${l.type === 'in' ? 'badge-green' : 'badge-red'}">${l.type === 'in' ? 'Masuk' : 'Keluar'}</span></td>
+          <td>${escHtml(l.cash_categories?.name || '—')}</td>
+          <td class="fw-700 ${l.type === 'in' ? 'text-green' : 'text-danger'}">${l.type === 'in' ? '+' : '−'}${fRp(l.amount)}</td>
+          <td class="text-xs">${escHtml(l.note || '—')}</td>
+          <td>${escHtml(l.creator?.name || '—')}</td>
+          <td>${l.is_void
+            ? `<span class="badge badge-red">VOID${l.voider?.name ? ' oleh ' + escHtml(l.voider.name) : ''}</span>`
+            : `<button class="btn btn-danger-soft btn-sm" data-admin-action="void-cash-log" data-id="${l.id}">Void</button>`}</td>
+        </tr>`;
+
+      const inBody  = document.getElementById('cash-tab-in-body');
+      const outBody = document.getElementById('cash-tab-out-body');
+      if (inBody)  inBody.innerHTML  = logsIn.length  ? logsIn.map(rowIn).join('')   : '<tr><td colspan="6" class="empty-td">Tidak ada kas masuk pada periode ini</td></tr>';
+      if (outBody) outBody.innerHTML = logsOut.length ? logsOut.map(rowOut).join('') : '<tr><td colspan="6" class="empty-td">Tidak ada kas keluar pada periode ini</td></tr>';
+      if (allBody) allBody.innerHTML = validLogs.length ? validLogs.map(rowAll).join('') : '<tr><td colspan="7" class="empty-td">Tidak ada data kas pada periode ini</td></tr>';
+
+    } catch (e) {
+      showToast('Gagal memuat laporan kas: ' + e.message, 'error');
+    }
+  },
+
+  switchCashTab(tab, el) {
+    document.querySelectorAll('#section-cash-report .inner-tab').forEach(t => t.classList.remove('active'));
+    if (el) el.classList.add('active');
+    document.getElementById('cash-tab-in').style.display  = tab === 'in'  ? '' : 'none';
+    document.getElementById('cash-tab-out').style.display = tab === 'out' ? '' : 'none';
+    document.getElementById('cash-tab-all').style.display = tab === 'all' ? '' : 'none';
+  },
+
+  async voidCashLog(logId) {
+    const reason = await showPrompt({
+      title:       'Alasan Void Kas',
+      message:     'Berikan alasan pembatalan log kas ini.',
+      placeholder: 'Contoh: Input salah',
+      confirmText: 'Lanjutkan',
+    });
+    if (!reason?.trim()) return;
+    const ok = await showConfirm({
+      title:       'Void Log Kas?',
+      message:     'Log kas ini akan dibatalkan.',
+      confirmText: 'Ya, Void',
+      danger:      true,
+    });
+    if (!ok) return;
+    try {
+      await cashService.voidLog({ logId, reason: reason.trim(), voidedBy: this.user.id });
+      showToast('Cash log di-void', 'success');
+      this.loadCashReport();
+    } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async confirmLogout() {
+    const ok = await showConfirm({
+      title:       'Yakin ingin keluar?',
+      message:     'Sesi admin akan diakhiri.',
+      confirmText: 'Ya, Keluar',
+      danger:      true,
+      icon:        '🚪'
+    });
+    if (ok) auth.logout();
+  },
+
+  // ── Bulk Menu Import / Template ───────────────────────────
+
+  // Helper: switch visible state panel inside modal-bulk-import
+  _bulkShowState(state) {
+    ['parsing','preview','importing','done'].forEach(s => {
+      const el = document.getElementById(`bulk-state-${s}`);
+      if (el) el.classList.toggle('hidden', s !== state);
+    });
+  },
+
+  // Wire up the bulk import modal close / cancel buttons (called once after DOM ready)
+  _bulkModalInit() {
+    if (this._bulkModalWired) return;
+    this._bulkModalWired = true;
+    const overlay = document.getElementById('modal-bulk-import');
+    const closeX  = document.getElementById('btn-bulk-close-x');
+    const cancel  = document.getElementById('btn-bulk-cancel');
+    const done    = document.getElementById('btn-bulk-done');
+    const hide = () => { if (overlay) overlay.classList.remove('active'); };
+    [closeX, cancel, done].forEach(btn => btn && btn.addEventListener('click', hide));
+
+    // Drag-and-drop on the dropzone
+    const dz = document.getElementById('bulk-dropzone');
+    const fi = document.getElementById('bulk-import-file');
+    if (dz && fi) {
+      dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+      dz.addEventListener('drop', e => {
+        e.preventDefault(); dz.classList.remove('drag-over');
+        const file = e.dataTransfer?.files?.[0];
+        if (file) { const dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files; fi.dispatchEvent(new Event('change', { bubbles: true })); }
+      });
+    }
+  },
+
+  async downloadMenuTemplate() {
+    const btn = document.getElementById('btn-download-menu-template');
+    if (btn) { btn.disabled = true; btn.textContent = 'Memuat...'; }
+    try {
+      if (!window.XLSX) throw new Error('Library SheetJS belum dimuat');
+      const { data: branches } = await db.from('branches').select('id,name').order('name');
+      const branchNames = (branches || []).map(b => b.name);
+
+      const header = ['product_name','variant_name','default_price','category','sku', ...branchNames];
+      // Example rows — 1 sample per branch to show the override concept
+      const mk = (p,v,dp,cat,...prices) => [p,v,dp,cat,'', ...prices];
+      const bFill = (arr, len) => { while (arr.length < len) arr.push(''); return arr; };
+      const sampleRows = [
+        mk('Roti Bakar Coklat','Kecil',14000,'Roti Bakar', ...bFill([13000],branchNames.length)),
+        mk('Roti Bakar Coklat','Besar',20000,'Roti Bakar', ...bFill([19000],branchNames.length)),
+        mk('Roti Bakar Keju','Kecil',14000,'Roti Bakar',  ...bFill([],branchNames.length)),
+        mk('Roti Bakar Keju','Besar',20000,'Roti Bakar',  ...bFill([],branchNames.length)),
+        mk('Roti Bakar Strawberry','Kecil',12000,'Roti Bakar',...bFill([],branchNames.length)),
+        mk('Roti Bakar Strawberry','Besar',16000,'Roti Bakar',...bFill([],branchNames.length)),
+        mk('Kopi Hitam','Hot',10000,'Minuman',            ...bFill([],branchNames.length)),
+        mk('Kopi Hitam','Ice',12000,'Minuman',            ...bFill([],branchNames.length)),
+      ];
+
+      const aoa = [header, ...sampleRows];
+      const ws  = XLSX.utils.aoa_to_sheet(aoa);
+
+      // Style header row (column widths)
+      ws['!cols'] = header.map((h,i) => ({ wch: i < 5 ? 24 : 18 }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'menu_import');
+
+      // Second sheet: instructions
+      const instrRows = [
+        ['PANDUAN PENGISIAN TEMPLATE BULK IMPORT MENU'],
+        [''],
+        ['Kolom Wajib:'],
+        ['  product_name  — Nama produk (string). Jika sudah ada di DB, varian akan di-update/ditambah.'],
+        ['  variant_name  — Nama varian (string). Misal: Kecil, Besar, Hot, Ice.'],
+        ['  default_price — Harga jual global (angka tanpa titik/koma). Contoh: 15000'],
+        [''],
+        ['Kolom Opsional:'],
+        ['  category — Kategori produk (string).'],
+        ['  sku      — Kode SKU (string).'],
+        [''],
+        ['Kolom Harga Per-Cabang (warna orange):'],
+        ...branchNames.map(b => [`  ${b} — Harga override khusus cabang ini. Kosongkan = pakai default_price.`]),
+        [''],
+        ['Catatan:'],
+        ['  • Produk & varian baru dibuat otomatis jika nama belum ada.'],
+        ['  • Nama produk/varian sama persis = update harga (tidak duplikat).'],
+        ['  • Kolom cabang yang kosong tidak memengaruhi harga default.'],
+      ];
+      const ws2 = XLSX.utils.aoa_to_sheet(instrRows);
+      ws2['!cols'] = [{ wch: 80 }];
+      XLSX.utils.book_append_sheet(wb, ws2, 'Panduan');
+
+      const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+      const blob  = new Blob([wbout], { type:'application/octet-stream' });
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a');
+      a.href = url; a.download = 'menu_import_template.xlsx';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      showToast('Template Excel diunduh!', 'success');
+    } catch (e) {
+      console.error('downloadMenuTemplate', e);
+      showToast('Gagal membuat template: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="download" class="icon-sm"></i> Download Template .xlsx'; if(window.lucide) lucide.createIcons(); }
+    }
+  },
+
+  async handleImportMenuFile(node) {
+    if (!node?.files?.[0]) return;
+    this._bulkModalInit();
+    const overlay = document.getElementById('modal-bulk-import');
+    if (overlay) overlay.classList.add('active');
+    this._bulkShowState('parsing');
+    // Reset footer buttons
+    document.getElementById('btn-confirm-bulk-import')?.classList.add('hidden');
+    document.getElementById('btn-bulk-done')?.classList.add('hidden');
+    document.getElementById('btn-bulk-cancel')?.classList.remove('hidden');
+
+    try {
+      if (!window.XLSX) throw new Error('Library SheetJS belum dimuat');
+      const buf  = await node.files[0].arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      if (!sheet) throw new Error('Sheet tidak ditemukan di file');
+      const rawRows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+      if (!rawRows.length) throw new Error('File kosong atau tidak terbaca');
+
+      // Fetch branches to detect branch-price columns
+      const { data: branches } = await db.from('branches').select('id,name').order('name');
+      const branchList = branches || [];
+      const branchNameMap = {}; // lowercase name -> branch obj
+      branchList.forEach(b => { branchNameMap[b.name.trim().toLowerCase()] = b; });
+
+      // Detect which header columns are branch names
+      const allHeaders = rawRows.length ? Object.keys(rawRows[0]) : [];
+      const fixedCols  = new Set(['product_name','variant_name','default_price','price','category','sku']);
+      const branchCols = allHeaders.filter(h => {
+        const norm = h.trim().toLowerCase();
+        return !fixedCols.has(norm) && branchNameMap[norm] !== undefined;
+      });
+
+      // Normalize rows
+      const get = (r, ...keys) => {
+        for (const k of keys) {
+          const found = Object.keys(r).find(h => h.trim().toLowerCase() === k.toLowerCase());
+          if (found !== undefined && r[found] !== '') return r[found];
+        }
+        return '';
+      };
+
+      const errors = [];
+      const parsed = rawRows.map((r, idx) => {
+        const pname = String(get(r,'product_name','product') || '').trim();
+        const vname = String(get(r,'variant_name','variant') || '').trim();
+        const dpRaw = get(r,'default_price','price');
+        const dp    = Number(dpRaw) || 0;
+        const cat   = String(get(r,'category') || '').trim();
+        const sku   = String(get(r,'sku') || '').trim();
+
+        if (!pname || !vname) {
+          errors.push(`Baris ${idx+2}: product_name atau variant_name kosong`);
+          return null;
+        }
+        if (isNaN(Number(dpRaw)) || Number(dpRaw) < 0) {
+          errors.push(`Baris ${idx+2}: default_price tidak valid (${dpRaw})`);
+          return null;
+        }
+
+        const branchPrices = {}; // branchId -> price
+        branchCols.forEach(col => {
+          const val = r[col];
+          if (val !== '' && val !== null && val !== undefined) {
+            const branch = branchNameMap[col.trim().toLowerCase()];
+            if (branch) {
+              const p = Number(val);
+              if (!isNaN(p) && p >= 0) branchPrices[branch.id] = p;
+            }
+          }
+        });
+        return { pname, vname, dp, cat, sku, branchPrices };
+      }).filter(Boolean);
+
+      if (!parsed.length) throw new Error('Tidak ditemukan baris valid (pastikan kolom product_name & variant_name terisi)');
+
+      // Count stats for preview
+      const uniqueProducts = new Set(parsed.map(r => r.pname)).size;
+      const totalBranchPrices = parsed.reduce((s,r) => s + Object.keys(r.branchPrices).length, 0);
+
+      document.getElementById('bp-cnt-products').textContent = uniqueProducts;
+      document.getElementById('bp-cnt-variants').textContent  = parsed.length;
+      document.getElementById('bp-cnt-prices').textContent   = totalBranchPrices;
+      document.getElementById('bp-cnt-errors').textContent   = errors.length;
+
+      // Show errors strip
+      const errEl = document.getElementById('bulk-preview-errors');
+      if (errors.length && errEl) {
+        errEl.classList.remove('hidden');
+        errEl.innerHTML = '<strong>Peringatan baris dilewati:</strong><br>' + errors.map(escHtml).join('<br>');
+      } else if (errEl) { errEl.classList.add('hidden'); }
+
+      // Build preview table
+      const thead = document.getElementById('bulk-preview-thead');
+      const tbody = document.getElementById('bulk-preview-tbody');
+      const branchColHeaders = branchCols.map(c => `<th class="col-branch-price">${escHtml(c)}</th>`).join('');
+      thead.innerHTML = `<tr><th>#</th><th>Produk</th><th>Varian</th><th>Harga Default</th><th>Kategori</th>${branchColHeaders}</tr>`;
+      tbody.innerHTML = parsed.map((r,i) => {
+        const bpCells = branchCols.map(col => {
+          const branch = branchNameMap[col.trim().toLowerCase()];
+          const price  = branch ? r.branchPrices[branch.id] : undefined;
+          return `<td class="col-branch-price">${price !== undefined ? fRp(price) : '<span class="text-muted">—</span>'}</td>`;
+        }).join('');
+        return `<tr><td class="text-muted">${i+1}</td><td class="fw-600">${escHtml(r.pname)}</td><td>${escHtml(r.vname)}</td><td class="fw-700 text-orange">${fRp(r.dp)}</td><td>${escHtml(r.cat||'—')}</td>${bpCells}</tr>`;
+      }).join('');
+
+      // Store for confirm step
+      this._bulkImportData = { rows: parsed, branchList, branchCols, branchNameMap };
+
+      // Update footer
+      const countEl = document.getElementById('bulk-row-count');
+      if (countEl) countEl.textContent = parsed.length;
+      document.getElementById('btn-confirm-bulk-import')?.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+
+      this._bulkShowState('preview');
+    } catch (e) {
+      console.error('handleImportMenuFile', e);
+      showToast('Gagal membaca file: ' + e.message, 'error');
+      const overlay = document.getElementById('modal-bulk-import');
+      if (overlay) overlay.classList.remove('active');
+    } finally {
+      try { node.value = ''; } catch(_) {}
+    }
+  },
+
+  async confirmBulkImport() {
+    if (!this._bulkImportData) return;
+    const { rows, branchNameMap } = this._bulkImportData;
+
+    // Switch to importing state
+    this._bulkShowState('importing');
+    document.getElementById('btn-confirm-bulk-import')?.classList.add('hidden');
+    document.getElementById('btn-bulk-cancel')?.classList.add('hidden');
+
+    const bar    = document.getElementById('bulk-progress-bar');
+    const txtEl  = document.getElementById('bulk-progress-text');
+    const curEl  = document.getElementById('bulk-progress-current');
+    const total  = rows.length;
+    let created = 0, updated = 0, skipped = 0, branchPricesSet = 0;
+
+    const setProgress = (done, msg) => {
+      const pct = total ? Math.round(done / total * 100) : 100;
+      if (bar)   bar.style.width = pct + '%';
+      if (txtEl) txtEl.textContent = `${done} / ${total} baris diproses (${pct}%)`;
+      if (curEl && msg) curEl.textContent = msg;
+    };
+
+    try {
+      // Pre-load existing products & variants
+      const { data: prodData } = await db.from('products').select('id,name');
+      const { data: varData  } = await db.from('product_variants').select('id,name,product_id,price');
+      const prodMap = {};
+      (prodData || []).forEach(p => { prodMap[p.name.trim().toLowerCase()] = p; });
+      const varMapByProd = {};
+      (varData || []).forEach(v => {
+        varMapByProd[v.product_id] = varMapByProd[v.product_id] || {};
+        varMapByProd[v.product_id][v.name.trim().toLowerCase()] = v;
+      });
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        setProgress(i, `Memproses: ${r.pname} — ${r.vname}`);
+
+        // ── Find or create product ──
+        let prod = prodMap[r.pname.toLowerCase()];
+        if (!prod) {
+          try {
+            const { data: np, error: pe } = await db.from('products')
+              .insert({ name: r.pname, category: r.cat || null })
+              .select().single();
+            if (pe) throw pe;
+            prod = np;
+            prodMap[prod.name.trim().toLowerCase()] = prod;
+            created++;
+          } catch (e) {
+            console.error('create product', r.pname, e);
+            skipped++; continue;
+          }
+        }
+
+        // ── Find or create/update variant ──
+        varMapByProd[prod.id] = varMapByProd[prod.id] || {};
+        let variant = varMapByProd[prod.id][r.vname.toLowerCase()];
+        if (!variant) {
+          try {
+            const { data: nv, error: ve } = await db.from('product_variants')
+              .insert({ product_id: prod.id, name: r.vname, price: r.dp })
+              .select().single();
+            if (ve) throw ve;
+            variant = nv;
+            varMapByProd[prod.id][variant.name.trim().toLowerCase()] = variant;
+            created++;
+          } catch (e) {
+            console.error('create variant', prod.id, r.vname, e);
+            skipped++; continue;
+          }
+        } else if (Number(variant.price) !== r.dp) {
+          try {
+            const { error: ue } = await db.from('product_variants')
+              .update({ price: r.dp }).eq('id', variant.id);
+            if (ue) throw ue;
+            variant.price = r.dp;
+            updated++;
+          } catch (e) {
+            console.error('update variant price', variant.id, e);
+          }
+        }
+
+        // ── Upsert branch-variant prices ──
+        const bpEntries = Object.entries(r.branchPrices);
+        if (bpEntries.length && variant) {
+          const upserts = bpEntries.map(([bId, price]) => ({
+            branch_id: parseInt(bId), variant_id: variant.id, price,
+            updated_at: new Date().toISOString()
+          }));
+          try {
+            const { error: bpe } = await db.from('branch_variant_prices')
+              .upsert(upserts, { onConflict: 'branch_id,variant_id' });
+            if (bpe && !/does not exist|relation.*not found/i.test(bpe.message)) throw bpe;
+            branchPricesSet += upserts.length;
+          } catch (e) {
+            console.error('upsert branch prices', e);
+          }
+        }
+      }
+
+      setProgress(total, 'Selesai!');
+      await this.loadMasterData();
+
+      // Show done state
+      document.getElementById('bulk-done-desc').textContent =
+        `${total} baris diproses dari file Excel`;
+      document.getElementById('bulk-done-stats').innerHTML = `
+        <div class="bulk-stat-box"><div class="bulk-stat-val text-primary">${created}</div><div class="bulk-stat-lbl">Dibuat Baru</div></div>
+        <div class="bulk-stat-box"><div class="bulk-stat-val text-orange">${updated}</div><div class="bulk-stat-lbl">Diperbarui</div></div>
+        <div class="bulk-stat-box"><div class="bulk-stat-val" style="color:var(--success)">${branchPricesSet}</div><div class="bulk-stat-lbl">Harga Cabang</div></div>
+        <div class="bulk-stat-box"><div class="bulk-stat-val text-danger">${skipped}</div><div class="bulk-stat-lbl">Terlewat</div></div>
+      `;
+      this._bulkShowState('done');
+      document.getElementById('btn-bulk-done')?.classList.remove('hidden');
+      this._bulkImportData = null;
+
+      if (this.currentSection === 'products') this.loadProducts();
+      showToast(`Import selesai — ${created} baru, ${updated} update, ${branchPricesSet} harga cabang`, 'success');
+    } catch (e) {
+      console.error('confirmBulkImport', e);
+      showToast('Import gagal: ' + e.message, 'error');
+      this._bulkShowState('preview');
+      document.getElementById('btn-confirm-bulk-import')?.classList.remove('hidden');
+      document.getElementById('btn-bulk-cancel')?.classList.remove('hidden');
+    }
+  },
+
+  // End of bulk import helpers (legacy handlers removed)
+
+  // ── Toppings ─────────────────────────────────────────────────
+  async loadToppingSection() {
+    // Populate product select for mapping
+    const opts = this.products.map(p => `<option value="${p.id}">${escHtml(p.name)}</option>`).join('');
+    setSelect('topping-mapping-product', `<option value="">— Pilih Produk —</option>${opts}`);
+    await this.loadToppings();
+  },
+
+  async loadToppings() {
+    const tbody = document.getElementById('toppings-list');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-td">Memuat...</td></tr>';
+    const { data, error } = await db.from('toppings').select('*').order('name');
+    if (error) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}. Pastikan sudah menjalankan schema_toppings_apikeys.sql</td></tr>`;
+      return;
+    }
+    if (!data?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-td">Belum ada topping. Klik "+ Tambah Topping" untuk mulai.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map((t, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td class="fw-600">${escHtml(t.name)}</td>
+        <td>${t.price > 0 ? fRp(t.price) : '<span class="text-muted">Gratis</span>'}</td>
+        <td>
+          <span class="badge ${t.is_active ? 'badge-green' : 'badge-red'}">${t.is_active ? 'Aktif' : 'Nonaktif'}</span>
+        </td>
+        <td>
+          <div class="flex gap-1">
+            <button class="btn btn-outline btn-sm" data-admin-action="open-topping-modal" data-id="${t.id}">Edit</button>
+            <button class="btn btn-sm ${t.is_active ? 'btn-warning' : 'btn-success'}" data-admin-action="toggle-topping-active" data-id="${t.id}" data-active="${t.is_active}">${t.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+            <button class="btn btn-danger btn-sm" data-admin-action="delete-topping" data-id="${t.id}" data-name="${escHtml(t.name)}">Hapus</button>
+          </div>
+        </td>
+      </tr>`).join('');
+    if (window.lucide) lucide.createIcons();
+  },
+
+  openToppingModal(id = null) {
+    document.getElementById('topping-id').value    = id || '';
+    document.getElementById('topping-name').value  = '';
+    document.getElementById('topping-price').value = '';
+    document.getElementById('topping-is-active').checked = true;
+    document.getElementById('topping-modal-title').textContent = id ? 'Edit Topping' : 'Tambah Topping';
+
+    if (id) {
+      db.from('toppings').select('*').eq('id', id).single().then(({ data }) => {
+        if (!data) return;
+        document.getElementById('topping-name').value  = data.name;
+        document.getElementById('topping-price').value = data.price;
+        document.getElementById('topping-is-active').checked = data.is_active;
+      });
+    }
+    openModal('modal-topping');
+  },
+
+  async saveTopping() {
+    const id       = document.getElementById('topping-id').value;
+    const name     = document.getElementById('topping-name').value.trim();
+    const price    = parseFloat(document.getElementById('topping-price').value) || 0;
+    const isActive = document.getElementById('topping-is-active').checked;
+
+    if (!name) { showToast('Nama topping wajib diisi', 'error'); return; }
+    if (price < 0) { showToast('Harga tidak boleh negatif', 'error'); return; }
+
+    try {
+      if (id) {
+        const { error } = await db.from('toppings').update({ name, price, is_active: isActive }).eq('id', Number(id));
+        if (error) throw error;
+        showToast('Topping diperbarui', 'success');
+      } else {
+        const { error } = await db.from('toppings').insert({ name, price, is_active: isActive });
+        if (error) throw error;
+        showToast('Topping berhasil ditambahkan', 'success');
+      }
+      closeModal('modal-topping');
+      this.loadToppings();
+    } catch (e) {
+      showToast('Gagal: ' + e.message, 'error');
+    }
+  },
+
+  async deleteTopping(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus "${name}"?`,
+      message:     'Topping ini akan dihapus dari semua produk yang menggunakannya.',
+      confirmText: 'Ya, Hapus',
+      danger:      true
+    });
+    if (!ok) return;
+    const { error } = await db.from('toppings').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('Topping dihapus', 'success');
+    this.loadToppings();
+  },
+
+  async toggleToppingActive(id, currentActive) {
+    const { error } = await db.from('toppings').update({ is_active: !currentActive }).eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast(currentActive ? 'Topping dinonaktifkan' : 'Topping diaktifkan', 'success');
+    this.loadToppings();
+  },
+
+  async loadToppingMapping(productId) {
+    const container = document.getElementById('topping-mapping-list');
+    if (!container) return;
+    if (!productId) {
+      container.innerHTML = '<div class="empty-state py-6"><div class="empty-title text-sm">Pilih produk di atas</div></div>';
+      return;
+    }
+    container.innerHTML = '<div class="text-center p-4 text-muted text-sm">Memuat...</div>';
+
+    const [toppingRes, mappingRes] = await Promise.all([
+      db.from('toppings').select('id, name, price, is_active').eq('is_active', true).order('name'),
+      db.from('product_toppings').select('topping_id').eq('product_id', Number(productId))
+    ]);
+
+    const toppings  = toppingRes.data || [];
+    const mapped    = new Set((mappingRes.data || []).map(r => r.topping_id));
+
+    if (!toppings.length) {
+      container.innerHTML = '<div class="empty-state py-6"><div class="empty-title text-sm">Belum ada topping aktif. Tambah topping terlebih dahulu.</div></div>';
+      return;
+    }
+
+    container.innerHTML = toppings.map(t => `
+      <label class="flex items-center gap-3 p-3 rounded cursor-pointer" style="border:1px solid var(--border);background:var(--bg-alt);user-select:none" onchange="ADMIN._onToppingMappingChange(${productId}, ${t.id}, this.querySelector('input').checked)">
+        <input type="checkbox" ${mapped.has(t.id) ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--primary);flex-shrink:0" />
+        <div class="flex-1">
+          <div class="fw-600 text-sm">${escHtml(t.name)}</div>
+          <div class="text-xs text-muted">${t.price > 0 ? '+' + fRp(t.price) : 'Gratis'}</div>
+        </div>
+      </label>`).join('');
+  },
+
+  async _onToppingMappingChange(productId, toppingId, checked) {
+    try {
+      if (checked) {
+        const { error } = await db.from('product_toppings').upsert(
+          { product_id: productId, topping_id: toppingId },
+          { onConflict: 'product_id,topping_id', ignoreDuplicates: true }
+        );
+        if (error) throw error;
+      } else {
+        const { error } = await db.from('product_toppings').delete()
+          .eq('product_id', productId).eq('topping_id', toppingId);
+        if (error) throw error;
+      }
+    } catch (e) {
+      showToast('Gagal menyimpan mapping: ' + e.message, 'error');
+      // Revert checkbox
+      this.loadToppingMapping(productId);
+    }
+  },
+
+  // ── API Keys ─────────────────────────────────────────────────
+  async loadApiKeysSection() {
+    // Fill endpoint display
+    const epEl   = document.getElementById('api-endpoint-display');
+    const codeEl = document.getElementById('api-code-example');
+    const supaUrl = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '') ||
+                    (typeof db?._url !== 'undefined' ? db._url : '') ||
+                    '<SUPABASE_URL>';
+    const supaKey = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') || '<SUPABASE_ANON_KEY>';
+
+    if (epEl)   epEl.textContent   = `${supaUrl}/rest/v1/rpc/get_transactions_api`;
+    if (codeEl) codeEl.textContent = `fetch('${supaUrl}/rest/v1/rpc/get_transactions_api', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'apikey': '${supaKey}'\n  },\n  body: JSON.stringify({\n    p_api_key: 'YOUR_API_KEY_HERE',\n    p_from: '2025-01-01T00:00:00Z',\n    p_to:   '2025-12-31T23:59:59Z'\n  })\n})`;
+
+    await this.loadApiKeys();
+  },
+
+  async loadApiKeys() {
+    const tbody = document.getElementById('api-keys-list');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-td">Memuat...</td></tr>';
+    const { data, error } = await db.from('api_keys').select('*').order('created_at', { ascending: false });
+    if (error) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}. Pastikan sudah menjalankan schema_toppings_apikeys.sql</td></tr>`;
+      return;
+    }
+    if (!data?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-td">Belum ada API key. Klik "+ Buat API Key Baru".</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(k => `
+      <tr>
+        <td class="fw-600">${escHtml(k.name)}</td>
+        <td>
+          <div class="flex items-center gap-2">
+            <code class="text-xs" style="background:var(--bg-alt);padding:3px 8px;border-radius:6px;border:1px solid var(--border);word-break:break-all;font-family:monospace">${escHtml(k.key_value)}</code>
+            <button class="btn btn-outline btn-sm flex-shrink-0" data-admin-action="copy-api-key" data-key="${escHtml(k.key_value)}" title="Salin">
+              <i data-lucide="copy" style="width:13px;height:13px"></i>
+            </button>
+          </div>
+        </td>
+        <td><span class="badge ${k.is_active ? 'badge-green' : 'badge-red'}">${k.is_active ? 'Aktif' : 'Nonaktif'}</span></td>
+        <td class="text-xs text-muted nowrap">${fDate(k.created_at)}</td>
+        <td>
+          <div class="flex gap-1">
+            <button class="btn btn-sm ${k.is_active ? 'btn-warning' : 'btn-success'}" data-admin-action="toggle-api-key" data-id="${k.id}" data-active="${k.is_active}">${k.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+            <button class="btn btn-danger btn-sm" data-admin-action="delete-api-key" data-id="${k.id}" data-name="${escHtml(k.name)}">Hapus</button>
+          </div>
+        </td>
+      </tr>`).join('');
+    if (window.lucide) lucide.createIcons();
+  },
+
+  openApiKeyModal() {
+    document.getElementById('api-key-name').value = '';
+    openModal('modal-api-key');
+  },
+
+  async confirmGenerateApiKey() {
+    const name = document.getElementById('api-key-name').value.trim();
+    if (!name) { showToast('Nama API key wajib diisi', 'error'); return; }
+
+    // Generate secure random key
+    const arr = new Uint8Array(32);
+    crypto.getRandomValues(arr);
+    const keyValue = 'rbn_' + Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    try {
+      const { error } = await db.from('api_keys').insert({ name, key_value: keyValue, is_active: true });
+      if (error) throw error;
+      closeModal('modal-api-key');
+      showToast('API key berhasil dibuat', 'success');
+      await this.loadApiKeys();
+      // Auto copy to clipboard
+      try {
+        await navigator.clipboard.writeText(keyValue);
+        showToast('Key disalin ke clipboard!', 'success');
+      } catch(e) { /* clipboard not available */ }
+    } catch (e) {
+      showToast('Gagal membuat API key: ' + e.message, 'error');
+    }
+  },
+
+  async deleteApiKey(id, name) {
+    const ok = await showConfirm({
+      title:       `Hapus API key "${name}"?`,
+      message:     'Aplikasi yang menggunakan key ini tidak akan bisa mengakses data lagi.',
+      confirmText: 'Ya, Hapus',
+      danger:      true
+    });
+    if (!ok) return;
+    const { error } = await db.from('api_keys').delete().eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast('API key dihapus', 'success');
+    this.loadApiKeys();
+  },
+
+  async toggleApiKey(id, currentActive) {
+    const { error } = await db.from('api_keys').update({ is_active: !currentActive }).eq('id', id);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    showToast(currentActive ? 'API key dinonaktifkan' : 'API key diaktifkan', 'success');
+    this.loadApiKeys();
+  },
+
+  async copyApiKey(key) {
+    try {
+      await navigator.clipboard.writeText(key);
+      showToast('Key disalin ke clipboard!', 'success');
+    } catch(e) {
+      showToast('Gagal menyalin. Salin manual dari tabel.', 'warning');
+    }
+  },
+};
+
+
+// ── Global helpers ─────────────────────────────────────────────
+// Formatting helpers are provided by js/utils/formatter.js (window.fRp, window.formatRupiah, window.escHtml)
+function setSelect(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+// Alias for backward compat
+function setSelectOptions(id, html) { setSelect(id, html); }
+// Modal/loader helpers are provided by `js/utils/formatter.js` (openModal/closeModal/showLoader/hideLoader)
+// `showToast` provided by js/utils/formatter.js
+
+document.addEventListener('DOMContentLoaded', () => ADMIN.init());
+
+// Global overlay click handler for modals: close when clicking on overlay
+document.addEventListener('click', function(e) {
+  if (!e.target.classList || !e.target.classList.contains('modal-overlay')) return;
+  const lockedModals = ['modal-shift', 'modal-branch'];
+  if (lockedModals.includes(e.target.id)) return;
+  e.target.classList.remove('active');
+});
