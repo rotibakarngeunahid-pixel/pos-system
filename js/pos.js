@@ -1053,7 +1053,7 @@ const POS = {
     if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
     if (tab === 'stock')        this.loadInventorySummary();
     if (tab === 'cash')         this.updateCashSummary();
-    if (tab === 'deposits')     { if (window.depositUi && typeof depositUi.refresh === 'function') depositUi.refresh(); }
+    if (tab === 'deposits')     { if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi); }
     if (tab === 'transactions') this.loadSessionTransactions();
   },
 
@@ -1082,7 +1082,7 @@ const POS = {
       if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
       if (tab === 'stock')        this.loadInventorySummary();
       if (tab === 'cash')         this.updateCashSummary();
-      if (tab === 'deposits')     { if (window.depositUi && typeof depositUi.refresh === 'function') depositUi.refresh(); }
+      if (tab === 'deposits')     { if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi); }
       if (tab === 'transactions') this.loadSessionTransactions();
     }
 

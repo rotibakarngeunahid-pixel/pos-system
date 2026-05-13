@@ -8,13 +8,13 @@ const depositUi = {
   expectedCash: 0,
   selectedFile: null,
   isSubmitting: false,
+  readyRefreshTimer: null,
 
   init() {
     document.addEventListener('DOMContentLoaded', () => {
       try {
         this.bindElements();
-        // If POS already initialized, refresh when user/session ready
-        if (window.POS && POS.user && POS.branch) this.refresh();
+        this.refreshWhenReady();
       } catch (e) {
         console.warn('depositUi.init error', e);
       }
@@ -47,12 +47,26 @@ const depositUi = {
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.refresh());
   },
 
+  refreshWhenReady(attempt = 0) {
+    if (window.POS && POS.user && POS.branch) {
+      this.refresh();
+      return;
+    }
+    if (attempt >= 40) return;
+    clearTimeout(this.readyRefreshTimer);
+    this.readyRefreshTimer = setTimeout(() => this.refreshWhenReady(attempt + 1), 250);
+  },
+
   async refresh() {
     if (!window.POS || !POS.branch) return;
     const branchId = POS.branch.id;
     const sessionId = POS.session?.id || null;
+    if (this.el.accountSelect) {
+      this.el.accountSelect.disabled = true;
+      this.el.accountSelect.innerHTML = '<option value="">Memuat metode...</option>';
+    }
     try {
-      this.accounts = await depositService.getAccounts(branchId);
+      this.accounts = await depositService.getAccounts();
     } catch (e) {
       console.error('getAccounts', e);
       showToast('Gagal memuat metode setoran', 'error');
@@ -98,7 +112,8 @@ const depositUi = {
     }
     const opts = ['<option value="">Pilih metode...</option>'];
     this.accounts.forEach(a => {
-      opts.push(`<option value="${a.id}" data-type="${a.type}">${escHtml(a.label)}</option>`);
+      const detail = a.type === 'bank' && a.account_number ? ` - ${a.account_number}` : '';
+      opts.push(`<option value="${a.id}" data-type="${a.type}">${escHtml(a.label + detail)}</option>`);
     });
     this.el.accountSelect.innerHTML = opts.join('');
     this.el.accountSelect.disabled = false;
