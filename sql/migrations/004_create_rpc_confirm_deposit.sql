@@ -3,9 +3,11 @@
 
 BEGIN;
 
+DROP FUNCTION IF EXISTS public.confirm_deposit(uuid, uuid, text, text);
+
 CREATE OR REPLACE FUNCTION public.confirm_deposit(
   p_deposit_id uuid,
-  p_admin_id uuid,
+  p_admin_id bigint,
   p_action text,
   p_reject_reason text DEFAULT NULL
 ) RETURNS void

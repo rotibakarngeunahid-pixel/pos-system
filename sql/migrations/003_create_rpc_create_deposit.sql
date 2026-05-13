@@ -3,10 +3,12 @@
 
 BEGIN;
 
+DROP FUNCTION IF EXISTS public.create_deposit(bigint, bigint, uuid, uuid, numeric, numeric, text, text);
+
 CREATE OR REPLACE FUNCTION public.create_deposit(
   p_branch_id bigint,
   p_session_id bigint,
-  p_staff_id uuid,
+  p_staff_id bigint,
   p_deposit_account_id uuid,
   p_amount numeric,
   p_cash_balance_at_deposit numeric,

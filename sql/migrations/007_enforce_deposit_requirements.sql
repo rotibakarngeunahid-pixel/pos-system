@@ -54,14 +54,14 @@ CREATE TABLE IF NOT EXISTS public.cash_deposits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   branch_id bigint NOT NULL REFERENCES public.branches(id),
   session_id bigint REFERENCES public.cashier_sessions(id),
-  staff_id uuid NOT NULL REFERENCES public.users(id),
+  staff_id bigint NOT NULL REFERENCES public.users(id),
   deposit_account_id uuid NOT NULL REFERENCES public.deposit_accounts(id),
   amount numeric(15,2) NOT NULL CHECK (amount > 0),
   cash_balance_at_deposit numeric(15,2) NOT NULL,
   proof_url text,
   notes text,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','rejected')),
-  reviewed_by uuid REFERENCES public.users(id),
+  reviewed_by bigint REFERENCES public.users(id),
   reviewed_at timestamptz,
   reject_reason text,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -161,10 +161,12 @@ BEGIN
   END IF;
 END$$;
 
+DROP FUNCTION IF EXISTS public.create_deposit(bigint, bigint, uuid, uuid, numeric, numeric, text, text);
+
 CREATE OR REPLACE FUNCTION public.create_deposit(
   p_branch_id bigint,
   p_session_id bigint,
-  p_staff_id uuid,
+  p_staff_id bigint,
   p_deposit_account_id uuid,
   p_amount numeric,
   p_cash_balance_at_deposit numeric,
@@ -203,9 +205,11 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.confirm_deposit(uuid, uuid, text, text);
+
 CREATE OR REPLACE FUNCTION public.confirm_deposit(
   p_deposit_id uuid,
-  p_admin_id uuid,
+  p_admin_id bigint,
   p_action text,
   p_reject_reason text DEFAULT NULL
 ) RETURNS void
