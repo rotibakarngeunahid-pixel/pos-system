@@ -10,19 +10,27 @@ const depositUi = {
   isSubmitting: false,
   readyRefreshTimer: null,
   accountLoadError: null,
+  didBind: false,
 
   init() {
-    document.addEventListener('DOMContentLoaded', () => {
+    const start = () => {
       try {
         this.bindElements();
         this.refreshWhenReady();
       } catch (e) {
         console.warn('depositUi.init error', e);
       }
-    });
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', start);
+    } else {
+      start();
+    }
   },
 
   bindElements() {
+    if (this.didBind) return;
+    this.didBind = true;
     this.el.panel = document.getElementById('panel-deposits');
     this.el.expectedCashEl = document.getElementById('deposit-expected-cash');
     this.el.amountInput = document.getElementById('deposit-amount');

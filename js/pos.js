@@ -45,6 +45,9 @@ const POS = {
         case 'load-sales-summary': POS.loadSalesSummary(); break;
         case 'load-inventory-summary': POS.loadInventorySummary(); break;
         case 'update-cash-summary': POS.updateCashSummary(); break;
+        case 'refresh-deposits':
+          if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
+          break;
         case 'load-session-transactions': POS.loadSessionTransactions(); break;
         case 'switch-mobile-drawer-tab': POS.switchMobileDrawerTab(btn.dataset.tab, btn); break;
         case 'test-print': POS.testPrint(); break;
