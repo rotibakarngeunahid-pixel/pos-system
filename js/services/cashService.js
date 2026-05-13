@@ -139,10 +139,12 @@ const cashService = {
 
     // Opening cash comes from session record, not logs — fetch separately
     let openingCash = openingIn;
+    let totalSales  = salesIn; // fallback: cash-only when no session
     if (sessionId) {
       const { data: sess } = await db.from('cashier_sessions')
-        .select('opening_cash').eq('id', sessionId).maybeSingle();
+        .select('opening_cash, total_sales').eq('id', sessionId).maybeSingle();
       openingCash = parseFloat(sess?.opening_cash || 0);
+      totalSales  = parseFloat(sess?.total_sales  || 0);
     }
 
     // BUG 2A FIX: voidOut is now included in expectedCash and totalOut
@@ -151,6 +153,8 @@ const cashService = {
     return {
       openingCash,
       salesIn,
+      cashSalesIn: salesIn,
+      totalSales,
       manualIn,
       manualOut,
       refundOut,

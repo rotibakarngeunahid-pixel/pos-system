@@ -4,9 +4,11 @@ const reportService = {
 
   // ── Sales Report ──────────────────────────────────────────────
   async getSalesReport({ branchId, dateFrom, dateTo, paymentMethod, staffId }) {
+    // Fetch ALL transactions for the range without a status filter at DB level,
+    // so the UI can show both completed and void rows and surface accurate
+    // void stats — all in one round-trip.
     let q = db.from('transactions')
       .select('id, created_at, total, subtotal, discount_amount, tax_amount, payment_method, status, branches(name), users!staff_id(name)')
-      .eq('status', 'completed')
       .gte('created_at', dateFrom + 'T00:00:00')
       .lte('created_at', dateTo + 'T23:59:59')
       .order('created_at', { ascending: false });
@@ -17,22 +19,32 @@ const reportService = {
     const { data, error } = await q;
     if (error) throw error;
 
-    const transactions = data || [];
+    const all = data || [];
+
+    // transactions table only has `status` as void indicator.
+    const isVoided = t => t.status === 'void' || t.status === 'voided';
+
+    const completed = all.filter(t => !isVoided(t) && t.status === 'completed');
+    const voided    = all.filter(t => isVoided(t));
+
     return {
-      transactions,
-      totalRevenue:  transactions.reduce((s, t) => s + parseFloat(t.total || 0), 0),
-      totalDiscount: transactions.reduce((s, t) => s + parseFloat(t.discount_amount || 0), 0),
-      count:         transactions.length
+      transactions:       completed,
+      voidedTransactions: voided,
+      totalRevenue:  completed.reduce((s, t) => s + parseFloat(t.total || 0), 0),
+      totalDiscount: completed.reduce((s, t) => s + parseFloat(t.discount_amount || 0), 0),
+      count:         completed.length,
+      voidCount:     voided.length,
+      voidAmount:    voided.reduce((s, t) => s + parseFloat(t.total || 0), 0)
     };
   },
 
   // ── Product Performance ───────────────────────────────────────
-  // BUG 5E FIX: replaced two-step query (fetch IDs then .in()) with a single
-  // join query from transaction_items → transactions using !inner join.
-  // This avoids URL length limit issues with thousands of transaction IDs.
+  // BUG 5E FIX: uses a single !inner join query (avoids URL length limits
+  // from thousands of transaction IDs in a two-step .in() approach).
+  // VOID FIX: apply JS-level status guard so that void transactions are
+  // excluded even if the PostgREST dot-notation filter on the joined table
+  // is unreliable in some versions.
   async getProductPerformance({ branchId, dateFrom, dateTo, paymentMethod, staffId }) {
-    // Build query directly on transaction_items with an !inner join to transactions
-    // so we can filter by date, status, branch, etc. in one round-trip.
     let q = db.from('transaction_items')
       .select(`
         product_name, variant_name, quantity, subtotal, price,
@@ -54,6 +66,11 @@ const reportService = {
 
     const map = {};
     for (const i of items) {
+      const tx = i.transactions;
+      // JS-level guard: skip non-completed rows even if PostgREST dot-notation
+      // filter on the joined table didn't apply correctly in some versions.
+      if (!tx || tx.status !== 'completed') continue;
+
       const key = `${i.product_name}||${i.variant_name}`;
       if (!map[key]) map[key] = {
         product: i.product_name,

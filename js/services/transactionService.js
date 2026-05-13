@@ -166,16 +166,23 @@ const transactionService = {
 
     if (error) throw new Error(error.message);
 
-    // Otomatis membatalkan log kas yang terkait dengan penjualan ini
-    await db.from('cash_logs')
+    // Mark related cash_logs as void. This is a best-effort update — if it
+    // fails (e.g. network drop after the RPC succeeded), the transaction is
+    // still void in the DB; only the cash summary may be temporarily off
+    // until the next session reconciliation or a manual DB fix.
+    const { error: clErr } = await db.from('cash_logs')
       .update({
-        is_void: true,
+        is_void:    true,
         void_reason: reason.trim(),
-        voided_by: userId,
-        voided_at: new Date().toISOString()
+        voided_by:  userId,
+        voided_at:  new Date().toISOString()
       })
       .eq('reference_type', 'sale')
       .eq('reference_id', transactionId);
+
+    if (clErr) {
+      console.error('voidTransaction: cash_logs update failed — summary may be inaccurate until reconciled:', clErr);
+    }
 
     return { transactionId, status: data?.status || 'void' };
   }

@@ -45,7 +45,7 @@
         <img src="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" alt="Logo Roti Bakar Ngeunah" />
       </div>
       <div class="login-brand-name">Roti Bakar Ngeunah</div>
-      <div class="login-brand-tagline">Point of Sale System</div>
+        <div class="login-brand-tagline">Sistem Point of Sale</div>
     </div>
 
     <div id="db-status"></div>
@@ -62,7 +62,7 @@
             id="input-name"
             type="text"
             class="form-control"
-            placeholder="Masukkan username"
+              placeholder="Masukkan Username"
             autocomplete="username"
             required
           />
@@ -75,7 +75,7 @@
               id="input-password"
               type="password"
               class="form-control"
-              placeholder="Masukkan password"
+                placeholder="Masukkan Password"
               autocomplete="current-password"
               required
             />
@@ -98,132 +98,138 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/supabaseclient.js"></script>
+  <!-- 1. Lucide -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <!-- 2. Supabase CDN — HARUS selesai sebelum supabaseClient.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- 3. File lokal — berurutan, synchronous -->
+  <script src="js/supabaseClient.js"></script>
   <script src="js/auth.js"></script>
+  <!-- 4. Inline logic — window.load menunggu SEMUA script di atas selesai -->
   <script>
-    // ── Redirect if already logged in ──
-    (function() {
+    window.addEventListener('load', function () {
+
+      // Init Lucide icons
+      if (window.lucide) lucide.createIcons();
+
+      // Redirect jika sudah login
       const s = auth.getSession();
       if (s) {
         window.location.href = s.role === 'admin' ? 'admin.html' : 'pos.html';
+        return;
       }
-    })();
 
-    // ── DB Connection Test (runs on load) ──────────────────
-    async function testDbConnection() {
-      const statusEl = document.getElementById('db-status');
-      try {
-        // Use regular SELECT (not HEAD) — more reliable across all Supabase versions
-        const { data, error } = await db
-          .from('users')
-          .select('id')
-          .limit(1);
+      // DB Connection Test
+      async function testDbConnection() {
+        const statusEl = document.getElementById('db-status');
 
-        if (error) {
-          const msg    = (error.message || '').toLowerCase();
-          const code   = String(error.code   || '');
-          const status = Number(error.status || 0);
-          console.error('[RBN] DB test error:', error);
-
-          // 401 / 403 = tabel ada tapi GRANT belum diberikan ke anon role
-          if (status === 401 || status === 403 || code === '42501' || msg.includes('permission denied')) {
-            statusEl.className = 'fail';
-            statusEl.innerHTML =
-                '❌ <strong>Permission ditolak (401).</strong> Tabel ada tapi anon key tidak bisa mengakses.<br><br>' +
-                  '<strong>Solusi — jalankan SQL ini di Supabase SQL Editor:</strong><br>' +
-                  '<code class="db-help-code">' +
-                  'GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;<br>' +
-                  'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;<br>' +
-                  'GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated;' +
-                  '</code>';
-
-          // 42P01 = tabel tidak ada → schema.sql belum dijalankan
-          } else if (code === '42P01' || msg.includes('does not exist') || msg.includes('relation')) {
-            statusEl.className = 'fail';
-            statusEl.innerHTML =
-              '❌ <strong>Tabel belum dibuat!</strong><br>' +
-              'Buka <strong>Supabase Dashboard → SQL Editor</strong>, paste seluruh isi file ' +
-              '<code>schema.sql</code>, lalu klik <strong>Run</strong>.';
-
-          // JWT salah
-          } else if (msg.includes('jwt') || msg.includes('invalid key')) {
-            statusEl.className = 'fail';
-            statusEl.innerHTML =
-              '❌ <strong>API Key tidak valid!</strong><br>' +
-              'Periksa <code>SUPABASE_KEY</code> di <code>js/supabaseClient.js</code>.';
-
-          } else {
-            statusEl.className = 'warn';
-            statusEl.innerHTML =
-              '⚠️ <strong>Error:</strong> status=' + status + ' code=' + code +
-              ' msg=<code>' + (error.message || '(kosong)') + '</code><br>' +
-              'Screenshot ini dan kirimkan ke developer.';
-          }
+        if (typeof db === 'undefined' || typeof window.supabase === 'undefined') {
+          statusEl.className = 'fail';
+          statusEl.innerHTML =
+            '❌ <strong>supabaseClient.js gagal di-load.</strong><br>' +
+            'Pastikan file <code>js/supabaseClient.js</code> ada dan path-nya benar.';
           return;
         }
 
-        // Sukses (data array, termasuk array kosong [] = OK)
-        statusEl.classList.add('hidden');
-        console.log('[RBN] DB connection OK, rows:', data?.length ?? 0);
+        try {
+          const { data, error } = await db.from('users').select('id').limit(1);
 
-      } catch (e) {
-        console.error('[RBN] Fetch error:', e);
-        statusEl.className = 'fail';
-        statusEl.innerHTML =
-          '❌ <strong>Tidak bisa terhubung ke Supabase.</strong><br>' +
-          'Periksa koneksi internet Anda. Error: <code>' + (e.message || e) + '</code>';
+          if (error) {
+            const msg    = (error.message || '').toLowerCase();
+            const code   = String(error.code || '');
+            const status = Number(error.status || 0);
+            console.error('[RBN] DB test error:', error);
+
+            if (status === 401 || status === 403 || code === '42501' || msg.includes('permission denied')) {
+              statusEl.className = 'fail';
+              statusEl.innerHTML =
+                '❌ <strong>Permission ditolak (401).</strong> Tabel ada tapi anon key tidak bisa mengakses.<br><br>' +
+                '<strong>Solusi — jalankan SQL ini di Supabase SQL Editor:</strong><br>' +
+                '<code>' +
+                'GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;<br>' +
+                'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;<br>' +
+                'GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated;' +
+                '</code>';
+            } else if (code === '42P01' || msg.includes('does not exist') || msg.includes('relation')) {
+              statusEl.className = 'fail';
+              statusEl.innerHTML =
+                '❌ <strong>Tabel belum dibuat!</strong><br>' +
+                'Buka <strong>Supabase Dashboard → SQL Editor</strong>, paste seluruh isi file ' +
+                '<code>schema.sql</code>, lalu klik <strong>Run</strong>.';
+            } else if (msg.includes('jwt') || msg.includes('invalid key')) {
+              statusEl.className = 'fail';
+              statusEl.innerHTML =
+                '❌ <strong>API Key tidak valid!</strong><br>' +
+                'Periksa <code>SUPABASE_KEY</code> di <code>js/supabaseClient.js</code>.';
+            } else {
+              statusEl.className = 'warn';
+              statusEl.innerHTML =
+                '⚠️ <strong>Error:</strong> status=' + status + ' code=' + code +
+                ' msg=<code>' + (error.message || '(kosong)') + '</code><br>' +
+                'Screenshot ini dan kirimkan ke developer.';
+            }
+            return;
+          }
+
+          statusEl.classList.add('hidden');
+          console.log('[RBN] DB connection OK, rows:', data?.length ?? 0);
+
+        } catch (e) {
+          console.error('[RBN] Fetch error:', e);
+          statusEl.className = 'fail';
+          statusEl.innerHTML =
+            '❌ <strong>Tidak bisa terhubung ke Supabase.</strong><br>' +
+            'Periksa koneksi internet Anda. Error: <code>' + (e.message || e) + '</code>';
+        }
       }
-    }
 
-    testDbConnection();
+      testDbConnection();
 
-    // Toggle password visibility (lucide icons)
-    document.getElementById('toggle-pw').addEventListener('click', function() {
-      const inp = document.getElementById('input-password');
-      const show = inp.type === 'password';
-      inp.type = show ? 'text' : 'password';
-      const showIcon = this.querySelector('.toggle-pw-show');
-      const hideIcon = this.querySelector('.toggle-pw-hide');
-      if (showIcon && hideIcon) {
-        showIcon.classList.toggle('hidden', !show);
-        hideIcon.classList.toggle('hidden', show);
-      }
-    });
+      // Toggle password visibility
+      document.getElementById('toggle-pw').addEventListener('click', function () {
+        const inp = document.getElementById('input-password');
+        const show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        const showIcon = this.querySelector('.toggle-pw-show');
+        const hideIcon = this.querySelector('.toggle-pw-hide');
+        if (showIcon && hideIcon) {
+          showIcon.classList.toggle('hidden', !show);
+          hideIcon.classList.toggle('hidden', show);
+        }
+        if (window.lucide) lucide.createIcons();
+      });
 
-    // Login form
-    document.getElementById('login-form').addEventListener('submit', async function(e) {
-      e.preventDefault();
-      const name     = document.getElementById('input-name').value;
-      const password = document.getElementById('input-password').value;
-      const btn      = document.getElementById('login-btn');
-      const btnText  = document.getElementById('login-btn-text');
-      const spinner  = document.getElementById('login-btn-spinner');
-      const errorEl  = document.getElementById('login-error');
+      // Login form
+      document.getElementById('login-form').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const name     = document.getElementById('input-name').value;
+        const password = document.getElementById('input-password').value;
+        const btn      = document.getElementById('login-btn');
+        const btnText  = document.getElementById('login-btn-text');
+        const spinner  = document.getElementById('login-btn-spinner');
+        const errorEl  = document.getElementById('login-error');
 
-      errorEl.classList.remove('show');
-      btn.disabled = true;
-      btnText.textContent = 'Masuk...';
-      spinner.classList.remove('hidden');
+        errorEl.classList.remove('show');
+        btn.disabled = true;
+        btnText.textContent = 'Masuk...';
+        spinner.classList.remove('hidden');
 
-      try {
-        const user = await auth.login(name, password);
-        btnText.textContent = 'Berhasil!';
-        setTimeout(() => {
-          window.location.href = user.role === 'admin' ? 'admin.html' : 'pos.html';
-        }, 400);
-      } catch(err) {
-        errorEl.textContent = err.message;
-        errorEl.classList.add('show');
-        btn.disabled = false;
-        btnText.textContent = 'Masuk';
-        spinner.classList.add('hidden');
-      }
-    });
+        try {
+          const user = await auth.login(name, password);
+          btnText.textContent = 'Berhasil!';
+          setTimeout(() => {
+            window.location.href = user.role === 'admin' ? 'admin.html' : 'pos.html';
+          }, 400);
+        } catch (err) {
+          errorEl.textContent = err.message;
+          errorEl.classList.add('show');
+          btn.disabled = false;
+          btnText.textContent = 'Masuk';
+          spinner.classList.add('hidden');
+        }
+      });
+
+    }); // end window.load
   </script>
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>
-
-<!-- fix -->

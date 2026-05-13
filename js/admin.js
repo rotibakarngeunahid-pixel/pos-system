@@ -11,6 +11,7 @@ const ADMIN = {
   currentSection: 'dashboard',
   currentReportTab: 'sales',
   _bulkImportData: null,  // parsed rows waiting for confirmation
+  _allProducts:    [],    // cache for client-side product search/filter
 
   // ── Init ─────────────────────────────────────────────────────
   async init() {
@@ -118,15 +119,34 @@ const ADMIN = {
         case 'toggle-inventory-modal-type': this.toggleInventoryModalType(); break;
         case 'import-menu-file': this.handleImportMenuFile(node); break;
         case 'load-topping-mapping': this.loadToppingMapping(node.value); break;
+        case 'toggle-report-void': this.runReport(this.currentReportTab || 'sales'); break;
       }
     });
     document.addEventListener('input', (e) => {
       const node = e.target.closest('[data-admin-input]');
-      if (!node) return;
-      const action = node.dataset.adminInput;
-      if (action === 'preview-image-url') this.previewImageUrl(node.value);
-      else if (action === 'update-pending-variant') this.updatePendingVariant(Number(node.dataset.index), node.dataset.field, node.value);
+      if (node) {
+        const action = node.dataset.adminInput;
+        if (action === 'preview-image-url') this.previewImageUrl(node.value);
+        else if (action === 'update-pending-variant') this.updatePendingVariant(Number(node.dataset.index), node.dataset.field, node.value);
+      }
+      // Product search (debounced)
+      if (e.target.id === 'product-search-input') {
+        clearTimeout(this._productSearchTimer);
+        this._productSearchTimer = setTimeout(() => ADMIN._renderProductGrid(), 200);
+      }
     });
+
+    // Product category filter change
+    document.addEventListener('change', (e) => {
+      if (e.target.id === 'product-category-filter') ADMIN._renderProductGrid();
+      if (e.target.name === 'product-type') {
+        const isSimple = e.target.value === 'simple';
+        const simpleSec  = document.getElementById('product-simple-price-section');
+        const variantSec = document.getElementById('product-variant-section');
+        if (simpleSec)  simpleSec.style.display  = isSimple ? '' : 'none';
+        if (variantSec) variantSec.style.display  = isSimple ? 'none' : '';
+      }
+    }, true);
 
     document.getElementById('sidebar-user-name').textContent = this.user.name;
     const avatarEl = document.getElementById('sidebar-user-avatar');
@@ -249,6 +269,11 @@ const ADMIN = {
     btn.classList.add('active');
     document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
     document.getElementById(`section-${section}`).classList.add('active');
+
+    // Sync bottom nav active state
+    document.querySelectorAll('.admin-bottom-tab[data-section]').forEach(t => t.classList.remove('active'));
+    const abnTab = document.querySelector(`.admin-bottom-tab[data-section="${section}"]`);
+    if (abnTab) abnTab.classList.add('active');
 
     const titles = {
       dashboard:   'Dashboard',         branches:     'Manajemen Cabang',
@@ -627,30 +652,69 @@ const ADMIN = {
 
   // ── Products ─────────────────────────────────────────────────
   async loadProducts() {
-    const { data } = await db.from('products').select('*').order('created_at', { ascending:false });
+    const { data } = await db.from('products')
+      .select('*, product_variants(id, name, price)')
+      .order('created_at', { ascending: false });
+
+    this._allProducts = data || [];
+
+    // Populate category filter
+    const cats = [...new Set((data || []).map(p => p.category).filter(Boolean))].sort();
+    const catSel = document.getElementById('product-category-filter');
+    if (catSel) {
+      catSel.innerHTML = '<option value="">Semua Kategori</option>'
+        + cats.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+    }
+
+    this._renderProductGrid();
+    if (window.lucide) lucide.createIcons();
+  },
+
+  _renderProductGrid() {
     const container = document.getElementById('products-grid-container');
     if (!container) return;
-    container.innerHTML = data?.length
-      ? `<div class="product-admin-grid">${data.map(p => `
-          <div class="product-admin-card">
-            <div class="product-admin-img">
-              ${p.image_url ? `<img loading="lazy" src="${escHtml(p.image_url)}" alt="${escHtml(p.name)}" class="img-cover" onerror="this.outerHTML='<div class=&quot;product-img-placeholder&quot;><i data-lucide=&quot;package&quot; class=&quot;icon-xl&quot;></i></div>'; if(window.lucide) lucide.createIcons();" />` : '<i data-lucide="package" class="icon-xl"></i>'}
-            </div>
-            <div class="product-admin-body">
-              <div class="product-admin-name">${escHtml(p.name)}</div>
-              ${p.category ? `<span class="badge badge-orange mt-1">${escHtml(p.category)}</span>` : ''}
-            </div>
-            <div class="product-admin-footer">
-              <button class="btn btn-outline btn-sm" data-admin-action="open-product-modal" data-id="${p.id}">Edit</button>
-              <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-product" data-id="${p.id}" data-name="${escHtml(p.name)}">Hapus</button>
-            </div>
-          </div>`).join('')}</div>`
-      : `<div class="empty-state">
-          <div class="empty-icon"><i data-lucide="package-2" class="icon"></i></div>
-          <div class="empty-title">Belum ada produk</div>
-          <div class="empty-desc">Tambahkan produk pertama untuk mulai berjualan</div>
-          <div class="empty-cta"><button class="btn btn-primary" data-admin-action="open-product-modal">+ Tambah Produk</button></div>
-        </div>`;
+
+    const query   = (document.getElementById('product-search-input')?.value || '').toLowerCase().trim();
+    const catFilt = document.getElementById('product-category-filter')?.value || '';
+
+    const filtered = this._allProducts.filter(p => {
+      const matchName = !query || p.name.toLowerCase().includes(query);
+      const matchCat  = !catFilt || p.category === catFilt;
+      return matchName && matchCat;
+    });
+
+    if (!filtered.length) {
+      container.innerHTML = `<div class="empty-state">
+        <div class="empty-icon"><i data-lucide="search-x" class="icon"></i></div>
+        <div class="empty-title">${query ? `Produk "${escHtml(query)}" tidak ditemukan` : 'Belum ada produk'}</div>
+        ${!query ? '<div class="empty-desc">Tambahkan produk pertama untuk mulai berjualan</div>' : ''}
+      </div>`;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = `<div class="product-admin-grid">${filtered.map(p => {
+      const variantCount = p.product_variants?.length || 0;
+      const isSimple = p.has_variants === false;
+      const priceLine = isSimple
+        ? `<div class="text-xs text-muted mt-1">Harga: ${fRp ? fRp(p.default_price || 0) : (p.default_price || 0).toLocaleString('id-ID', {style:'currency',currency:'IDR',maximumFractionDigits:0})}</div>`
+        : `<div class="text-xs text-muted mt-1">${variantCount} varian</div>`;
+      return `<div class="product-admin-card">
+        <div class="product-admin-img">
+          ${p.image_url ? `<img loading="lazy" src="${escHtml(p.image_url)}" alt="${escHtml(p.name)}" class="img-cover" onerror="this.outerHTML='<div class=&quot;product-img-placeholder&quot;><i data-lucide=&quot;package&quot; class=&quot;icon-xl&quot;></i></div>'; if(window.lucide) lucide.createIcons();" />` : '<i data-lucide="package" class="icon-xl"></i>'}
+        </div>
+        <div class="product-admin-body">
+          <div class="product-admin-name">${escHtml(p.name)}</div>
+          ${p.category ? `<span class="badge badge-orange mt-1">${escHtml(p.category)}</span>` : ''}
+          ${priceLine}
+        </div>
+        <div class="product-admin-footer">
+          <button class="btn btn-outline btn-sm" data-admin-action="open-product-modal" data-id="${p.id}">Edit</button>
+          <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-product" data-id="${p.id}" data-name="${escHtml(p.name)}">Hapus</button>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+
     if (window.lucide) lucide.createIcons();
   },
 
@@ -688,8 +752,13 @@ const ADMIN = {
     let   imageUrl  = document.getElementById('product-image-url').value.trim();
     if (!name) { showToast('Nama produk wajib diisi', 'error'); return; }
 
-    // For new products: validate pending variants (at least 1 required)
-    if (!id) {
+    const isSimple     = document.querySelector('input[name="product-type"]:checked')?.value === 'simple';
+    const defaultPrice = isSimple ? (parseFloat(document.getElementById('product-default-price').value) || 0) : null;
+
+    if (isSimple && defaultPrice < 0) { showToast('Harga tidak boleh negatif', 'error'); return; }
+
+    // For new variant products: validate pending variants (at least 1 required)
+    if (!id && !isSimple) {
       const valid = this._pendingVariants.filter(v => v.name?.trim() && v.price !== '' && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0);
       if (!valid.length) { showToast('Tambahkan minimal 1 varian dengan nama dan harga', 'error'); return; }
     }
@@ -704,7 +773,7 @@ const ADMIN = {
       }
     }
 
-    const payload = { name, category, image_url: imageUrl || null };
+    const payload = { name, category, image_url: imageUrl || null, has_variants: !isSimple, default_price: isSimple ? defaultPrice : null };
     let savedId = parseInt(id) || null;
 
     if (id) {
@@ -718,15 +787,23 @@ const ADMIN = {
       document.getElementById('product-id').value = savedId;
       document.getElementById('product-modal-title').textContent = 'Edit Produk';
 
-      // Bulk insert pending variants
-      const variantRows = this._pendingVariants
-        .filter(v => v.name?.trim() && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0)
-        .map(v => ({ product_id: savedId, name: v.name.trim(), price: parseFloat(v.price) }));
-      if (variantRows.length) {
-        const { error: vErr } = await db.from('product_variants').insert(variantRows);
-        if (vErr) { showToast('Produk tersimpan, tapi gagal menyimpan varian: ' + vErr.message, 'warning'); }
+      if (isSimple) {
+        // Insert single hidden variant so RPC process_transaction stays compatible
+        const { error: vErr } = await db.from('product_variants').insert({
+          product_id: savedId, name, price: defaultPrice, is_default: true
+        });
+        if (vErr) showToast('Produk tersimpan, varian default gagal: ' + vErr.message, 'warning');
+      } else {
+        // Bulk insert pending variants
+        const variantRows = this._pendingVariants
+          .filter(v => v.name?.trim() && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0)
+          .map(v => ({ product_id: savedId, name: v.name.trim(), price: parseFloat(v.price) }));
+        if (variantRows.length) {
+          const { error: vErr } = await db.from('product_variants').insert(variantRows);
+          if (vErr) { showToast('Produk tersimpan, tapi gagal menyimpan varian: ' + vErr.message, 'warning'); }
+        }
+        this._pendingVariants = [];
       }
-      this._pendingVariants = [];
     }
 
     // Sync branch_products
@@ -1111,8 +1188,9 @@ const ADMIN = {
     const invMap = {};
     (inv||[]).forEach(i => { if (i.ingredients) invMap[i.ingredients.id] = i; });
 
-    grid.innerHTML = this.ingredients.length
-      ? this.ingredients.map(ing => {
+    const ingredientsInBranch = this.ingredients.filter(ing => invMap[ing.id] !== undefined);
+    grid.innerHTML = ingredientsInBranch.length
+      ? ingredientsInBranch.map(ing => {
           const record  = invMap[ing.id];
           const stock   = record ? parseFloat(record.stock) : 0;
           const level   = stock < 5 ? 'low' : 'good';
@@ -1127,7 +1205,7 @@ const ADMIN = {
             </div>
           </div>`;
         }).join('')
-      : '<div class="empty-state"><div class="empty-icon"><i data-lucide="package" class="icon"></i></div><div class="empty-title">Belum ada bahan</div></div>';
+      : '<div class="empty-state"><div class="empty-icon"><i data-lucide="package" class="icon"></i></div><div class="empty-title">Belum ada bahan di cabang ini</div></div>';
   },
 
   openInventoryModal(type = 'stock_in') {
@@ -1162,7 +1240,7 @@ const ADMIN = {
     try {
       if (type === 'transfer') {
         const toBranchId = document.getElementById('inv-transfer-to').value;
-        if (!toBranchId || toBranchId === branchId) { showToast('Pilih cabang tujuan yang berbeda', 'error'); return; }
+        if (!toBranchId || parseInt(toBranchId, 10) === parseInt(branchId, 10)) { showToast('Pilih cabang tujuan yang berbeda', 'error'); return; }
         await inventoryService.transferStock({
           fromBranchId: parseInt(branchId), toBranchId: parseInt(toBranchId),
           ingredientId: parseInt(ingredientId), qty, notes, userId: this.user.id
@@ -1176,6 +1254,7 @@ const ADMIN = {
       }
       showToast('Stok berhasil diperbarui', 'success');
       this.closeModal('modal-inventory');
+      await this.loadMasterData();
       this.loadInventory();
     } catch (e) {
       showToast('Gagal: ' + e.message, 'error');
@@ -1419,23 +1498,49 @@ const ADMIN = {
     try {
       if (tab === 'sales') {
         const el = document.getElementById('report-sales-body');
-        el.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat...</td></tr>';
+        el.innerHTML = '<tr><td colspan="8" class="empty-td">Memuat...</td></tr>';
         const data = await reportService.getSalesReport({ branchId, dateFrom, dateTo, paymentMethod, staffId });
+
+        // Summary cards — only completed transactions
         document.getElementById('report-stat-revenue').textContent     = fRp(data.totalRevenue);
         document.getElementById('report-stat-discount').textContent    = fRp(data.totalDiscount);
         document.getElementById('report-stat-count').textContent       = data.count;
-        el.innerHTML = data.transactions.length
-          ? data.transactions.map((t, i) => `
-              <tr>
-                <td>${i+1}</td>
+
+        // Void info banner
+        const voidInfoEl = document.getElementById('report-void-info');
+        if (data.voidCount > 0) {
+          voidInfoEl.style.display = 'block';
+          voidInfoEl.textContent   = `⚠️  ${data.voidCount} transaksi void (${fRp(data.voidAmount)}) dikecualikan dari total penjualan`;
+        } else {
+          voidInfoEl.style.display = 'none';
+        }
+
+        // Table — show completed always; append voided rows when toggle is on
+        const showVoid = document.getElementById('report-show-void')?.checked;
+        const displayTx = showVoid
+          ? [...data.transactions, ...data.voidedTransactions]
+          : data.transactions;
+
+        const isVoided = t => t.status === 'void' || t.status === 'voided';
+
+        el.innerHTML = displayTx.length
+          ? displayTx.map((t, i) => {
+              const voided = isVoided(t);
+              const statusBadge = voided
+                ? '<span class="badge badge-danger">VOID</span>'
+                : '<span class="badge badge-green">Selesai</span>';
+              return `<tr style="${voided ? 'opacity:0.55' : ''}">
+                <td>${i + 1}</td>
                 <td>${fDate(t.created_at)}</td>
-                <td>${escHtml(t.branches?.name||'—')}</td>
-                <td>${escHtml(t.users?.name||'—')}</td>
-                <td>${t.payment_method||'cash'}</td>
+                <td>${escHtml(t.branches?.name || '—')}</td>
+                <td>${escHtml(t.users?.name || '—')}</td>
+                <td>${t.payment_method || 'cash'}</td>
                 <td>${t.discount_amount > 0 ? fRp(t.discount_amount) : '—'}</td>
-                <td class="fw-700">${fRp(t.total)}</td>
-              </tr>`).join('')
-          : '<tr><td colspan="7" class="empty-td">Tidak ada data</td></tr>';
+                <td>${statusBadge}</td>
+                <td class="fw-700${voided ? ' text-muted' : ''}">${fRp(t.total)}</td>
+              </tr>`;
+            }).join('')
+          : '<tr><td colspan="8" class="empty-td">Tidak ada data</td></tr>';
 
       } else if (tab === 'products') {
         const el = document.getElementById('report-products-body');
@@ -1738,6 +1843,18 @@ const ADMIN = {
       </label>
     `).join('') || '<div class="text-sm text-muted">Belum ada cabang</div>';
 
+    // Reset product type toggle to default (variant)
+    const radioVariant = document.getElementById('product-type-variant');
+    const radioSimple  = document.getElementById('product-type-simple');
+    const simpleSec    = document.getElementById('product-simple-price-section');
+    const variantSec   = document.getElementById('product-variant-section');
+    if (radioVariant) radioVariant.checked = true;
+    if (radioSimple)  radioSimple.checked  = false;
+    if (simpleSec)    simpleSec.style.display  = 'none';
+    if (variantSec)   variantSec.style.display  = '';
+    const defPriceEl = document.getElementById('product-default-price');
+    if (defPriceEl) defPriceEl.value = '';
+
     if (id) {
       const p = this.products.find(x => x.id === id) || {};
       document.getElementById('product-name').value     = p.name     || '';
@@ -1750,6 +1867,15 @@ const ADMIN = {
         img.style.display = 'block';
         document.getElementById('upload-placeholder').style.display = 'none';
       }
+
+      // Set simple/variant toggle based on product data
+      const isSimple = p.has_variants === false;
+      if (radioSimple)  radioSimple.checked  = isSimple;
+      if (radioVariant) radioVariant.checked = !isSimple;
+      if (simpleSec)    simpleSec.style.display  = isSimple ? '' : 'none';
+      if (variantSec)   variantSec.style.display  = isSimple ? 'none' : '';
+      if (isSimple && defPriceEl) defPriceEl.value = p.default_price || 0;
+
       await this.loadProductModalVariants(id);
     } else {
       // New product: start with one empty pending variant row

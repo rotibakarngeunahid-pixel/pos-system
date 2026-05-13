@@ -13,6 +13,22 @@
   <meta name="apple-mobile-web-app-title" content="RBN POS" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="stylesheet" href="css/styles.css" />
+  <script>
+    /* Fix: Viewport height correction for Android nav bar
+       dvh/vh pada Android Chrome sering TIDAK mengecualikan navigation bar,
+       sehingga tombol bawah tenggelam. window.innerHeight selalu akurat. */
+    (function () {
+      function setVh() {
+        document.documentElement.style.setProperty('--vh100', window.innerHeight + 'px');
+      }
+      setVh();
+      window.addEventListener('resize', setVh);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', setVh);
+        window.visualViewport.addEventListener('scroll', setVh);
+      }
+    })();
+  </script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <style>
     /* Product grid & card — inline override to bypass CSS cache */
@@ -30,7 +46,7 @@
         grid-template-columns: repeat(2, 1fr) !important;
         gap: 8px !important;
         padding: 8px !important;
-        padding-bottom: 80px !important;
+        padding-bottom: calc(68px + max(env(safe-area-inset-bottom, 0px), 16px)) !important;
       }
     }
 
@@ -159,6 +175,8 @@
       </div>
     </div>
     <div class="pos-header-right">
+      <!-- Staff chip: visible on mobile only -->
+      <span id="header-staff-chip"></span>
       <button class="btn btn-outline btn-sm" data-action="open-printer-settings" title="Pengaturan Printer">
         <i data-lucide="printer" class="icon-sm"></i>
       </button>
@@ -188,55 +206,62 @@
     <button class="pos-tab-item" id="pos-maintab-cash" data-action="switch-main-tab" data-tab="cash">
       <i data-lucide="banknote" class="icon-sm"></i> Kas
     </button>
+    <button class="pos-tab-item" id="pos-maintab-deposits" data-action="switch-main-tab" data-tab="deposits">
+      <i data-lucide="dollar-sign" class="icon-sm"></i> Setoran
+    </button>
   </div>
 
   <!-- Content Area -->
   <div class="pos-content-area">
 
-    <!-- ═══ KASIR PANEL (product grid + cart) ═══ -->
-    <div class="pos-body" id="panel-kasir">
+    <!-- ═══ KASIR PANEL (SPA: view-kasir + view-cart) ═══ -->
+    <div id="panel-kasir">
 
-      <!-- Products Panel -->
-      <div class="pos-products" id="panel-products">
-        <div class="pos-products-toolbar">
-          <div class="search-wrap search-compact">
-            <span class="search-icon">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            </span>
-            <input type="text" class="form-control" id="product-search" placeholder="Cari produk..." autocomplete="off" />
+      <!-- ── View Kasir: Grid Produk + FAB ── -->
+      <div id="view-kasir">
+        <div class="pos-products" id="panel-products">
+          <div class="pos-products-toolbar">
+            <div class="search-wrap search-compact">
+              <span class="search-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              </span>
+              <input type="text" class="form-control" id="product-search" placeholder="Cari produk..." autocomplete="off" />
+            </div>
+            <div class="pos-category-bar" id="category-bar"></div>
           </div>
-          <div class="pos-category-bar" id="category-bar"></div>
-        </div>
-        <div class="pos-products-grid" id="products-grid">
-          <div class="empty-state col-span-full">
-            <div class="empty-icon"><i data-lucide="loader" class="icon"></i></div>
-            <div class="empty-title">Memuat produk...</div>
+          <div class="pos-products-grid" id="products-grid">
+            <div class="empty-state col-span-full">
+              <div class="empty-icon"><i data-lucide="loader" class="icon"></i></div>
+              <div class="empty-title">Memuat produk...</div>
+            </div>
           </div>
         </div>
+
+        <!-- FAB Cart Button — fixed, safe-area aware -->
+        <button class="pos-fab-cart" id="fab-cart-btn" data-action="open-cart-view">
+          <div class="fab-info">
+            <span class="fab-title">Total Belanja</span>
+            <span class="fab-total" id="fab-cart-total">Rp 0</span>
+          </div>
+          <div class="fab-action">
+            <i data-lucide="shopping-cart" class="icon"></i>
+            <span>Keranjang</span>
+            <span class="fab-badge" id="fab-cart-count" style="display:none">0</span>
+          </div>
+        </button>
       </div>
 
-      <!-- Mobile Floating Cart Button (Modern Bottom Bar) -->
-      <button class="pos-fab-cart" data-action="toggle-mobile-cart" id="mobile-fab-cart">
-        <div class="fab-info">
-          <span class="fab-title">Total Belanja</span>
-          <span class="fab-total" id="fab-cart-total">Rp 0</span>
-        </div>
-        <div class="fab-action">
-          <i data-lucide="shopping-cart" class="icon"></i>
-          <span>Keranjang</span>
-          <span class="fab-badge" id="fab-cart-count" style="display:none">0</span>
-        </div>
-      </button>
+      <!-- ── View Cart: Halaman Penuh ── -->
+      <div id="view-cart" hidden>
 
-      <!-- Cart Panel -->
-      <div class="pos-cart" id="panel-cart">
-        <div class="pos-cart-header">
-          <button class="btn btn-ghost btn-sm mobile-back-btn" data-action="toggle-mobile-cart" title="Kembali ke Produk">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        <!-- Header -->
+        <div class="cart-page-header">
+          <button class="btn btn-ghost" data-action="close-cart-view" style="gap:4px;padding:8px 10px;">
+            <i data-lucide="chevron-left" class="icon"></i>
+            Kembali
           </button>
-          <span class="pos-cart-title">Keranjang</span>
-          <span class="pos-cart-count" id="cart-count">0</span>
-          <div class="pos-cart-actions">
+          <span class="cart-page-title">Keranjang <span id="cart-count" class="cart-count-badge">0</span></span>
+          <div class="cart-page-actions">
             <button class="btn btn-outline btn-sm" id="btn-hold-cart"
               data-action="hold-cart" title="Tahan Keranjang">
               <i data-lucide="pause-circle" class="icon-sm"></i>
@@ -252,15 +277,21 @@
           </div>
         </div>
 
-        <div class="pos-cart-items" id="cart-items"></div>
+        <!-- Items (scrollable) -->
+        <div class="cart-page-items" id="cart-items"></div>
 
-        <div id="cart-empty" class="pos-cart-empty empty-state">
+        <!-- Empty State -->
+        <div id="cart-empty" class="cart-page-empty">
           <div class="empty-icon"><i data-lucide="shopping-cart" class="icon"></i></div>
-          <div class="empty-title">Keranjang Kosong</div>
-          <div class="empty-desc">Pilih produk di sebelah kiri untuk mulai transaksi</div>
+          <div class="empty-title" style="margin-top:4px;">Keranjang Kosong</div>
+          <div class="empty-desc">Kembali untuk memilih produk</div>
+          <button class="btn btn-primary mt-3" data-action="close-cart-view">
+            <i data-lucide="arrow-left" class="icon-sm"></i> Kembali Pilih Produk
+          </button>
         </div>
 
-        <div class="pos-cart-footer hidden" id="cart-footer">
+        <!-- Sticky Footer: Total + Checkout -->
+        <div class="cart-page-footer hidden" id="cart-footer">
           <div class="cart-summary">
             <div class="cart-summary-row">
               <span id="cart-items-count-text" class="small">0 item</span>
@@ -279,8 +310,10 @@
             Bayar Sekarang →
           </button>
         </div>
-      </div>
-    </div>
+
+      </div><!-- /#view-cart -->
+
+    </div><!-- /#panel-kasir -->
 
     <!-- ═══ RINGKASAN PENJUALAN ═══ -->
     <div class="pos-alt-panel" id="panel-summary">
@@ -292,7 +325,6 @@
             style="width:140px; height:32px; font-size:12px; padding:4px 8px;"
             data-action-change="load-sales-summary">
             <option value="all">Semua Metode</option>
-            <!-- opsi dinamis dari loadPaymentMethodFilter() -->
           </select>
           <button class="btn btn-outline btn-sm" data-action="load-sales-summary" title="Refresh">
             <i data-lucide="refresh-cw" class="icon-sm"></i>
@@ -330,7 +362,6 @@
           <div class="empty-title">Memuat stok...</div>
         </div>
       </div>
-      <!-- Riwayat penambahan stok -->
       <div id="stock-log-section" style="padding:0 var(--s4) var(--s6);"></div>
     </div>
 
@@ -346,6 +377,54 @@
         <div class="empty-state">
           <div class="empty-icon"><i data-lucide="banknote" class="icon"></i></div>
           <div class="empty-title">Memuat info kas...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SETORAN TUNAI (Staff) ═══ -->
+    <div class="pos-alt-panel" id="panel-deposits">
+      <div class="panel-header">
+        <h2 class="h2">Setoran Tunai</h2>
+        <button class="btn btn-outline btn-sm" id="deposit-refresh-btn" data-action="refresh-deposits">
+          <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label">Kas Akhir Saat Ini</label>
+            <div id="deposit-expected-cash" class="fw-700">Rp 0</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Jumlah Setoran (Rp)</label>
+            <input type="number" class="form-control" id="deposit-amount" min="0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Metode Setoran</label>
+            <select id="deposit-account-select" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Bukti Setoran</label>
+            <input type="file" id="deposit-proof-file" accept=".jpg,.jpeg,.png,.webp,.pdf" />
+            <div id="deposit-proof-preview" style="margin-top:8px"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Catatan (opsional)</label>
+            <textarea id="deposit-notes" class="form-control" rows="2"></textarea>
+          </div>
+          <div style="margin-top:12px">
+            <button class="btn btn-primary" id="btn-submit-deposit">Setor Sekarang</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt-4">
+        <div class="card-header"><span class="card-title">Riwayat Setoran</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tanggal</th><th>Jumlah</th><th>Metode</th><th>Bukti</th><th>Status</th><th>Catatan</th></tr></thead>
+            <tbody id="deposit-history-body"><tr><td colspan="6" class="empty-td">Memuat...</td></tr></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -380,9 +459,6 @@
       <button class="drawer-btn active" id="drawer-tab-kasir" data-action="switch-mobile-drawer-tab" data-tab="kasir">
         <i data-lucide="shopping-bag" class="icon"></i> Kasir
       </button>
-      <button class="drawer-btn" id="drawer-tab-cart" data-action="switch-mobile-drawer-tab" data-tab="cart">
-        <i data-lucide="shopping-cart" class="icon"></i> Keranjang <span class="badge badge-red ml-2" id="mobile-cart-badge" style="display:none">0</span>
-      </button>
       <button class="drawer-btn" id="drawer-tab-summary" data-action="switch-mobile-drawer-tab" data-tab="summary">
         <i data-lucide="bar-chart-2" class="icon"></i> Ringkasan
       </button>
@@ -394,6 +470,9 @@
       </button>
       <button class="drawer-btn" id="drawer-tab-cash" data-action="switch-mobile-drawer-tab" data-tab="cash">
         <i data-lucide="banknote" class="icon"></i> Kas
+      </button>
+      <button class="drawer-btn" id="drawer-tab-deposits" data-action="switch-mobile-drawer-tab" data-tab="deposits">
+        <i data-lucide="dollar-sign" class="icon"></i> Setoran
       </button>
       <div class="border-t my-2" style="border-color: var(--border);"></div>
       <button class="drawer-btn" data-action="open-printer-settings">
@@ -415,7 +494,6 @@
         <button class="modal-close" data-action="close-modal" data-modal-id="modal-printer">✕</button>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">
-        <!-- Printer status -->
         <div style="display:flex;align-items:center;justify-content:space-between;background:var(--success-bg);border:1px solid rgba(22,163,74,0.2);border-radius:var(--r);padding:12px 14px;">
           <div>
             <div style="font-size:13px;font-weight:700;color:var(--text);">Status Printer</div>
@@ -424,7 +502,6 @@
           <i data-lucide="check-circle" class="icon" style="color:var(--success);flex-shrink:0;"></i>
         </div>
 
-        <!-- Auto print toggle -->
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2);">
           <input type="checkbox" id="cb-auto-print" data-action-change="save-printer-settings" style="width:16px;height:16px;accent-color:var(--danger);cursor:pointer;" />
           <div>
@@ -433,7 +510,6 @@
           </div>
         </label>
 
-        <!-- Paper size info -->
         <div style="font-size:11px;color:var(--text-muted);background:var(--bg-alt);padding:10px;border-radius:var(--r);line-height:1.6;">
           <strong>Ukuran kertas:</strong> 58mm (thermal)<br>
           Pastikan printer thermal sudah terhubung dan dipilih di dialog cetak browser.
@@ -510,7 +586,6 @@
         </div>
       </div>
       <div class="modal-footer">
-        <!-- BUG-01 FIX: Allow user to cancel/logout instead of being trapped in shift modal -->
         <button class="btn btn-ghost btn-sm" data-action="confirm-logout" title="Batalkan dan keluar">Keluar</button>
         <button class="btn btn-primary" id="btn-open-shift" data-action="confirm-open-shift">Buka Shift &amp; Mulai Berjualan</button>
       </div>
@@ -569,9 +644,16 @@
         </div>
         <div class="form-group" style="margin:0;">
           <label class="form-label">Jenis Penyesuaian</label>
-          <select class="form-control" id="stock-adj-type">
+          <select class="form-control" id="stock-adj-type" data-action-change="toggle-stock-adj-type">
             <option value="in">Stok Masuk (Pembelian / Tambah)</option>
             <option value="out">Stok Keluar (Koreksi / Susut)</option>
+            <option value="transfer">Transfer ke Outlet Lain</option>
+          </select>
+        </div>
+        <div id="stock-adj-transfer-target" class="form-group" style="margin:0;display:none;">
+          <label class="form-label">Outlet Tujuan</label>
+          <select id="stock-adj-target-branch" class="form-control">
+            <!-- populated dynamically -->
           </select>
         </div>
         <div class="form-group" style="margin:0;">
@@ -752,7 +834,10 @@
   <script src="js/services/inventoryService.js"></script>
   <script src="js/services/cashService.js"></script>
   <script src="js/services/transactionService.js"></script>
+  <script src="js/depositService.js"></script>
+  <script src="js/depositUi.js"></script>
   <script src="js/pos.js"></script>
+
   <!-- ══════════════════════════════════════════
        MODAL: Pilih Topping
   ══════════════════════════════════════════ -->
@@ -785,9 +870,12 @@
 
   <!-- ══════════════════════════════════════════
        MODAL: Sukses Transaksi
+       FIX: Hapus data-action="close-success-popup" dari overlay —
+       overlay click tidak menutup modal ini agar tombol di dalamnya
+       selalu bisa diklik dengan benar.
   ══════════════════════════════════════════ -->
-  <div class="modal-overlay" id="modal-success-trx" data-action="close-success-popup" style="backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);">
-    <div class="success-popup" id="success-popup-card" onclick="event.stopPropagation()">
+  <div class="modal-overlay" id="modal-success-trx" style="backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);">
+    <div class="success-popup" id="success-popup-card">
       <div class="success-popup-check">
         <svg class="success-check-svg" viewBox="0 0 52 52">
           <circle class="success-check-circle" cx="26" cy="26" r="24" fill="none"/>
@@ -802,6 +890,24 @@
         </button>
         <button class="btn btn-primary btn-lg" style="flex:1;min-width:130px;" data-action="print-receipt-close">
           <i data-lucide="printer" class="icon-sm"></i> Cetak Struk
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Notifikasi Stok Masuk dari Transfer
+  ══════════════════════════════════════════ -->
+  <div id="modal-transfer-notif" style="display:none;position:fixed;inset:0;z-index:9500;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);">
+    <div style="background:#fff;border-radius:16px;padding:0;max-width:380px;width:calc(100% - 32px);box-shadow:0 20px 60px rgba(0,0,0,.25);">
+      <div style="padding:20px 20px 0;display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="font-size:2rem;line-height:1;">📦</div>
+        <div style="font-size:16px;font-weight:800;color:var(--text);">Stok Masuk dari Transfer</div>
+      </div>
+      <div class="modal-body" id="transfer-notif-body" style="padding:16px 20px;"></div>
+      <div style="padding:0 20px 20px;">
+        <button class="btn btn-primary btn-full" id="btn-close-transfer-notif" disabled style="height:44px;font-size:14px;font-weight:700;">
+          Mengerti (<span id="transfer-notif-countdown">3</span>)
         </button>
       </div>
     </div>

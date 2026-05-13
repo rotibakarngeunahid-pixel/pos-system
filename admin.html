@@ -128,6 +128,9 @@
       <button class="nav-item" data-admin-action="navigate" data-section="cash-report" title="Laporan Kas">
         <i data-lucide="wallet"></i><span class="nav-text">Laporan Kas</span>
       </button>
+      <button class="nav-item" data-admin-action="navigate" data-section="cash-deposits" title="Setoran Tunai">
+        <i data-lucide="dollar-sign"></i><span class="nav-text">Setoran Tunai</span>
+      </button>
       <button class="nav-item" data-admin-action="navigate" data-section="cash-categories" title="Kategori Kas">
         <i data-lucide="tag"></i><span class="nav-text">Kategori Kas</span>
       </button>
@@ -148,6 +151,37 @@
   </aside>
 
   <div class="sidebar-overlay" id="sidebar-overlay" data-admin-action="close-sidebar"></div>
+
+  <!-- ── Admin Mobile Bottom Navigation ────────────────────── -->
+  <nav class="admin-bottom-nav" id="admin-bottom-nav" aria-label="Navigasi bawah">
+    <div class="admin-bottom-nav-inner">
+      <button class="admin-bottom-tab active" id="abn-dashboard"
+        data-admin-action="navigate" data-section="dashboard" title="Dashboard">
+        <i data-lucide="layout-dashboard"></i>
+        <span>Dashboard</span>
+      </button>
+      <button class="admin-bottom-tab" id="abn-transactions"
+        data-admin-action="navigate" data-section="transactions" title="Transaksi">
+        <i data-lucide="receipt"></i>
+        <span>Transaksi</span>
+      </button>
+      <button class="admin-bottom-tab" id="abn-reports"
+        data-admin-action="navigate" data-section="reports" title="Laporan">
+        <i data-lucide="bar-chart-2"></i>
+        <span>Laporan</span>
+      </button>
+      <button class="admin-bottom-tab" id="abn-inventory"
+        data-admin-action="navigate" data-section="inventory" title="Inventori">
+        <i data-lucide="archive"></i>
+        <span>Inventori</span>
+      </button>
+      <button class="admin-bottom-tab" id="abn-more"
+        data-admin-action="toggle-sidebar" title="Menu Lainnya">
+        <i data-lucide="menu"></i>
+        <span>Lainnya</span>
+      </button>
+    </div>
+  </nav>
 
   <!-- Ingredient → Produk Modal (moved outside sidebar) -->
   <div class="modal-overlay" id="modal-ingredient-products">
@@ -266,13 +300,21 @@
       <section class="admin-section" id="section-products">
         <div class="section-header">
           <h2 class="section-title">Manajemen Produk</h2>
-          <div class="section-actions">
+        </div>
+        <div id="tab-products-content">
+          <!-- Toolbar: search + category filter + add button -->
+          <div class="section-toolbar">
+            <div style="position:relative;flex:1;max-width:320px;">
+              <i data-lucide="search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;color:var(--text-muted);pointer-events:none;"></i>
+              <input id="product-search-input" type="search" class="form-control" placeholder="Cari produk..." style="padding-left:36px;" autocomplete="off" />
+            </div>
+            <select id="product-category-filter" class="form-control" style="max-width:180px;">
+              <option value="">Semua Kategori</option>
+            </select>
             <button class="btn btn-primary" data-admin-action="open-product-modal">
               <i data-lucide="plus" class="icon-sm"></i> Tambah Produk
             </button>
           </div>
-        </div>
-        <div id="tab-products-content">
           <div class="card">
             <div id="products-grid-container">
               <div class="empty-state">
@@ -566,9 +608,15 @@
             <div class="report-stat"><div class="report-stat-label">Total Diskon</div><div class="report-stat-value" id="report-stat-discount">—</div></div>
             <div class="report-stat"><div class="report-stat-label">Jumlah Transaksi</div><div class="report-stat-value" id="report-stat-count">—</div></div>
           </div>
+          <div id="report-void-info" style="display:none" class="alert-warning mb-2"></div>
+          <div class="flex gap-2 items-center mb-2" style="font-size:13px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="report-show-void" data-admin-change="toggle-report-void"> Tampilkan transaksi void
+            </label>
+          </div>
           <div class="card"><div class="table-wrap"><table>
-            <thead><tr><th>#</th><th>Waktu</th><th>Cabang</th><th>Kasir</th><th>Metode</th><th>Diskon</th><th>Total</th></tr></thead>
-            <tbody id="report-sales-body"><tr><td colspan="7" class="empty-td">Atur filter dan klik Tampilkan</td></tr></tbody>
+            <thead><tr><th>#</th><th>Waktu</th><th>Cabang</th><th>Kasir</th><th>Metode</th><th>Diskon</th><th>Status</th><th>Total</th></tr></thead>
+            <tbody id="report-sales-body"><tr><td colspan="8" class="empty-td">Atur filter dan klik Tampilkan</td></tr></tbody>
           </table></div></div>
         </div>
 
@@ -912,6 +960,41 @@
           <textarea class="form-control" id="branch-address" placeholder="Alamat lengkap cabang" rows="3"></textarea>
         </div>
       </div>
+      
+      <!-- ══════════ SETORAN TUNAI (ADMIN) ══════════ -->
+      <section class="admin-section" id="section-cash-deposits">
+        <div class="section-header">
+          <h2 class="section-title">Setoran Tunai</h2>
+          <div class="section-actions">
+            <select id="deposits-filter-branch" class="form-control">
+              <option value="">Semua Cabang</option>
+            </select>
+            <select id="deposits-filter-status" class="form-control">
+              <option value="">Semua Status</option>
+              <option value="pending">pending</option>
+              <option value="confirmed">confirmed</option>
+              <option value="rejected">rejected</option>
+            </select>
+            <input type="date" id="deposits-filter-from" class="form-control" />
+            <input type="date" id="deposits-filter-to" class="form-control" />
+            <button id="deposits-filter-btn" class="btn btn-primary">Filter</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Saat Setor</th><th>Metode</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
+              <tbody id="deposits-table-body"><tr><td colspan="9" class="empty-td">Memuat...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-header" style="margin-top:18px">
+          <h3 class="section-title">Rekening & QRIS</h3>
+        </div>
+        <div id="deposit-accounts-list" class="grid-1fr-420"></div>
+      </section>
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-branch">Batal</button>
         <button class="btn btn-primary" data-admin-action="save-branch">Simpan</button>
@@ -969,6 +1052,32 @@
 
           <!-- Right: Variant management -->
           <div>
+            <!-- Tipe Produk Toggle -->
+            <div class="form-group mb-3">
+              <label class="form-label">Tipe Produk</label>
+              <div class="radio-group">
+                <label class="radio-option">
+                  <input type="radio" name="product-type" id="product-type-variant" value="variant" checked />
+                  <span>Punya Varian (cth. Kecil, Besar)</span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="product-type" id="product-type-simple" value="simple" />
+                  <span>Tanpa Varian (satu harga langsung)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Harga langsung (simple product) -->
+            <div id="product-simple-price-section" class="form-group mb-3" style="display:none;">
+              <label class="form-label" for="product-default-price">Harga</label>
+              <div class="input-prefix-wrap">
+                <span class="input-prefix text-xs">Rp</span>
+                <input id="product-default-price" type="number" class="form-control" placeholder="0" min="0" step="100" />
+              </div>
+            </div>
+
+            <!-- Variant section wrapper -->
+            <div id="product-variant-section">
             <div class="flex items-center justify-between mb-3">
               <div class="fw-700 text-base">Varian &amp; Harga</div>
               <span id="product-variant-hint" class="text-xs text-muted"></span>
@@ -1000,6 +1109,7 @@
               </div>
               <button class="btn btn-primary btn-sm btn-full" data-admin-action="add-product-variant">+ Simpan Varian Baru</button>
             </div>
+            </div><!-- /#product-variant-section -->
           </div>
         </div>
       </div>
@@ -1525,6 +1635,8 @@
   <script src="js/services/cashService.js"></script>
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js"></script>
+  <script src="js/depositService.js"></script>
+  <script src="js/adminDepositUi.js"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js"></script>

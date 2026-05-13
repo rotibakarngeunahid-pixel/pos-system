@@ -1036,10 +1036,15 @@ tbody tr:hover td { background: var(--surface-2); }
    ============================================================ */
 .pos-page {
   display: flex; flex-direction: column;
-  height: 100vh; /* fallback */
-  height: 100dvh; /* actual visible viewport — handles Android nav bar & iOS safari */
+  /* Fallback chain — --vh100 paling akurat karena dari window.innerHeight
+     (JS di head mengecualikan Android nav bar & iOS safari bar secara real-time). */
+  height: 100vh;         /* fallback paling lama */
+  height: 100dvh;        /* modern fallback */
+  height: var(--vh100, 100dvh); /* JS-corrected: selalu = viewport visible */
   overflow: hidden;
   background: var(--bg);
+  /* Safe area untuk iOS (notch / home indicator) */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Header */
@@ -1075,7 +1080,7 @@ tbody tr:hover td { background: var(--surface-2); }
 .pos-staff-name   { font-size: 13px; font-weight: 600; color: #ffffff; }
 
 /* Body wrapper */
-.pos-content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.pos-content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
 /* Kasir body */
 .pos-body { display: grid; grid-template-columns: 1fr 340px; flex: 1; overflow: hidden; min-height: 0; height: 100%; }
@@ -1233,12 +1238,19 @@ tbody tr:hover td { background: var(--surface-2); }
 .pcard:hover .pcard-btn { background: #dc2626; transform: scale(1.1); }
 
 /* Cart Panel */
+.pos-cart-backdrop { display: none; }
+
 .pos-cart {
   width: 340px; flex-shrink: 0;
   background: var(--surface);
   border-left: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: -2px 0 12px rgba(0,0,0,0.04);
+  /* FIX: min-height:0 dan height:100% wajib agar grid item bisa shrink dan flex
+     internal (.pos-cart-items flex:1 + .pos-cart-footer flex-shrink:0)
+     berfungsi benar di semua resolusi */
+  min-height: 0;
+  height: 100%;
 }
 
 .pos-cart-header {
@@ -1249,7 +1261,7 @@ tbody tr:hover td { background: var(--surface-2); }
   min-height: 52px;
 }
 .mobile-back-btn { display: none; }
-.pos-fab-cart { display: none !important; }
+.pos-fab-cart { display: none; }
 .pos-cart-title { font-size: 15px; font-weight: 800; color: var(--text); flex: 1; letter-spacing: -0.01em; }
 .pos-cart-count {
   font-size: 11px;
@@ -1337,11 +1349,19 @@ tbody tr:hover td { background: var(--surface-2); }
 /* Cart Footer */
 .pos-cart-footer {
   border-top: 1.5px solid var(--border);
-  padding: var(--s4) var(--s4) var(--s5);
-  background: var(--surface); flex-shrink: 0;
-  position: sticky;
-  bottom: 0;
+  padding: var(--s4) var(--s4) calc(var(--s5) + env(safe-area-inset-bottom, 12px));
+  background: var(--surface);
+  flex-shrink: 0;  /* KUNCI: footer tidak boleh menyusut */
+  position: relative; /* bukan sticky — parent flex yang handle posisi */
   z-index: 20;
+}
+
+/* Resolusi pendek (1200x800, landscape tablet) */
+@media (min-width: 901px) and (max-height: 860px) {
+  .pos-cart-footer {
+    padding-bottom: var(--s4); /* kurangi padding bawah di viewport pendek */
+  }
+  .btn-checkout { min-height: 46px; font-size: 14px; padding: var(--s3) var(--s4); }
 }
 .cart-summary { margin-bottom: var(--s3); }
 .cart-summary-row {
@@ -2038,51 +2058,42 @@ tbody tr:hover td { background: var(--surface-2); }
   .panel-header { flex-wrap: wrap; gap: 8px; }
 }
 
-/* Mobile */
 @media (max-width: 768px) {
   /* POS mobile layout — revert grid to stacked flex */
-  .pos-body { display: flex; flex-direction: column; overflow: hidden; }
+  .pos-body { display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  .pos-cart-backdrop.mobile-show {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideUpCart { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
   .pos-cart {
     width: 100%; border-left: none; border-top: none; box-shadow: none;
     display: none; flex: 1;
   }
-  .pos-cart.mobile-show { display: flex; }
-  .pos-products.mobile-hide { display: none; }
+  .pos-cart.mobile-show {
+    display: flex;
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 85vh;
+    max-height: 85vh;
+    border-radius: 20px 20px 0 0;
+    background: var(--surface);
+    z-index: 1001;
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.15);
+    animation: slideUpCart 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .pos-products.mobile-hide { display: flex !important; }
   .mobile-back-btn { display: flex; align-items: center; padding: 0; margin-right: var(--s2); }
 
-  /* Floating cart button — bottom bar style, shown when .show added by JS */
-  .pos-fab-cart.show {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    height: 64px; border-radius: 0;
-    background: linear-gradient(135deg, var(--danger), #b91c1c);
-    color: white;
-    display: flex !important; align-items: center; justify-content: space-between;
-    padding: 0 var(--s5);
-    box-shadow: 0 -4px 16px rgba(220,38,38,0.3); z-index: 99;
-    border: none; cursor: pointer;
-    transition: transform var(--t);
-  }
+  /* Floating cart button — styles moved to SPA section at end of file */
   .pos-fab-cart:active { transform: scale(0.99); }
-  .pos-fab-cart .fab-info {
-    display: flex; flex-direction: column; align-items: flex-start;
-  }
-  .pos-fab-cart .fab-title {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; opacity: 0.85; line-height: 1.2;
-  }
-  .pos-fab-cart .fab-total {
-    font-size: 18px; font-weight: 900; line-height: 1.2; letter-spacing: -0.02em;
-  }
-  .pos-fab-cart .fab-action {
-    display: flex; align-items: center; gap: var(--s2); font-weight: 700; font-size: 13px;
-    background: rgba(255,255,255,0.18);
-    padding: var(--s2) var(--s4);
-    border-radius: var(--r-full);
-  }
-  .pos-fab-cart .fab-badge {
-    background: white; color: var(--danger);
-    font-size: 11px; font-weight: 900;
-    padding: 2px 7px; border-radius: 12px;
-  }
 
   .pos-mobile-tabs { display: flex; overflow-x: auto; }
   .pos-mobile-tabs::-webkit-scrollbar { display: none; }
@@ -2093,9 +2104,34 @@ tbody tr:hover td { background: var(--surface-2); }
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     padding: 8px;
-    padding-bottom: 80px;
+    padding-bottom: calc(68px + max(env(safe-area-inset-bottom, 0px), 16px));
   }
-  .pos-cart { max-height: calc(100dvh - 56px); max-height: calc(100svh - 56px); }
+  .pos-cart {
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .pos-cart-items {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    /* Tambah padding bawah agar item terakhir tidak tertutup footer */
+    padding-bottom: 8px;
+  }
+  .pos-cart-footer {
+    flex-shrink: 0 !important;
+    position: relative !important; /* override sticky agar tidak keluar dari flex */
+    bottom: auto !important;
+    /* Padding bawah extra untuk navigation bar Android */
+    padding-bottom: calc(var(--s4) + max(env(safe-area-inset-bottom, 0px), 56px)) !important;
+    background: #111827 !important;
+    border-top: none !important;
+  }
+  .pos-cart-footer .cart-summary-row,
+  .pos-cart-footer .cart-total-label { color: rgba(255,255,255,0.7); }
+  .pos-cart-footer .cart-total-value { color: #fff; }
+  .pos-cart-footer .cart-discount-row { color: #fca5a5; }
+  .pos-cart-footer .cart-summary { border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: var(--s3); margin-bottom: var(--s3); }
 
   .pcard-body { padding: 6px 8px 8px; }
   .pcard-name { font-size: 11px; }
@@ -2206,7 +2242,7 @@ tbody tr:hover td { background: var(--surface-2); }
 
 /* Very small mobile (≤400px) */
 @media (max-width: 400px) {
-  .pos-products-grid { gap: 6px; padding: 6px; padding-bottom: 80px; }
+  .pos-products-grid { gap: 6px; padding: 6px; padding-bottom: calc(68px + max(env(safe-area-inset-bottom, 0px), 16px)); }
   .pcard-name { font-size: 10px; }
   .pcard-price { font-size: 9px; }
   .pcard-btn { width: 20px; height: 20px; font-size: 13px; }
@@ -2218,15 +2254,19 @@ tbody tr:hover td { background: var(--surface-2); }
 
 /* Desktop (≥769px): grid layout, dark cart footer */
 @media (min-width: 769px) {
-  /* Cart footer — sticky, dark brand */
+  /* Cart footer — flex-shrink:0 supaya tidak tenggelam, dark brand */
   .pos-cart-footer {
-    position: sticky;
-    bottom: 0;
+    flex-shrink: 0;
+    position: relative;
+    bottom: auto;
     z-index: 20;
     background: #111827;
     border-top: none;
-    /* safe-area-inset-bottom: agar tidak ketutup navigation bar Android/iOS */
-    padding: var(--s4) var(--s4) calc(var(--s5) + env(safe-area-inset-bottom, 0px));
+    /* FIX: env(safe-area-inset-bottom) sering = 0 di Android Chrome.
+       Gunakan max() untuk memastikan minimal 8px di atas padding var(--s5).
+       Ini mencegah tombol Bayar tertutup navigation bar Android. */
+    padding: var(--s4) var(--s4)
+             calc(var(--s5) + max(env(safe-area-inset-bottom, 0px), 56px));
   }
   .pos-cart-footer .cart-summary { border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: var(--s3); margin-bottom: var(--s3); }
   .pos-cart-footer .cart-summary-row,
@@ -2252,7 +2292,10 @@ tbody tr:hover td { background: var(--surface-2); }
   .pos-cart { width: 360px; }
   .pos-products-grid { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
   /* Cart footer action area gets extra breathing room */
-  .pos-cart-footer { padding: var(--s4) var(--s5) var(--s6); }
+  .pos-cart-footer {
+    padding: var(--s4) var(--s5)
+             calc(var(--s6) + max(env(safe-area-inset-bottom, 0px), 56px));
+  }
   .btn-checkout { min-height: 56px; font-size: 16px; }
 }
 
@@ -2539,3 +2582,555 @@ tbody tr:hover td { background: var(--surface-2); }
 
 .pos-mobile-menu-btn { color: white !important; }
 .pos-mobile-menu-btn i { stroke: white !important; }
+
+/* ════════════════════════════════════════════════════════════
+   SPA CART PAGE — View Swap Architecture
+   PRD: Halaman Keranjang Terpisah v1.0.0
+   ════════════════════════════════════════════════════════════ */
+
+/* ── #panel-kasir: replaces old .pos-body grid layout ── */
+#panel-kasir {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── #view-kasir: product view, fills panel entirely ── */
+#view-kasir {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#view-kasir[hidden] { display: none !important; }
+
+/* ── #view-cart: full-page cart, hidden by default ── */
+#view-cart {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+#view-cart[hidden] { display: none !important; }
+
+/* ── FAB Cart Button — position:fixed, safe-area-inset-bottom ── */
+/* Overrides the old .pos-fab-cart rules for ALL screen sizes */
+.pos-fab-cart {
+  position: fixed !important;
+  bottom: max(env(safe-area-inset-bottom, 0px), 16px) !important;
+  left: 0 !important;
+  right: 0 !important;
+  min-height: 60px !important;
+  z-index: 800 !important;
+  padding: 0 var(--s5) !important;
+  padding-bottom: 0 !important;
+  touch-action: manipulation !important;
+  /* Default: hidden */
+  display: none !important;
+  /* Style */
+  background: linear-gradient(135deg, var(--danger), #b91c1c) !important;
+  color: white !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  box-shadow: 0 -4px 20px rgba(220,38,38,0.35) !important;
+  border: none !important;
+  cursor: pointer !important;
+  border-radius: 0 !important;
+  transition: transform 0.1s ease !important;
+}
+/* Show FAB when count > 0 and in kasir view */
+.pos-fab-cart.show { display: flex !important; }
+.pos-fab-cart:active { transform: scale(0.99) !important; }
+
+/* FAB internal elements */
+.pos-fab-cart .fab-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.pos-fab-cart .fab-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  opacity: 0.85;
+  line-height: 1.2;
+}
+.pos-fab-cart .fab-total {
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.pos-fab-cart .fab-action {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-weight: 700;
+  font-size: 13px;
+  background: rgba(255,255,255,0.18);
+  padding: var(--s2) var(--s4);
+  border-radius: var(--r-full);
+  min-height: 40px;
+}
+.pos-fab-cart .fab-badge {
+  background: white;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 7px;
+  border-radius: 12px;
+}
+
+/* Tablet landscape: rounded, with side margin */
+@media (min-width: 768px) and (orientation: landscape) {
+  .pos-fab-cart {
+    bottom: max(env(safe-area-inset-bottom, 0px), 20px) !important;
+    left: 24px !important;
+    right: 24px !important;
+    border-radius: var(--r-lg) !important;
+    min-height: 60px !important;
+  }
+}
+
+/* Product grid: ensure last row is always visible above FAB */
+.pos-products-grid {
+  padding-bottom: calc(68px + max(env(safe-area-inset-bottom, 0px), 16px));
+}
+
+/* ── Cart Page Header ── */
+.cart-page-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 12px var(--s4);
+  padding-top: max(env(safe-area-inset-top, 0px), 12px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  min-height: 56px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.cart-page-title {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cart-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 10px;
+  line-height: 1;
+}
+.cart-page-actions {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ── Cart Page Items (scrollable area) ── */
+.cart-page-items {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+}
+.cart-page-items::-webkit-scrollbar { width: 3px; }
+.cart-page-items::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ── Cart Page Empty State ── */
+.cart-page-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px var(--s6);
+}
+
+/* ── Cart Page Footer (sticky, dark brand) ── */
+.cart-page-footer {
+  background: #111827;
+  border-top: none;
+  padding: var(--s4);
+  padding-bottom: max(calc(var(--s5) + env(safe-area-inset-bottom, 0px)), 100px);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+}
+.cart-page-footer .cart-summary {
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: var(--s3);
+  margin-bottom: var(--s3);
+}
+.cart-page-footer .cart-summary-row,
+.cart-page-footer .cart-total-label { color: rgba(255,255,255,0.7); }
+.cart-page-footer .cart-total-value { color: #fff; }
+.cart-page-footer .cart-discount-row { color: #fca5a5; display: flex; }
+.cart-page-footer .btn-checkout {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+}
+.cart-page-footer .btn-checkout:hover { background: #b91c1c; }
+
+/* Short viewport landscape (e.g. 1200×800) — jangan kurangi padding nav bar Android */
+@media (min-width: 901px) and (max-height: 860px) {
+  .cart-page-footer {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 80px);
+  }
+  .cart-page-footer .btn-checkout { min-height: 46px; font-size: 14px; }
+}
+
+/* Mobile: compact footer */
+@media (max-width: 768px) {
+  .cart-page-header { padding: 10px var(--s3); min-height: 52px; }
+  .cart-page-items { padding: 0; }
+  .cart-page-footer {
+    padding: var(--s3);
+    /* fallback 100px agar tombol Bayar tidak tertutup nav-bar Android */
+    padding-bottom: max(calc(var(--s4) + env(safe-area-inset-bottom, 0px)), 100px);
+  }
+}
+
+/* Ensure cart-item styles work inside cart-page-items */
+.cart-page-items .cart-item { border-bottom: 1px solid var(--border); }
+.cart-page-items .cart-item:last-child { border-bottom: none; }
+
+/* ============================================================
+   UX RESPONSIVE IMPROVEMENTS v3
+   ============================================================ */
+
+/* ── Admin Bottom Navigation (mobile only) ──────────────── */
+.admin-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--surface);
+  border-top: 1.5px solid var(--border);
+  z-index: 160;
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.07);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.admin-bottom-nav-inner {
+  display: flex;
+  height: 56px;
+  align-items: stretch;
+}
+
+.admin-bottom-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color var(--t), background var(--t);
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+  letter-spacing: 0.2px;
+}
+.admin-bottom-tab [data-lucide], .admin-bottom-tab svg { width: 20px; height: 20px; display: block; }
+.admin-bottom-tab.active { color: var(--orange); }
+.admin-bottom-tab.active::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 20%; right: 20%;
+  height: 2.5px;
+  background: var(--orange);
+  border-radius: 0 0 3px 3px;
+}
+.admin-bottom-tab:active { background: var(--bg-alt); }
+
+@media (max-width: 900px) {
+  .admin-bottom-nav { display: block; }
+  /* Push admin-main content above bottom nav */
+  .admin-main {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px) + var(--s5)) !important;
+  }
+}
+
+/* ── Admin: table column hiding on small mobile ──────────── */
+/* Transactions: hide Kasir & Metode columns */
+@media (max-width: 600px) {
+  #section-transactions table thead th:nth-child(4),
+  #section-transactions table thead th:nth-child(5),
+  #section-transactions table tbody td:nth-child(4),
+  #section-transactions table tbody td:nth-child(5) { display: none; }
+
+  /* Dashboard recent transactions: hide Cabang, Kasir, Metode */
+  #section-dashboard table thead th:nth-child(3),
+  #section-dashboard table thead th:nth-child(4),
+  #section-dashboard table thead th:nth-child(5),
+  #section-dashboard table tbody td:nth-child(3),
+  #section-dashboard table tbody td:nth-child(4),
+  #section-dashboard table tbody td:nth-child(5) { display: none; }
+
+  /* Reports sales table: hide Cabang, Kasir, Metode */
+  #report-sales-body tr td:nth-child(3),
+  #report-sales-body tr td:nth-child(4),
+  #report-sales-body tr td:nth-child(5),
+  #section-reports #report-tab-sales table thead th:nth-child(3),
+  #section-reports #report-tab-sales table thead th:nth-child(4),
+  #section-reports #report-tab-sales table thead th:nth-child(5) { display: none; }
+
+  /* Inventory logs: hide Stok detail & Keterangan */
+  #inv-log-body tr td:nth-child(6),
+  #inv-log-body tr td:nth-child(7),
+  #section-inv-logs table thead th:nth-child(6),
+  #section-inv-logs table thead th:nth-child(7) { display: none; }
+
+  /* Branch pricing: hide total varian & varian override, keep aksi */
+  #branch-pricing-body tr td:nth-child(2),
+  #branch-pricing-body tr td:nth-child(3),
+  #section-branch-pricing table thead th:nth-child(2),
+  #section-branch-pricing table thead th:nth-child(3) { display: none; }
+}
+
+/* ── Admin: section actions full-width on mobile ─────────── */
+@media (max-width: 600px) {
+  .section-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  /* Primary action stretches full width */
+  .section-actions .btn-primary {
+    flex: 1 1 100%;
+  }
+  /* Secondary actions share row */
+  .section-actions .btn:not(.btn-primary) {
+    flex: 1 1 calc(50% - 3px);
+    min-width: 0;
+    justify-content: center;
+  }
+  /* If only one button, also full width */
+  .section-actions .btn:only-child {
+    flex: 1 1 100%;
+  }
+}
+
+/* ── Admin: filters bar mobile stacking ──────────────────── */
+@media (max-width: 768px) {
+  .filters-bar {
+    padding: var(--s3);
+    gap: var(--s2);
+  }
+  .filters-bar .form-group { flex: 1 1 calc(50% - 4px); min-width: 120px; }
+  .filters-bar .form-group.flex-none { flex: 1 1 calc(50% - 4px); }
+  .filters-bar .pb-1 { flex: 1 1 100%; }
+  .filters-bar .pb-1 .btn { width: 100%; }
+  .filters-bar .quick-filters { gap: var(--s1); }
+  .filters-bar .quick-filter-btn { padding: 5px 10px; font-size: 11px; }
+}
+
+/* ── Touch target minimum on mobile ──────────────────────── */
+@media (max-width: 900px) {
+  /* Ensure all interactive buttons hit 44×44 */
+  .btn-sm {
+    min-height: 38px;
+    padding: 8px 14px;
+  }
+  .btn-icon { width: 40px; height: 40px; }
+  .qty-btn { width: 40px; height: 40px; }
+  .modal-close { width: 36px; height: 36px; font-size: 16px; }
+  .quick-filter-btn { min-height: 36px; }
+  /* Nav items in drawer: larger tap area */
+  .drawer-btn { padding: var(--s3) var(--s4); min-height: 48px; }
+}
+
+/* ── Admin topbar: hide date on small mobile ─────────────── */
+@media (max-width: 500px) {
+  .topbar-date { display: none; }
+}
+
+/* ── Admin stat cards: single column on very small ───────── */
+@media (max-width: 400px) {
+  .stats-grid { grid-template-columns: 1fr !important; }
+  .report-stat-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Admin dashboard grid: ensure card stacks on mobile ──── */
+@media (max-width: 768px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+  /* Stat card hero: full width in 2-col grid */
+  .stat-card-hero { grid-column: 1 / -1; }
+}
+
+/* ── POS header mobile: show branch name ─────────────────── */
+@media (max-width: 900px) {
+  .pos-branch-name { display: block !important; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.92); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+  .pos-brand-name  { display: none !important; }
+}
+
+/* ── POS: staff name chip in header (mobile) ─────────────── */
+#header-staff-chip {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,0.15);
+  border-radius: var(--r-full);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+@media (max-width: 900px) {
+  #header-staff-chip { display: flex; }
+}
+
+/* ── Admin inventory section actions: wrap tightly ───────── */
+#section-inventory .section-actions {
+  flex-wrap: wrap;
+}
+@media (max-width: 768px) {
+  #section-inventory .section-actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
+  #section-inventory .section-actions .btn-primary { flex: 1 1 100%; }
+}
+
+/* ── Admin section header: better mobile layout ──────────── */
+@media (max-width: 600px) {
+  .section-title { font-size: 18px; }
+  .section-header { margin-bottom: var(--s4); gap: var(--s3); }
+}
+
+/* ── Admin: cards in narrow view ─────────────────────────── */
+@media (max-width: 400px) {
+  .admin-list-card {
+    padding: var(--s3) var(--s4);
+    gap: var(--s3);
+  }
+  .list-card-actions { flex-wrap: wrap; }
+  .product-admin-grid { grid-template-columns: repeat(2, 1fr); padding: var(--s3); }
+}
+
+/* ── POS alt panels: add bottom padding for FAB ──────────── */
+.pos-alt-panel {
+  padding-bottom: calc(var(--s4) + env(safe-area-inset-bottom, 0px));
+}
+
+/* ── Cart page: larger touch on header actions ───────────── */
+@media (max-width: 768px) {
+  .cart-page-actions .btn-sm { min-height: 40px; min-width: 40px; }
+  .cart-page-actions .btn-ghost { min-height: 40px; }
+}
+
+/* ── Payment modal: cash input larger on mobile ──────────── */
+@media (max-width: 480px) {
+  .input-hero { font-size: 20px; padding: 14px; }
+  .change-value { font-size: 26px; }
+  .quick-amounts { gap: var(--s1); }
+  .quick-amount-btn { padding: 8px 10px; font-size: 11px; flex: 1 1 calc(33% - 4px); text-align: center; }
+}
+
+/* ── Modals on very small screens ───────────────────────────*/
+@media (max-width: 380px) {
+  .modal-body { padding: var(--s4) var(--s3); }
+  .modal-footer { padding: var(--s3); gap: var(--s2); }
+  .modal-header { padding: var(--s3) var(--s4); }
+  .success-popup { padding: var(--s5) var(--s4) var(--s4); }
+  .success-popup-btns { flex-direction: column; }
+  .success-popup-btns .btn { min-width: unset; }
+}
+
+/* ── Shift summary modal: grid stack on mobile ───────────── */
+@media (max-width: 480px) {
+  .shift-stat-group { grid-template-columns: 1fr; }
+  .shift-expected-box { flex-direction: column; align-items: flex-start; gap: var(--s2); }
+}
+
+/* ── Admin topbar: compact on mobile ─────────────────────── */
+@media (max-width: 500px) {
+  .admin-topbar { padding: 0 var(--s3); }
+  .admin-topbar-title { font-size: 15px; }
+  /* Hide "Buka POS" text, keep icon */
+  .admin-topbar-right .btn span { display: none; }
+}
+
+/* ── Section-header wrap fix on mobile ───────────────────── */
+@media (max-width: 768px) {
+  .section-header { flex-direction: column; align-items: flex-start; }
+  .section-actions { align-self: stretch; }
+}
+
+/* ── Bulk import steps: vertical on mobile ───────────────── */
+@media (max-width: 600px) {
+  .bulk-steps { flex-direction: column; gap: var(--s4); }
+  .bulk-step-connector { display: none; }
+}
+
+/* ── inv-grid responsive ─────────────────────────────────── */
+@media (max-width: 480px) {
+  .inv-grid { grid-template-columns: 1fr 1fr; gap: var(--s3); }
+}
+
+/* ── cash balance card responsive ───────────────────────── */
+@media (max-width: 480px) {
+  .cash-balance-card { flex-direction: column; align-items: flex-start; }
+  .cbc-amount { font-size: 1.5rem; }
+  .cbc-formula { flex-direction: column; gap: var(--s2); }
+  .cbf-op { display: none; }
+}
+
+/* ── trx-item responsive: smaller padding ───────────────── */
+@media (max-width: 480px) {
+  .trx-item { padding: 12px var(--s3); }
+}
+
+/* ── POS alt panel panels: compact stat grid ─────────────── */
+@media (max-width: 480px) {
+  .pos-summary-grid { grid-template-columns: 1fr 1fr; gap: var(--s2); }
+  .pos-inv-grid { grid-template-columns: repeat(2, 1fr); gap: var(--s2); padding: var(--s3); }
+}
+/* ── Transfer Notification Pop-up ──────────────────────── */
+.transfer-notif-detail { background: var(--surface-2, #F9FAFB); border-radius: 12px; padding: 14px; }
+.transfer-notif-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border, #E5E7EB); }
+.transfer-notif-row:last-child { border-bottom: none; }
+.transfer-notif-row .label { color: var(--text-muted); font-size: 13px; }
+.transfer-notif-row .value { font-size: 13px; text-align: right; }
+
+/* ── Product Search Toolbar (admin) ──────────────────────── */
+.section-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+
+/* ── Radio Toggle: Tipe Produk ────────────────────────────── */
+.radio-group { display: flex; flex-direction: column; gap: 8px; }
+.radio-option { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
+.radio-option input[type="radio"] { accent-color: var(--warning, #F97316); width: 16px; height: 16px; }

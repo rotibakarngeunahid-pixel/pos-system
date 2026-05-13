@@ -16,7 +16,7 @@ const inventoryService = {
       p_notes: notes || null,
       p_user_id: createdBy || null
     });
-    if (error) throw error;
+    if (error) throw new Error(error.message || 'Penyesuaian stok gagal di server');
     return { stockBefore: data.stock_before, stockAfter: data.stock_after };
   },
 
@@ -108,7 +108,7 @@ const inventoryService = {
       p_notes: notes || null,
       p_user_id: userId || null
     });
-    if (error) throw error;
+    if (error) throw new Error(error.message || 'Transfer stok gagal di server');
   },
 
   // ── Receive purchase order → add stock ────────────────────────

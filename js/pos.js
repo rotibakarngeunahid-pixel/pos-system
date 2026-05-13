@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const POS = {
   // ── State ────────────────────────────────────────────────────
@@ -36,7 +36,8 @@ const POS = {
         case 'open-printer-settings': POS.closeMobileDrawer(); POS.openPrinterSettings(); break;
         case 'confirm-logout': POS.confirmLogout(); break;
         case 'switch-main-tab': POS.switchMainTab(btn.dataset.tab, btn); break;
-        case 'toggle-mobile-cart': POS.toggleMobileCart(); break;
+        case 'open-cart-view':    POS.switchView('cart');  break;
+        case 'close-cart-view':   POS.switchView('kasir'); break;
         case 'hold-cart': POS.holdCart(); break;
         case 'show-held-carts': POS.showHeldCarts(); break;
         case 'clear-cart': POS.clearCart(); break;
@@ -66,6 +67,7 @@ const POS = {
         case 'filter-category': POS.filterCategory(btn.dataset.cat || 'Semua'); break;
         case 'select-payment-method': POS.selectPaymentMethod(btn, btn.dataset.method); break;
         case 'set-quick-amount': POS.setQuickAmount(safeNum(btn.dataset.amount || 0, 'Quick Amount')); break;
+        // FIX: 'start-new-transaction' was missing from switch-case — added here
         case 'start-new-transaction': POS.startNewTransaction(); break;
         case 'close-receipt': POS.closeReceipt(); break;
         case 'open-shift-modal': openModal('modal-shift'); break;
@@ -77,6 +79,7 @@ const POS = {
         case 'open-stock-adjust-modal': POS.openStockAdjustModal(); break;
         case 'submit-stock-adjust': POS.submitStockAdjust(); break;
         case 'edit-item-price': POS.editItemPrice(Number(btn.dataset.id)); break;
+        // FIX: close-success-popup handler properly resets all locks
         case 'close-success-popup': POS.closeSuccessPopup(); break;
         case 'print-receipt-close': POS.printReceiptAndClose(); break;
         case 'confirm-topping-select': POS.confirmToppingSelect(); break;
@@ -95,6 +98,7 @@ const POS = {
       else if (action === 'load-inventory-summary') POS.loadInventorySummary();
       else if (action === 'save-printer-settings') POS.savePrinterSettings();
       else if (action === 'toggle-discount-input') POS.toggleDiscountInput();
+      else if (action === 'toggle-stock-adj-type') POS.toggleStockAdjType();
     });
     document.addEventListener('input', e => {
       const inputNode = e.target.closest('[data-action-input]');
@@ -105,12 +109,22 @@ const POS = {
       else if (action === 'update-shift-diff') POS.updateShiftDiff(inputNode.value);
     });
 
+    // Handle Android back button / browser popstate
+    window.addEventListener('popstate', () => {
+      const viewCart = document.getElementById('view-cart');
+      if (viewCart && !viewCart.hidden) {
+        POS.switchView('kasir');
+      }
+    });
+
     this.user = auth.requireRole('staff');
     if (!this.user) return;
     this.user = await auth.validateCurrentUser();
     if (!this.user) return;
     const headerStaffEl = document.getElementById('header-staff-name');
     if (headerStaffEl) headerStaffEl.textContent = this.user.name;
+    const staffChip = document.getElementById('header-staff-chip');
+    if (staffChip) staffChip.textContent = this.user.name;
 
     let branch = null;
     if (this.user.branch_id) {
@@ -137,6 +151,10 @@ const POS = {
 
     this.setupSearch();
     this.hideLoader();
+
+    // Poll transfer notifications every 30 seconds
+    this._checkTransferNotifications();
+    this._transferNotifInterval = setInterval(() => this._checkTransferNotifications(), 30_000);
 
     // BUG-04 FIX: Poll session validity every 5 minutes
     setInterval(() => {
@@ -222,10 +240,6 @@ const POS = {
     }
   },
 
-  // BUG-01 FIX: updateShiftUI no longer force-opens modal — modal is opened
-  // explicitly by initShift() only. The cancel handler in the modal footer
-  // (data-action="cancel-shift-modal") calls auth.logout() so user is never
-  // trapped. See pos.html modal-shift for the cancel button.
   updateShiftUI() {
     if (!this.session) {
       // Only open if no session — already handled by initShift/selectBranch
@@ -263,7 +277,8 @@ const POS = {
       try { summary = await cashService.getSummary({ branchId: this.branch.id, sessionId: this.session.id }); } catch(e) {}
     }
     const openingCash  = summary ? summary.openingCash  : parseFloat(this.session.opening_cash || 0);
-    const salesIn      = summary ? summary.salesIn      : parseFloat(this.session.total_sales  || 0);
+    const salesIn      = summary ? summary.salesIn      : 0;
+    const totalSales   = summary ? summary.totalSales   : parseFloat(this.session.total_sales  || 0);
     const manualIn     = summary ? summary.manualIn     : 0;
     const manualOut    = summary ? summary.manualOut    : 0;
     const refundOut    = summary ? summary.refundOut    : 0;
@@ -388,7 +403,7 @@ const POS = {
     // Fetch branch products and branch-specific price overrides in parallel
     const [bpRes, priceRes] = await Promise.all([
       db.from('branch_products')
-        .select(`is_active, products(id, name, image_url, category, product_variants(id, name, price))`)
+        .select(`is_active, products(id, name, image_url, category, has_variants, default_price, product_variants(id, name, price))`)
         .eq('branch_id', this.branch.id)
         .eq('is_active', true),
       db.from('branch_variant_prices')
@@ -414,17 +429,24 @@ const POS = {
     this.allProducts = [];
     data.forEach(row => {
       const p = row.products;
-      if (!p || !p.product_variants?.length) return;
+      if (!p) return;
+
+      const resolvedVariants = (p.product_variants || []).map(v => ({
+        id:    v.id,
+        name:  v.name,
+        price: priceOverride[v.id] !== undefined ? priceOverride[v.id] : parseFloat(v.price)
+      }));
+
+      if (!resolvedVariants.length) return;
+
+      const isSimple = p.has_variants === false;
       this.allProducts.push({
         productId:   p.id,
         productName: p.name,
         category:    p.category || 'Lainnya',
         imageUrl:    p.image_url,
-        variants:    p.product_variants.map(v => ({
-          id:    v.id,
-          name:  v.name,
-          price: priceOverride[v.id] !== undefined ? priceOverride[v.id] : parseFloat(v.price)
-        }))
+        isSimple,
+        variants:    resolvedVariants
       });
     });
 
@@ -454,7 +476,6 @@ const POS = {
     this.renderGrid();
   },
 
-  // BUG-09 FIX: Debounce search input 200ms to avoid re-rendering on every keystroke
   setupSearch() {
     const input = document.getElementById('product-search');
     if (!input) return;
@@ -483,13 +504,15 @@ const POS = {
     }
     const minPrice = p => Math.min(...p.variants.map(v => v.price));
     grid.innerHTML = this.filtered.map(p => {
-      const hasMultiple = p.variants.length > 1;
+      const hasMultiple = !p.isSimple && p.variants.length > 1;
       const priceDisplay = hasMultiple
         ? 'Rp ' + minPrice(p).toLocaleString('id-ID') + '+'
         : formatRupiah(p.variants[0]?.price || 0);
-      const metaText = hasMultiple
-        ? `${p.variants.length} varian`
-        : escapeHtml(p.variants[0]?.name || '');
+      const metaText = p.isSimple
+        ? ''
+        : hasMultiple
+          ? `${p.variants.length} varian`
+          : escapeHtml(p.variants[0]?.name || '');
       const imgHtml = p.imageUrl
         ? `<img loading="lazy" src="${escapeHtml(p.imageUrl)}" alt="${escapeHtml(p.productName)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="pcard-placeholder" style="display:none"><i data-lucide="package" class="icon-lg"></i></div>`
         : `<div class="pcard-placeholder"><i data-lucide="package" class="icon-lg"></i></div>`;
@@ -499,7 +522,6 @@ const POS = {
   },
 
   // ── BOM / Stock Cache ─────────────────────────────────────────
-  // Pre-load all recipe + ingredient data once so add-to-cart is instant (no DB round-trip).
   async preloadBOM() {
     if (!this.allProducts.length) return;
     const allVariantIds = this.allProducts.flatMap(p => p.variants.map(v => v.id));
@@ -547,7 +569,6 @@ const POS = {
     }
   },
 
-  // Refresh only stock levels (cheap: 1 query). Call after each successful transaction.
   async refreshStockCache() {
     if (!this.bomData || !this.branch) return;
     try {
@@ -559,9 +580,6 @@ const POS = {
     } catch (e) { /* non-fatal */ }
   },
 
-  // Delta-based BOM deduction after checkout: only applies the shortfall that the SQL RPC
-  // may have missed (e.g., not multiplying by cart item quantity). Safe to call even if the
-  // RPC already deducted correctly — in that case remaining ≈ 0 and nothing extra happens.
   async _applyBOMDeduction(cart, trxId, preStock) {
     if (!this.bomData || !this.branch) return;
     try {
@@ -595,7 +613,6 @@ const POS = {
     }
   },
 
-  // Delta-based BOM restore after void: only restores the shortfall the SQL RPC may have missed.
   async _applyBOMRestore(txItems, trxId, preStock) {
     if (!this.bomData || !this.branch || !txItems.length) return;
     try {
@@ -629,7 +646,6 @@ const POS = {
     }
   },
 
-  // Synchronous stock check against in-memory cache. Returns same shape as checkBOMStock.
   checkStockFromCache(cart) {
     if (!this.bomData || !this.stockCache) return { ok: true, insufficient: [] };
     const { recipeMap, recipeItemsMap } = this.bomData;
@@ -723,9 +739,9 @@ const POS = {
       productId:   product.productId,
       productName: product.productName,
       variantName: variant.name,
-      price:       variant.price,   // original selling price — used as minimum
-      customPrice: null,            // null = use original price; number = custom override
-      toppings:    toppings,        // [{id, name, price}]
+      price:       variant.price,
+      customPrice: null,
+      toppings:    toppings,
       _toppingKey: toppingKey,
       category:    product.category,
       imageUrl:    product.imageUrl,
@@ -801,7 +817,6 @@ const POS = {
     this.renderCart();
   },
 
-  // BUG-06 FIX: Use showConfirm() from ui.js instead of legacy showConfirmModal()
   async clearCart() {
     if (!this.cart.length) return;
     const ok = await showConfirm({
@@ -896,7 +911,6 @@ const POS = {
     const emptyEl  = document.getElementById('cart-empty');
     const footerEl = document.getElementById('cart-footer');
     const countEl  = document.getElementById('cart-count');
-    const badge    = document.getElementById('mobile-cart-badge');
 
     const subtotal = this.cartSubtotal();
     const disc     = this.calcDiscount(subtotal);
@@ -904,26 +918,18 @@ const POS = {
     const count    = this.cart.reduce((s, i) => s + i.quantity, 0);
 
     if (countEl) countEl.textContent = count;
-    if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'inline-block' : 'none'; }
-    const fabBadge = document.getElementById('fab-cart-count');
-    const fabCartBtn = document.getElementById('mobile-fab-cart');
-    const fabTotal = document.getElementById('fab-cart-total');
-    const pc = document.getElementById('panel-cart');
-    const isCartOpenMobile = pc && pc.classList.contains('mobile-show');
+    const fabBadge   = document.getElementById('fab-cart-count');
+    const fabCartBtn = document.getElementById('fab-cart-btn');
+    const fabTotal   = document.getElementById('fab-cart-total');
 
-    if (fabBadge) {
-      fabBadge.textContent = count;
-      fabBadge.style.display = count > 0 ? 'inline-block' : 'none';
-    }
-    if (fabTotal) {
-      fabTotal.textContent = formatRupiah(total);
-    }
+    if (fabBadge) { fabBadge.textContent = count; fabBadge.style.display = count > 0 ? 'inline-block' : 'none'; }
+    if (fabTotal) { fabTotal.textContent = formatRupiah(total); }
     if (fabCartBtn) {
-      const pKasir = document.getElementById('panel-kasir');
-      // Use getComputedStyle so we catch CSS display:flex (not just inline style)
-      const kasirDisplay = pKasir ? window.getComputedStyle(pKasir).display : 'none';
-      const isKasirVisible = kasirDisplay !== 'none';
-      if (count > 0 && !isCartOpenMobile && isKasirVisible) {
+      const pKasir   = document.getElementById('panel-kasir');
+      const viewCart = document.getElementById('view-cart');
+      const kasirVis  = pKasir ? window.getComputedStyle(pKasir).display !== 'none' : false;
+      const cartShown = viewCart ? !viewCart.hidden : false;
+      if (count > 0 && !cartShown && kasirVis) {
         fabCartBtn.classList.add('show');
       } else {
         fabCartBtn.classList.remove('show');
@@ -932,15 +938,15 @@ const POS = {
 
     if (!this.cart.length) {
       if (itemsEl)  itemsEl.innerHTML = '';
-      if (emptyEl)  emptyEl.style.display  = 'flex';
-      if (footerEl) footerEl.style.display = 'none';
-      if (itemsEl)  itemsEl.style.display  = 'none';
+      if (emptyEl)  emptyEl.classList.remove('hidden');
+      if (footerEl) footerEl.classList.add('hidden');
+      if (itemsEl)  itemsEl.classList.add('hidden');
       return;
     }
 
-    if (emptyEl)  emptyEl.style.display  = 'none';
-    if (footerEl) { footerEl.classList.remove('hidden'); footerEl.style.display = 'block'; }
-    if (itemsEl)  itemsEl.style.display  = 'block';
+    if (emptyEl)  emptyEl.classList.add('hidden');
+    if (footerEl) footerEl.classList.remove('hidden');
+    if (itemsEl)  itemsEl.classList.remove('hidden');
 
     itemsEl.innerHTML = this.cart.map(item => {
       const toppingTotal = (item.toppings || []).reduce((s, t) => s + t.price, 0);
@@ -981,7 +987,7 @@ const POS = {
 
     const discRow = document.getElementById('cart-discount-row');
     if (discRow) {
-      discRow.style.display = disc > 0 ? 'flex' : 'none';
+      discRow.classList.toggle('hidden', disc <= 0);
       const discEl = document.getElementById('cart-discount-text');
       if (discEl) discEl.textContent = '−' + formatRupiah(disc);
     }
@@ -1002,22 +1008,52 @@ const POS = {
     return 0;
   },
 
+  // ── SPA View Swap ─────────────────────────────────────────────
+  switchView(target) {
+    const viewKasir = document.getElementById('view-kasir');
+    const viewCart  = document.getElementById('view-cart');
+    if (!viewKasir || !viewCart) return;
+
+    if (target === 'cart') {
+      this._savedScrollTop = document.getElementById('panel-products')?.scrollTop ?? 0;
+      viewKasir.hidden = true;
+      viewCart.hidden  = false;
+      history.pushState({ posView: 'cart' }, '');
+      this.renderCart();
+    } else {
+      viewCart.hidden  = true;
+      viewKasir.hidden = false;
+      const pp = document.getElementById('panel-products');
+      if (pp && this._savedScrollTop) pp.scrollTop = this._savedScrollTop;
+      this.renderCart();
+    }
+  },
+
   // ── Tab Switching ─────────────────────────────────────────────
   switchMainTab(tab, btnEl) {
     this.currentMainTab = tab;
     document.querySelectorAll('.pos-tab-item').forEach(b => b.classList.remove('active'));
     if (btnEl) btnEl.classList.add('active');
 
-    const altPanels = ['panel-summary','panel-stock','panel-cash','panel-transactions'];
+    const altPanels = ['panel-summary','panel-stock','panel-cash','panel-deposits','panel-transactions'];
     document.getElementById('panel-kasir').style.display = tab === 'kasir' ? '' : 'none';
     altPanels.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.classList.toggle('active', id === 'panel-' + tab);
     });
 
+    if (tab === 'kasir') {
+      // reset to products view whenever switching back to kasir
+      const viewCart  = document.getElementById('view-cart');
+      const viewKasir = document.getElementById('view-kasir');
+      if (viewCart)  viewCart.hidden  = true;
+      if (viewKasir) viewKasir.hidden = false;
+      this.renderCart();
+    }
     if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
     if (tab === 'stock')        this.loadInventorySummary();
     if (tab === 'cash')         this.updateCashSummary();
+    if (tab === 'deposits')     { if (window.depositUi && typeof depositUi.refresh === 'function') depositUi.refresh(); }
     if (tab === 'transactions') this.loadSessionTransactions();
   },
 
@@ -1025,29 +1061,28 @@ const POS = {
     document.querySelectorAll('.drawer-btn').forEach(b => b.classList.remove('active'));
     if (btnEl) btnEl.classList.add('active');
 
-    if (tab === 'kasir' || tab === 'cart') {
+    if (tab === 'kasir') {
       document.getElementById('panel-kasir').style.display = '';
       ['panel-summary','panel-stock','panel-cash','panel-transactions'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.remove('active');
       });
-      const pp = document.getElementById('panel-products');
-      const pc = document.getElementById('panel-cart');
-      if (tab === 'kasir') {
-        pp.classList.remove('mobile-hide'); pc.classList.remove('mobile-show');
-      } else {
-        pp.classList.add('mobile-hide'); pc.classList.add('mobile-show');
-      }
+      // always reset to products view when navigating back to kasir
+      const viewCart  = document.getElementById('view-cart');
+      const viewKasir = document.getElementById('view-kasir');
+      if (viewCart)  viewCart.hidden  = true;
+      if (viewKasir) viewKasir.hidden = false;
       this.renderCart();
     } else {
       document.getElementById('panel-kasir').style.display = 'none';
-      ['panel-summary','panel-stock','panel-cash','panel-transactions'].forEach(id => {
+      ['panel-summary','panel-stock','panel-cash','panel-deposits','panel-transactions'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.toggle('active', id === 'panel-' + tab);
       });
       if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
       if (tab === 'stock')        this.loadInventorySummary();
       if (tab === 'cash')         this.updateCashSummary();
+      if (tab === 'deposits')     { if (window.depositUi && typeof depositUi.refresh === 'function') depositUi.refresh(); }
       if (tab === 'transactions') this.loadSessionTransactions();
     }
 
@@ -1088,20 +1123,8 @@ const POS = {
   },
 
   toggleMobileCart() {
-    const pc = document.getElementById('panel-cart');
-    const pp = document.getElementById('panel-products');
-    if (pc && pp) {
-      if (pc.classList.contains('mobile-show')) {
-        // Hide cart, show products
-        pc.classList.remove('mobile-show');
-        pp.classList.remove('mobile-hide');
-      } else {
-        // Show cart, hide products
-        pc.classList.add('mobile-show');
-        pp.classList.add('mobile-hide');
-      }
-      this.renderCart();
-    }
+    // Legacy method — now delegates to SPA view swap
+    this.switchView('cart');
   },
 
   // ── Summary / Stock / Cash panels ────────────────────────────
@@ -1162,11 +1185,15 @@ const POS = {
 
     const methodLabel = { cash: 'Tunai', qris: 'QRIS', transfer: 'Transfer' };
     const dateLabel = filterDate === businessDate ? 'Hari Ini' : filterDate;
+    const summarySubLabel = filterDate === businessDate ? 'Semua shift hari ini' : 'Semua shift tanggal ini';
 
     if (statsEl) statsEl.innerHTML = `
       <div class="pos-stat-card pos-stat-card-hero">
         <div class="pos-stat-label" style="color:rgba(255,255,255,0.65)">${dateLabel}${filterMethod !== 'all' ? ' · ' + (methodLabel[filterMethod] || filterMethod) : ''}</div>
         <div class="pos-stat-value" style="color:#fff;font-size:28px">${formatRupiah(totalRev)}</div>
+        <div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:4px;font-weight:500;letter-spacing:0.3px">
+          ${summarySubLabel}
+        </div>
       </div>
       <div class="pos-stat-card">
         <div class="pos-stat-label">Total Transaksi</div>
@@ -1211,7 +1238,6 @@ const POS = {
     const filterDate   = dateEl?.value || businessDate;
     const { from, to } = fmt.getBusinessDateRange(filterDate);
 
-    // Fetch current stock + usage logs + manual adjustment logs for selected date
     const [stockRes, logsRes, manualLogsRes] = await Promise.all([
       db.from('branch_inventory').select('stock, ingredient_id, ingredients(name, unit)').eq('branch_id', this.branch.id),
       db.from('inventory_logs')
@@ -1233,7 +1259,6 @@ const POS = {
     const logs        = logsRes.data || [];
     const manualLogs  = manualLogsRes.data || [];
 
-    // Map usage by ingredient_id
     const usageMap = {};
     logs.forEach(l => {
       const id = l.ingredient_id;
@@ -1247,7 +1272,6 @@ const POS = {
       return;
     }
 
-    // Build stock list
     grid.innerHTML = `
       <div class="trx-list" style="grid-column:1/-1; background:var(--surface); border-radius:var(--r-lg); border:1px solid var(--border); overflow:hidden;">
         ${stockData.map((r, idx) => {
@@ -1277,7 +1301,6 @@ const POS = {
         }).join('')}
       </div>`;
 
-    // Render manual adjustment history
     const logSection = document.getElementById('stock-log-section');
     if (logSection) {
       if (manualLogs.length) {
@@ -1319,27 +1342,36 @@ const POS = {
   // ── Stock Adjust (Staff & Admin) ──────────────────────────────
   async openStockAdjustModal() {
     if (!this.branch) return;
-    // Query ALL ingredients (not only those already in branch_inventory)
-    // so newly added ingredients are always visible
-    const { data: ingredients, error } = await db.from('ingredients')
-      .select('id, name, unit')
-      .order('name');
+    const [ingRes, branchRes] = await Promise.all([
+      db.from('ingredients').select('id, name, unit').order('name'),
+      db.from('branches').select('id, name').order('name')
+    ]);
 
     const sel = document.getElementById('stock-adj-ingredient');
     if (!sel) return;
 
-    if (error || !ingredients?.length) {
+    if (ingRes.error || !ingRes.data?.length) {
       showToast('Belum ada bahan baku terdaftar. Tambahkan di menu Admin → Bahan Baku.', 'warning');
       return;
     }
 
-    sel.innerHTML = ingredients
+    sel.innerHTML = ingRes.data
       .map(i => `<option value="${i.id}">${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`)
       .join('');
+
+    const targetSel = document.getElementById('stock-adj-target-branch');
+    if (targetSel) {
+      targetSel.innerHTML = (branchRes.data || [])
+        .filter(b => b.id !== this.branch.id)
+        .map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`)
+        .join('');
+    }
 
     document.getElementById('stock-adj-qty').value   = '';
     document.getElementById('stock-adj-notes').value = '';
     document.getElementById('stock-adj-type').value  = 'in';
+    const transferDiv = document.getElementById('stock-adj-transfer-target');
+    if (transferDiv) transferDiv.style.display = 'none';
     openModal('modal-stock-adjust');
   },
 
@@ -1358,6 +1390,37 @@ const POS = {
     if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
 
     try {
+      if (type === 'transfer') {
+        const targetBranchId = parseInt(document.getElementById('stock-adj-target-branch').value);
+        if (!targetBranchId) throw new Error('Pilih outlet tujuan');
+        if (targetBranchId === this.branch.id) throw new Error('Outlet tujuan tidak boleh sama');
+
+        await inventoryService.transferStock({
+          fromBranchId: this.branch.id,
+          toBranchId:   targetBranchId,
+          ingredientId,
+          qty,
+          notes:        notes || `Transfer dari ${this.branch.name}`,
+          userId:       this.user.id
+        });
+
+        await db.from('stock_transfer_notifications').insert({
+          from_branch_id: this.branch.id,
+          to_branch_id:   targetBranchId,
+          ingredient_id:  ingredientId,
+          qty,
+          notes:          notes || null,
+          created_by:     this.user.id,
+          is_read:        false
+        });
+
+        closeModal('modal-stock-adjust');
+        this.loadInventorySummary();
+        this.refreshStockCache();
+        showToast('Transfer stok berhasil', 'success');
+        return;
+      }
+
       await inventoryService.adjustStock({
         branchId:      this.branch.id,
         ingredientId,
@@ -1376,6 +1439,92 @@ const POS = {
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check" class="icon-sm"></i> Simpan'; if (window.lucide) lucide.createIcons(); }
     }
+  },
+
+  // ── Stock Adjust: Toggle Transfer Target ─────────────────────
+  toggleStockAdjType() {
+    const type        = document.getElementById('stock-adj-type').value;
+    const transferDiv = document.getElementById('stock-adj-transfer-target');
+    if (transferDiv) transferDiv.style.display = type === 'transfer' ? '' : 'none';
+  },
+
+  // ── Transfer Notifications Polling ───────────────────────────
+  async _checkTransferNotifications() {
+    if (!this.branch?.id) return;
+    try {
+      const { data: notifs } = await db.from('stock_transfer_notifications')
+        .select('id, qty, notes, created_at, from_branch_id, ingredient_id, branches!from_branch_id(name), ingredients(name, unit)')
+        .eq('to_branch_id', this.branch.id)
+        .eq('is_read', false)
+        .order('created_at', { ascending: true })
+        .limit(5);
+
+      if (!notifs?.length) return;
+      this._showTransferNotif(notifs, 0);
+    } catch (e) {
+      console.warn('[POS] Transfer notif check failed:', e.message);
+    }
+  },
+
+  async _showTransferNotif(notifs, index) {
+    if (index >= notifs.length) return;
+    const n = notifs[index];
+
+    const fromName = n.branches?.name || 'Outlet lain';
+    const ingName  = n.ingredients?.name || '?';
+    const ingUnit  = n.ingredients?.unit || '';
+    const qty      = parseFloat(n.qty);
+
+    const body = document.getElementById('transfer-notif-body');
+    body.innerHTML = `
+      <p style="color:var(--text-muted);font-size:13px;margin:0 0 12px;">Transfer baru diterima:</p>
+      <div class="transfer-notif-detail">
+        <div class="transfer-notif-row">
+          <span class="label">Dari Outlet</span>
+          <span class="value fw-700">${escapeHtml(fromName)}</span>
+        </div>
+        <div class="transfer-notif-row">
+          <span class="label">Bahan</span>
+          <span class="value">${escapeHtml(ingName)}</span>
+        </div>
+        <div class="transfer-notif-row">
+          <span class="label">Jumlah Masuk</span>
+          <span class="value fw-700" style="color:var(--success);">+${qty.toLocaleString('id-ID')} ${escapeHtml(ingUnit)}</span>
+        </div>
+      </div>`;
+
+    const modal     = document.getElementById('modal-transfer-notif');
+    const btn       = document.getElementById('btn-close-transfer-notif');
+    const countdown = document.getElementById('transfer-notif-countdown');
+
+    modal.style.display = 'flex';
+    btn.disabled = true;
+    countdown.textContent = '3';
+
+    let secs = 3;
+    const timer = setInterval(() => {
+      secs--;
+      countdown.textContent = secs;
+      if (secs <= 0) {
+        clearInterval(timer);
+        btn.disabled = false;
+        btn.textContent = 'Mengerti';
+      }
+    }, 1000);
+
+    const closeHandler = async () => {
+      clearInterval(timer);
+      modal.style.display = 'none';
+      btn.removeEventListener('click', closeHandler);
+      try {
+        await db.from('stock_transfer_notifications').update({ is_read: true }).eq('id', n.id);
+      } catch (e) {
+        console.warn('[POS] mark notif read failed:', e.message);
+      }
+      this._showTransferNotif(notifs, index + 1);
+      if (this.currentMainTab === 'stock') this.loadInventorySummary();
+    };
+    btn.addEventListener('click', closeHandler);
   },
 
   // ── Harga Custom per Item ────────────────────────────────────
@@ -1406,7 +1555,7 @@ const POS = {
     showToast(item.customPrice ? `Harga diubah ke ${formatRupiah(newPrice)}` : 'Harga dikembalikan ke harga normal', 'success');
   },
 
-  // ── Cash Tab (redesigned with sub-tabs: Masuk / Keluar) ─────
+  // ── Cash Tab ─────────────────────────────────────────────────
   _cashSubTab: 'in',
 
   async updateCashSummary() {
@@ -1427,6 +1576,7 @@ const POS = {
     try { summary = await cashService.getSummary({ branchId: this.branch.id, sessionId: this.session.id }); } catch(e){}
     const openingCash  = summary?.openingCash  ?? parseFloat(this.session.opening_cash || 0);
     const salesIn      = summary?.salesIn      ?? 0;
+    const totalSales   = summary?.totalSales   ?? parseFloat(this.session.total_sales || salesIn);
     const manualIn     = summary?.manualIn     ?? 0;
     const manualOut    = summary?.manualOut    ?? 0;
     const expectedCash = summary?.expectedCash ?? (openingCash + salesIn + manualIn - manualOut);
@@ -1440,7 +1590,6 @@ const POS = {
 
     let logs = [];
     try { logs = await cashService.getLogs({ branchId: this.branch.id, sessionId: this.session.id, includeVoided: true, limit: 100 }); } catch(e){}
-    // Hanya tampilkan kas masuk/keluar manual (bukan dari penjualan otomatis)
     const filteredLogs = logs.filter(l => l.type === tab && l.reference_type === 'manual');
 
     const logsHtml = filteredLogs.length
@@ -1463,12 +1612,13 @@ const POS = {
 
     el.innerHTML = `
       <div class="flex flex-col gap-3">
-
-        <!-- Summary stats -->
         <div class="cash-stats-grid">
           <div class="cash-stat-card cash-stat-hero">
-            <div class="cash-stat-label">Penjualan Shift</div>
+            <div class="cash-stat-label">Penjualan Tunai Shift</div>
             <div class="cash-stat-value">${formatRupiah(salesIn)}</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:4px;font-weight:500;letter-spacing:0.3px">
+              Shift ini saja · Untuk rekonsiliasi laci
+            </div>
           </div>
           <div class="cash-stat-card">
             <div class="cash-stat-label">Kas Awal</div>
@@ -1488,7 +1638,6 @@ const POS = {
           </div>
         </div>
 
-        <!-- Sub-tab pills -->
         <div class="cash-subtab-bar">
           <button class="cash-subtab-btn ${tab==='in'?'active-in':''}" data-action="switch-cash-subtab" data-type="in">
             <i data-lucide="trending-up" class="icon-sm"></i> Kas Masuk
@@ -1498,7 +1647,6 @@ const POS = {
           </button>
         </div>
 
-        <!-- Entry form -->
         <div class="card">
           <div class="card-header">
             <span class="card-title">${tab==='in'?'Catat Kas Masuk':'Catat Kas Keluar'}</span>
@@ -1529,7 +1677,6 @@ const POS = {
           </div>
         </div>
 
-        <!-- Log list -->
         <div class="card">
           <div class="card-header">
             <span class="card-title">Log ${tab==='in'?'Kas Masuk':'Kas Keluar'}</span>
@@ -1574,7 +1721,6 @@ const POS = {
     }
   },
 
-
   async submitCashEntry() {
     if (!this.session) { showToast('Buka shift terlebih dahulu', 'warning'); return; }
     const type     = this._cashSubTab || 'in';
@@ -1602,8 +1748,6 @@ const POS = {
       showToast('Gagal: ' + e.message, 'error');
     }
   },
-
-
 
   // ── Payment Modal ────────────────────────────────────────────
   async openPaymentModal() {
@@ -1644,7 +1788,6 @@ const POS = {
     document.getElementById('cash-received').value    = '';
     document.getElementById('change-display').style.display = 'none';
 
-    // Render payment method buttons from Supabase (fallback to localStorage/defaults)
     try {
       const defaultMethods = [
         { code: 'cash', label: 'Tunai', icon: '' },
@@ -1657,11 +1800,9 @@ const POS = {
         const { data, error } = await db.from('payment_methods').select('code, label, fee_label, fee_percent, is_active').eq('is_active', true).order('id');
         if (!error && Array.isArray(data) && data.length) methods = data;
       } catch (dbErr) {
-        // fallback to localStorage if DB unavailable
         const settings = JSON.parse(localStorage.getItem('pos_settings') || '{}');
         if (Array.isArray(settings.paymentMethods) && settings.paymentMethods.length) methods = settings.paymentMethods;
       }
-      // BUG FIX: Cache methods so showReceipt can resolve custom method labels
       POS._paymentMethodsCache = methods;
 
       const pmWrap = document.querySelector('.payment-methods');
@@ -1685,7 +1826,6 @@ const POS = {
       const defaultCode = methods.find(m => m.code === 'cash') ? 'cash' : (methods[0] && methods[0].code) || 'cash';
       this.selectPaymentMethod(document.querySelector(`.payment-method-btn[data-method="${defaultCode}"]`), defaultCode);
     } catch (e) {
-      // last resort fallback
       this.selectPaymentMethod(document.querySelector('.payment-method-btn[data-method="cash"]'), 'cash');
     }
     openModal('modal-payment');
@@ -1717,7 +1857,6 @@ const POS = {
     showToast('Diskon diterapkan: ' + formatRupiah(this.calcDiscount(subtotal)), 'success');
   },
 
-  // Preview diskon real-time tanpa mengubah state (dipanggil via oninput)
   applyDiscountPreview() {
     const type     = document.getElementById('discount-type').value;
     const rawValue = parseFloat(document.getElementById('discount-value').value) || 0;
@@ -1732,7 +1871,6 @@ const POS = {
       ? Math.round(subtotal * rawValue / 100)
       : Math.min(rawValue, subtotal);
 
-    // Update only the payment modal display — do not mutate this.discount
     const discEl  = document.getElementById('payment-discount-display');
     const totalEl = document.getElementById('payment-total-display');
     const activeBtn = document.querySelector('.payment-method-btn.active');
@@ -1745,7 +1883,6 @@ const POS = {
     if (totalEl) totalEl.textContent = formatRupiah(total);
   },
 
-  // Helper: update discount/fee/total displays in payment modal
   _updatePaymentTotals() {
     const subtotal  = this.cartSubtotal();
     const disc      = this.calcDiscount(subtotal);
@@ -1762,12 +1899,10 @@ const POS = {
 
   selectPaymentMethod(btn, method) {
     this.paymentMethod = method;
-    // Find full method data (for fee)
     this.paymentMethodData = null;
     document.querySelectorAll('.payment-method-btn').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
 
-    // Try get method data from button dataset or cached methods
     const feeRow = document.getElementById('payment-fee-row');
     const feeEl  = document.getElementById('payment-fee-display');
     const feePct = btn ? parseFloat(btn.dataset.feePct || 0) : 0;
@@ -1813,18 +1948,25 @@ const POS = {
   closePaymentModal() { closeModal('modal-payment'); this._updatePaymentTotals(); },
 
   // ── Checkout ─────────────────────────────────────────────────
-  // BUG-03 FIX: Disable button and set checkoutInProgress flag at the very top
   async confirmCheckout() {
     if (this._checkoutLock) return;
-    // Guard checks BEFORE disabling button to prevent flash
     if (this.loading || !this.cart.length) return;
     if (!this.session) { showToast('Buka shift terlebih dahulu sebelum checkout', 'warning'); return; }
     this._checkoutLock = true;
+
     let clientTxId;
     try {
       clientTxId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') ? crypto.randomUUID() : null;
     } catch (e) { clientTxId = null; }
-    if (!clientTxId) clientTxId = 'cli-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
+    // FIX: Fallback harus menghasilkan UUID v4 valid (format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
+    // agar tidak menyebabkan error "invalid input syntax for type uuid" di PostgreSQL
+    if (!clientTxId) {
+      clientTxId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
 
     const subtotal = this.cartSubtotal();
     const disc     = this.calcDiscount(subtotal);
@@ -1853,7 +1995,7 @@ const POS = {
 
     const btn = document.getElementById('btn-confirm-pay');
 
-    // Prevent stock/checkout races: verify BOM stock again immediately before processing
+    // FIX: Set loading true only while DB operations run, reset it BEFORE showing success popup
     this.loading = true;
     try {
       const stockCheck = await inventoryService.checkBOMStock({ cart: this.cart, branchId: this.branch.id });
@@ -1876,10 +2018,8 @@ const POS = {
       return;
     }
 
-    // Idempotency: track clientTxIds to avoid duplicate submissions
     this._pendingTxIds = this._pendingTxIds || new Set();
 
-    // Prevent duplicate client-side submission (extremely unlikely due to fresh UUID)
     if (this._pendingTxIds.has(clientTxId)) {
       showToast('Transaksi sedang diproses...', 'warning');
       this._checkoutLock = false;
@@ -1891,11 +2031,9 @@ const POS = {
 
     if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
 
-    // Snapshot stock BEFORE transaction so _applyBOMDeduction can compute delta
     const preCheckoutStock = new Map(this.stockCache || []);
 
     try {
-      // Map effective prices (custom overrides + toppings) before sending to DB
       const cartForTx = this.cart.map(i => {
         const toppingTotal = (i.toppings || []).reduce((s, t) => s + t.price, 0);
         const toppingNote  = i.toppings?.length ? ` [${i.toppings.map(t=>t.name).join(', ')}]` : '';
@@ -1922,16 +2060,20 @@ const POS = {
       const savedCart = [...this.cart];
       this.cart = [];
       this.discount = { type: 'none', value: 0 };
+
+      // FIX: Reset loading flag BEFORE showPostPaymentScreen so UI is interactive
+      this.loading = false;
+
       this.renderCart();
       this.showPostPaymentScreen(result, savedCart, method);
-      // Deduct BOM stock using actual cart quantities; only fixes shortfall from SQL RPC
+
+      // Run BOM deduction async without blocking UI
       this._applyBOMDeduction(savedCart, result.trx.id, preCheckoutStock);
       if (this.currentMainTab === 'summary') this.loadSalesSummary();
       if (this.currentMainTab === 'stock') this.loadInventorySummary();
 
     } catch (err) {
       console.error(err);
-      // Recovery attempt: maybe the transaction was processed server-side already
       try {
         const recovered = await transactionService.getTransactionByClientTxId(clientTxId);
         if (recovered && recovered.trx) {
@@ -1939,6 +2081,10 @@ const POS = {
           const savedCart = [...this.cart];
           this.cart = [];
           this.discount = { type: 'none', value: 0 };
+
+          // FIX: Reset loading flag BEFORE showPostPaymentScreen on recovery path too
+          this.loading = false;
+
           this.renderCart();
           this.showPostPaymentScreen(recovered, savedCart, method);
           this._applyBOMDeduction(savedCart, recovered.trx.id, preCheckoutStock);
@@ -1953,7 +2099,8 @@ const POS = {
     } finally {
       if (this._pendingTxIds) this._pendingTxIds.delete(clientTxId);
       this._checkoutLock = false;
-      this.loading    = false;
+      // FIX: Only reset loading here if it wasn't already reset in the success path above
+      if (this.loading) this.loading = false;
       if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
     }
   },
@@ -1966,12 +2113,10 @@ const POS = {
     // Pre-render receipt silently so it is ready to print
     this.showReceipt(trx, subtotal, disc, total, received, change, method, savedCart, true);
 
-    // Resolve payment method label
     const staticLabels = { cash:'Tunai', qris:'QRIS', transfer:'Transfer' };
     const cachedMethod = (POS._paymentMethodsCache || []).find(m => m.code === method);
     const mLabel = cachedMethod?.label || staticLabels[method] || method;
 
-    // Populate success popup info
     const metaEl = document.getElementById('success-popup-meta');
     if (metaEl) {
       metaEl.innerHTML =
@@ -1981,30 +2126,39 @@ const POS = {
         '<div class="spop-row" style="font-size:11px;color:var(--text-muted);"><span>No. Transaksi</span><span>#' + trx.id + '</span></div>';
     }
 
-    // Show popup immediately - no delay
     openModal('modal-success-trx');
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
 
-    // Auto-print if configured
     if (localStorage.getItem('printer_auto_print') === 'true') {
       requestAnimationFrame(() => window.print());
     }
   },
 
+  // FIX: closeSuccessPopup now also ensures all locks are cleared
   closeSuccessPopup() {
     closeModal('modal-success-trx');
+    this._checkoutLock = false;
+    this.loading = false;
+    this.switchView('kasir');
     showToast('Siap untuk transaksi berikutnya', 'success');
   },
 
   printReceiptAndClose() {
     window.print();
     closeModal('modal-success-trx');
+    this._checkoutLock = false;
+    this.loading = false;
+    this.switchView('kasir');
     showToast('Siap untuk transaksi berikutnya', 'success');
   },
 
+  // FIX: startNewTransaction properly closes modal and resets state
   startNewTransaction() {
     closeModal('modal-receipt');
     closeModal('modal-success-trx');
+    // Ensure all locks are cleared so next transaction works
+    this._checkoutLock = false;
+    this.loading = false;
     showToast('Siap untuk transaksi berikutnya', 'success');
   },
 
@@ -2013,7 +2167,6 @@ const POS = {
     const now    = new Date(trx.created_at || Date.now());
     const date   = now.toLocaleDateString('id-ID', { day:'2-digit', month:'long', year:'numeric' });
     const time   = now.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
-    // BUG FIX: resolve label from cached payment methods first, fallback to static map, then raw code
     const staticLabels = { cash:'Tunai', qris:'QRIS', transfer:'Transfer' };
     const cachedMethod = (POS._paymentMethodsCache || []).find(m => m.code === method);
     const mLabel = cachedMethod?.label || staticLabels[method] || method;
@@ -2179,26 +2332,22 @@ const POS = {
     });
     if (!ok) return;
     try {
-      // Fetch transaction items before void so we can restore BOM stock with correct quantities
       let txItems = [];
       try {
         const { data } = await db.from('transaction_items')
           .select('variant_id, quantity')
           .eq('transaction_id', id);
         txItems = data || [];
-      } catch (e) { /* non-fatal — stock restore will be skipped if fetch fails */ }
+      } catch (e) { /* non-fatal */ }
 
-      // Snapshot stock levels before void for delta-based restore
       const preVoidStock = new Map(this.stockCache || []);
 
       await transactionService.voidTransaction({ transactionId: id, reason: reason.trim(), userId: this.user.id });
       showToast('Transaksi berhasil di-void', 'success');
       closeModal('modal-pos-trx-detail');
 
-      // Restore BOM stock using actual transaction quantities; only fixes shortfall from SQL RPC
       this._applyBOMRestore(txItems, id, preVoidStock);
 
-      // BUG 4 FIX: refresh session counters, transaction list, and cash summary after void
       await this.initShift();
       this.loadSessionTransactions();
       if (this.currentMainTab === 'cash') this.updateCashSummary();
@@ -2207,8 +2356,6 @@ const POS = {
       showToast('Gagal void: ' + e.message, 'error');
     }
   },
-
-  // confirmLogout defined once at line ~819 above — this duplicate is removed
 
   closeReceipt() { closeModal('modal-receipt'); },
   hideLoader()   { document.getElementById('page-loader').style.display = 'none'; },
@@ -2306,14 +2453,8 @@ const POS = {
 };
 
 // ── Global helpers ─────────────────────────────────────────────
-// `formatRupiah` and `escapeHtml` provided by js/utils/formatter.js
 function roundUp(val, to) { return Math.ceil(val / to) * to; }
-// Modal/loader helpers are provided by `js/utils/formatter.js` (openModal/closeModal/showLoader/hideLoader)
-// `showToast` provided by js/utils/formatter.js
 
-// Legacy confirm modal removed — use `showConfirm()` from js/ui.js instead.
-
-// Refresh payment-method buttons from a settings object (used by storage sync)
 function refreshPaymentMethodsFromSettings(settings) {
   if (!settings) return;
   const methods = Array.isArray(settings.paymentMethods) && settings.paymentMethods.length ? settings.paymentMethods : null;
@@ -2330,7 +2471,6 @@ function refreshPaymentMethodsFromSettings(settings) {
   POS.selectPaymentMethod(document.querySelector(`.payment-method-btn[data-method="${defaultCode}"]`), defaultCode);
 }
 
-// When admin updates settings in another tab, update payment methods live
 window.addEventListener('storage', (e) => {
   if (e.key !== 'pos_settings') return;
   try {
@@ -2395,12 +2535,16 @@ POS.testPrint = function() {
 
 document.addEventListener('DOMContentLoaded', () => POS.init());
 
-// Global overlay click handler for modals: close when clicking the overlay
+// Global overlay click handler: close modal when clicking the backdrop
 document.addEventListener('click', function(e) {
   if (!e.target.classList || !e.target.classList.contains('modal-overlay')) return;
   const lockedModals = ['modal-shift', 'modal-branch'];
   if (lockedModals.includes(e.target.id)) return;
-  // Do not allow closing payment modal while checkout is locked/in-progress
+  // Do not close payment modal while checkout is locked/in-progress
   if (e.target.id === 'modal-payment' && typeof POS !== 'undefined' && POS._checkoutLock) return;
+  // FIX: Do NOT close success modal via overlay click — use the buttons inside instead
+  // (previously the overlay had data-action="close-success-popup" which conflicted with
+  //  stopPropagation on the card, causing intermittent non-responsiveness)
+  if (e.target.id === 'modal-success-trx') return;
   e.target.classList.remove('active');
 });
