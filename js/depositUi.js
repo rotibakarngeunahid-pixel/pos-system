@@ -80,7 +80,7 @@ const depositUi = {
       this.el.accountEmpty.textContent = 'Belum ada metode setoran aktif. Hubungi admin.';
     }
     try {
-      this.accounts = await depositService.getAccounts();
+      this.accounts = await depositService.getAccounts({ branchId });
     } catch (e) {
       console.error('getAccounts', e);
       this.accountLoadError = e.message || 'Gagal memuat metode setoran';
@@ -90,8 +90,12 @@ const depositUi = {
     this.renderAccounts();
 
     try {
-      const summary = await cashService.getSummary({ branchId, sessionId });
-      this.expectedCash = summary?.expectedCash || 0;
+      if (!sessionId) {
+        this.expectedCash = 0;
+      } else {
+        const summary = await cashService.getSummary({ branchId, sessionId });
+        this.expectedCash = summary?.expectedCash || 0;
+      }
     } catch (e) {
       this.expectedCash = 0;
     }

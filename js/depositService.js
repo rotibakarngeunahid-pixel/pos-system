@@ -14,10 +14,17 @@ const depositService = {
     }
   },
 
-  async getAccounts() {
-    const query = db.from('deposit_accounts')
+  async getAccounts({ branchId = null } = {}) {
+    let query = db.from('deposit_accounts')
       .select('*')
-      .eq('is_active', true)
+      .eq('is_active', true);
+
+    if (branchId) {
+      query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
+    }
+
+    query = query
+      .order('branch_id', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
 
     const { data, error } = await this.withTimeout(

@@ -106,11 +106,35 @@ const cashService = {
     return true;
   },
 
+  async getCashTransactionSummary({ branchId, sessionId = null, dateFrom = null, dateTo = null }) {
+    let q = db.from('transactions')
+      .select('id, total, status, payment_method, session_id')
+      .eq('branch_id', branchId)
+      .eq('payment_method', 'cash');
+
+    if (sessionId) {
+      q = q.eq('session_id', sessionId);
+    } else {
+      if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
+      if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59');
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const rows = data || [];
+    const completed = rows.filter(r => r.status === 'completed');
+    return {
+      totalCompleted: completed.reduce((s, r) => s + parseFloat(r.total || 0), 0),
+      scopedCashTransactionIds: new Set(rows.map(r => Number(r.id)).filter(Boolean))
+    };
+  },
+
   // ── Get cash summary for a session or date range ──────────────
-  // Returns: { openingCash, salesIn, cashIn, cashOut, refundOut, voidOut, expectedCash }
+  // Returns: { openingCash, salesIn, cashIn, cashOut, refundOut, voidOut, depositOut, expectedCash }
   async getSummary({ branchId, sessionId = null, dateFrom = null, dateTo = null, includeVoided = true }) {
     let q = db.from('cash_logs')
-      .select('type, amount, reference_type, is_void, session_id')
+      .select('type, amount, reference_type, reference_id, is_void, session_id')
       .eq('branch_id', branchId);
     if (!includeVoided) q = q.eq('is_void', false);
 
@@ -130,12 +154,15 @@ const cashService = {
     // Filter out voided rows to prevent them from affecting the expected cash calculations
     const validRows = rows.filter(r => !r.is_void);
 
-    const salesIn   = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'sale'));
+    const salesFromLogs = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'sale'));
     const manualIn  = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'manual'));
     const manualOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'manual'));
     const refundOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'refund'));
+    const depositOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'deposit'));
     const openingIn = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'opening'));
-    const voidOut   = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'void'));
+    const voidRows  = validRows.filter(r => r.type === 'out' && r.reference_type === 'void');
+    let voidOut     = sum(voidRows);
+    let salesIn     = salesFromLogs;
 
     // Opening cash comes from session record, not logs — fetch separately
     let openingCash = openingIn;
@@ -147,8 +174,19 @@ const cashService = {
       totalSales  = parseFloat(sess?.total_sales  || 0);
     }
 
-    // BUG 2A FIX: voidOut is now included in expectedCash and totalOut
-    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut;
+    try {
+      const txSummary = await this.getCashTransactionSummary({ branchId, sessionId, dateFrom, dateTo });
+      salesIn = txSummary.totalCompleted;
+      if (!sessionId) totalSales = salesIn;
+
+      if (txSummary.scopedCashTransactionIds?.size) {
+        voidOut = sum(voidRows.filter(r => !txSummary.scopedCashTransactionIds.has(Number(r.reference_id))));
+      }
+    } catch (e) {
+      console.warn('cashService.getSummary: fallback to cash_logs sales total', e);
+    }
+
+    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut - depositOut;
 
     return {
       openingCash,
@@ -159,9 +197,10 @@ const cashService = {
       manualOut,
       refundOut,
       voidOut,
+      depositOut,
       expectedCash,
       totalIn:  openingCash + salesIn + manualIn,
-      totalOut: manualOut + refundOut + voidOut
+      totalOut: manualOut + refundOut + voidOut + depositOut
     };
   },
 
