@@ -51,8 +51,6 @@ const depositUi = {
     this.el.accountSelect = document.getElementById('deposit-account-select');
     this.el.accountOptions = document.getElementById('deposit-account-options');
     this.el.accountEmpty = document.getElementById('deposit-account-empty');
-    this.el.referenceWrap = document.getElementById('deposit-reference-wrap');
-    this.el.referenceInput = document.getElementById('deposit-transfer-reference');
     this.el.fileInput = document.getElementById('deposit-proof-file');
     this.el.proofZone = document.getElementById('deposit-proof-zone');
     this.el.uploadEmpty = document.getElementById('deposit-upload-empty');
@@ -86,7 +84,6 @@ const depositUi = {
         this.selectAccount(card.dataset.depositAccountId);
       });
     }
-    if (this.el.referenceInput) this.el.referenceInput.addEventListener('input', () => this.updateSubmitState());
     if (this.el.fileInput) this.el.fileInput.addEventListener('change', e => this.onFileChange(e.target.files));
     this.bindUploadZone();
     if (this.el.submitBtn) this.el.submitBtn.addEventListener('click', () => this.onSubmit());
@@ -324,9 +321,6 @@ const depositUi = {
 
   updateMethodDependentFields() {
     const account = this.getSelectedAccount();
-    const isTransfer = this.isTransferAccount(account);
-    if (this.el.referenceWrap) this.el.referenceWrap.style.display = isTransfer ? '' : 'none';
-    if (!isTransfer && this.el.referenceInput) this.el.referenceInput.value = '';
     if (this.el.proofHint) {
       this.el.proofHint.textContent = this.isProofRequired(account)
         ? 'Wajib untuk transfer bank. Format JPG, PNG, atau PDF maksimal 5MB.'
@@ -338,11 +332,6 @@ const depositUi = {
   getSelectedAccount() {
     const id = this.el.accountSelect?.value;
     return this.accounts.find(a => String(a.id) === String(id)) || null;
-  },
-
-  isTransferAccount(account) {
-    if (!account) return false;
-    return account.type === 'bank' || account.type === 'qris';
   },
 
   isProofRequired(account = this.getSelectedAccount()) {
@@ -550,8 +539,7 @@ const depositUi = {
       return;
     }
 
-    const reference = this.el.referenceInput?.value?.trim() || '';
-    const ok = await this.showDepositConfirm({ amount, account, reference });
+    const ok = await this.showDepositConfirm({ amount, account });
     if (!ok) return;
 
     this.isSubmitting = true;
@@ -566,7 +554,7 @@ const depositUi = {
         amount,
         cashBalance: this.expectedCash,
         file: this.selectedFile,
-        notes: this.composeNotes(reference),
+        notes: this.composeNotes(),
         requireProof: proofRequired
       });
       this.setLastAccountId(account.id);
@@ -582,12 +570,9 @@ const depositUi = {
     }
   },
 
-  composeNotes(reference) {
+  composeNotes() {
     const notes = this.el.notesInput?.value?.trim() || '';
-    const parts = [];
-    if (reference) parts.push(`No. Referensi Transfer: ${reference}`);
-    if (notes) parts.push(notes);
-    return parts.length ? parts.join('\n') : null;
+    return notes || null;
   },
 
   renderSubmitting(isSubmitting) {
@@ -618,7 +603,7 @@ const depositUi = {
     if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
   },
 
-  showDepositConfirm({ amount, account, reference }) {
+  showDepositConfirm({ amount, account }) {
     return new Promise(resolve => {
       const overlay = document.createElement('div');
       overlay.className = 'deposit-confirm-overlay';
@@ -638,7 +623,6 @@ const depositUi = {
             <div class="deposit-confirm-summary">
               <div><span>Metode</span><strong>${this.esc(account.label || '-')}</strong></div>
               <div><span>Waktu</span><strong>${this.esc(this.formatDateTime(new Date().toISOString()))}</strong></div>
-              ${this.isTransferAccount(account) ? `<div><span>No. Referensi</span><strong>${this.esc(reference || '-')}</strong></div>` : ''}
             </div>
           </div>
           <div class="deposit-confirm-footer">
@@ -674,7 +658,6 @@ const depositUi = {
   clearForm({ keepAccount = false } = {}) {
     if (this.el.amountInput) this.el.amountInput.value = '';
     if (!keepAccount && this.el.accountSelect) this.selectAccount('', { persist: false });
-    if (this.el.referenceInput) this.el.referenceInput.value = '';
     if (this.el.notesInput) this.el.notesInput.value = '';
     this.removeFile();
     this.updateSubmitState();

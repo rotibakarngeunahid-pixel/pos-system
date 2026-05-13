@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="RBN POS" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <link rel="stylesheet" href="css/styles.css?v=20260514-deposit-mobile-fix-1" />
+  <link rel="stylesheet" href="css/styles.css?v=20260514-deposit-mobile-fix-2" />
   <script>
     /* Fix: Viewport height correction for Android nav bar
        dvh/vh pada Android Chrome sering TIDAK mengecualikan navigation bar,
@@ -449,11 +449,6 @@
               <input type="hidden" id="deposit-account-select" />
               <div id="deposit-account-options" class="deposit-method-grid" role="radiogroup" aria-label="Metode setoran"></div>
               <div id="deposit-account-empty" class="form-hint text-danger" style="display:none">Belum ada metode setoran aktif. Hubungi admin.</div>
-            </div>
-
-            <div class="form-group" id="deposit-reference-wrap" style="display:none">
-              <label class="form-label" for="deposit-transfer-reference">No. Referensi Transfer</label>
-              <input type="text" class="form-control" id="deposit-transfer-reference" placeholder="Masukkan nomor referensi" autocomplete="off" />
             </div>
 
             <div class="form-group">
@@ -897,7 +892,7 @@
   <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
   <script src="js/services/transactionService.js"></script>
   <script src="js/depositService.js?v=20260514-deposit-ui-prd-1"></script>
-  <script src="js/depositUi.js?v=20260514-deposit-ui-prd-1"></script>
+  <script src="js/depositUi.js?v=20260514-deposit-mobile-fix-2"></script>
   <script src="js/pos.js?v=20260514-pos-global-fix-1"></script>
 
   <!-- ══════════════════════════════════════════
