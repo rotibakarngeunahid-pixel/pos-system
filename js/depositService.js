@@ -14,26 +14,70 @@ const depositService = {
     }
   },
 
+  async fetchAccountsViaRest({ branchId = null } = {}) {
+    const supabaseUrl = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : (typeof window !== 'undefined' ? window.SUPABASE_URL : ''));
+    const supabaseKey = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : (typeof window !== 'undefined' ? window.SUPABASE_KEY : ''));
+    if (!supabaseUrl || !supabaseKey || typeof fetch !== 'function') {
+      throw new Error('REST fallback metode setoran tidak tersedia');
+    }
+
+    const url = new URL(`${supabaseUrl}/rest/v1/deposit_accounts`);
+    url.searchParams.set('select', '*');
+    url.searchParams.set('is_active', 'eq.true');
+    if (branchId) url.searchParams.set('or', `(branch_id.is.null,branch_id.eq.${branchId})`);
+    url.searchParams.set('order', 'branch_id.desc.nullslast,created_at.desc');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`
+        },
+        signal: controller.signal
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
   async getAccounts({ branchId = null } = {}) {
+    const scopedBranchId = Number.isFinite(Number(branchId)) ? Number(branchId) : null;
     let query = db.from('deposit_accounts')
       .select('*')
       .eq('is_active', true);
 
-    if (branchId) {
-      query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
+    if (scopedBranchId) {
+      query = query.or(`branch_id.is.null,branch_id.eq.${scopedBranchId}`);
     }
 
     query = query
       .order('branch_id', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
 
-    const { data, error } = await this.withTimeout(
-      query,
-      8000,
-      'Timeout memuat metode setoran. Periksa koneksi atau izin tabel deposit_accounts.'
-    );
-    if (error) throw error;
-    return data || [];
+    try {
+      const { data, error } = await this.withTimeout(
+        query,
+        5000,
+        'Timeout memuat metode setoran dari SDK Supabase.'
+      );
+      if (error) throw error;
+      return data || [];
+    } catch (primaryError) {
+      console.warn('depositService.getAccounts primary query failed, trying REST fallback', primaryError);
+      try {
+        return await this.fetchAccountsViaRest({ branchId: scopedBranchId });
+      } catch (fallbackError) {
+        throw new Error(`Gagal memuat metode setoran: ${fallbackError.message || primaryError.message}`);
+      }
+    }
   },
 
   async submitDeposit({ branchId, sessionId = null, staffId, accountId, amount, cashBalance = null, file = null, notes = null }) {

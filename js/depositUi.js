@@ -84,7 +84,7 @@ const depositUi = {
     } catch (e) {
       console.error('getAccounts', e);
       this.accountLoadError = e.message || 'Gagal memuat metode setoran';
-      showToast(this.accountLoadError, 'error');
+      if (typeof showToast === 'function') showToast(this.accountLoadError, 'error');
       this.accounts = [];
     }
     this.renderAccounts();
@@ -122,6 +122,11 @@ const depositUi = {
 
   renderAccounts() {
     if (!this.el.accountSelect) return;
+    const esc = typeof escHtml === 'function'
+      ? escHtml
+      : (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
     if (this.accountLoadError) {
       this.el.accountSelect.innerHTML = '<option value="">Gagal memuat metode</option>';
       this.el.accountSelect.disabled = true;
@@ -142,7 +147,7 @@ const depositUi = {
     const opts = ['<option value="">Pilih metode...</option>'];
     this.accounts.forEach(a => {
       const detail = a.type === 'bank' && a.account_number ? ` - ${a.account_number}` : '';
-      opts.push(`<option value="${a.id}" data-type="${a.type}">${escHtml(a.label + detail)}</option>`);
+      opts.push(`<option value="${esc(a.id)}" data-type="${esc(a.type)}">${esc((a.label || 'Metode Setoran') + detail)}</option>`);
     });
     this.el.accountSelect.innerHTML = opts.join('');
     this.el.accountSelect.disabled = false;
