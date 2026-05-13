@@ -2,12 +2,16 @@
 
 const depositService = {
 
-  async getAccounts() {
-    const { data, error } = await db.from('deposit_accounts')
+  async getAccounts(branchId = null) {
+    let query = db.from('deposit_accounts')
       .select('*')
       .eq('is_active', true)
       .order('type')
       .order('label');
+
+    if (branchId) query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
+
+    const { data, error } = await query;
     if (error) throw error;
     return data || [];
   },

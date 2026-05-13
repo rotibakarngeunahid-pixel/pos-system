@@ -151,6 +151,9 @@ const POS = {
 
     this.setupSearch();
     this.hideLoader();
+    if (window.depositUi && typeof depositUi.refreshWhenReady === 'function') {
+      depositUi.refreshWhenReady();
+    }
 
     // Poll transfer notifications every 30 seconds
     this._checkTransferNotifications();
@@ -211,6 +214,9 @@ const POS = {
     this.updateBranchUI();
     await this.initShift();
     await this.loadProducts();
+    if (window.depositUi && typeof depositUi.refreshWhenReady === 'function') {
+      depositUi.refreshWhenReady();
+    }
     this.hideLoader();
   },
 

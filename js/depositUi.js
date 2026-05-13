@@ -9,6 +9,7 @@ const depositUi = {
   selectedFile: null,
   isSubmitting: false,
   readyRefreshTimer: null,
+  accountLoadError: null,
 
   init() {
     document.addEventListener('DOMContentLoaded', () => {
@@ -61,15 +62,21 @@ const depositUi = {
     if (!window.POS || !POS.branch) return;
     const branchId = POS.branch.id;
     const sessionId = POS.session?.id || null;
+    this.accountLoadError = null;
     if (this.el.accountSelect) {
       this.el.accountSelect.disabled = true;
       this.el.accountSelect.innerHTML = '<option value="">Memuat metode...</option>';
     }
+    if (this.el.accountEmpty) {
+      this.el.accountEmpty.style.display = 'none';
+      this.el.accountEmpty.textContent = 'Belum ada metode setoran aktif. Hubungi admin.';
+    }
     try {
-      this.accounts = await depositService.getAccounts();
+      this.accounts = await depositService.getAccounts(branchId);
     } catch (e) {
       console.error('getAccounts', e);
-      showToast('Gagal memuat metode setoran', 'error');
+      this.accountLoadError = e.message || 'Gagal memuat metode setoran';
+      showToast(this.accountLoadError, 'error');
       this.accounts = [];
     }
     this.renderAccounts();
@@ -103,6 +110,16 @@ const depositUi = {
 
   renderAccounts() {
     if (!this.el.accountSelect) return;
+    if (this.accountLoadError) {
+      this.el.accountSelect.innerHTML = '<option value="">Gagal memuat metode</option>';
+      this.el.accountSelect.disabled = true;
+      if (this.el.accountEmpty) {
+        this.el.accountEmpty.textContent = `Gagal memuat metode setoran: ${this.accountLoadError}`;
+        this.el.accountEmpty.style.display = '';
+      }
+      this.updateSubmitState();
+      return;
+    }
     if (!this.accounts.length) {
       this.el.accountSelect.innerHTML = '<option value="">Tidak ada metode aktif</option>';
       this.el.accountSelect.disabled = true;
