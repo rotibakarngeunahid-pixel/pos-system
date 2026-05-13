@@ -323,8 +323,8 @@ const depositUi = {
     const account = this.getSelectedAccount();
     if (this.el.proofHint) {
       this.el.proofHint.textContent = this.isProofRequired(account)
-        ? 'Wajib untuk transfer bank. Format JPG, PNG, atau PDF maksimal 5MB.'
-        : 'Opsional untuk Tunai ke Manager. Lampirkan foto bila tersedia.';
+        ? 'Bukti wajib untuk transfer bank.'
+        : 'Bukti opsional untuk Tunai ke Manager.';
     }
     this.el.proofZone?.classList.toggle('optional', !this.isProofRequired(account));
   },

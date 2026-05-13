@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="RBN POS" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <link rel="stylesheet" href="css/styles.css?v=20260514-deposit-mobile-fix-2" />
+  <link rel="stylesheet" href="css/styles.css?v=20260514-deposit-polish-1" />
   <script>
     /* Fix: Viewport height correction for Android nav bar
        dvh/vh pada Android Chrome sering TIDAK mengecualikan navigation bar,
@@ -457,12 +457,14 @@
               <div id="deposit-proof-zone" class="deposit-upload-zone" role="button" tabindex="0" aria-label="Pilih atau seret bukti setoran">
                 <div class="deposit-upload-empty" id="deposit-upload-empty">
                   <i data-lucide="upload-cloud" class="icon-lg"></i>
-                  <strong>Klik untuk upload bukti</strong>
-                  <span>JPG, PNG, atau PDF maksimal 5MB. Bisa langsung ambil foto dari kamera HP.</span>
+                  <div class="deposit-upload-copy">
+                    <strong>Upload bukti setoran</strong>
+                    <span>Ambil foto atau pilih file JPG, PNG, PDF maksimal 5MB.</span>
+                  </div>
                 </div>
                 <div id="deposit-proof-preview" class="deposit-proof-preview"></div>
               </div>
-              <div id="deposit-proof-hint" class="form-hint">Wajib untuk transfer bank. Opsional untuk Tunai ke Manager.</div>
+              <div id="deposit-proof-hint" class="form-hint">Bukti wajib untuk transfer bank.</div>
             </div>
 
             <div class="form-group">
@@ -892,7 +894,7 @@
   <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
   <script src="js/services/transactionService.js"></script>
   <script src="js/depositService.js?v=20260514-deposit-ui-prd-1"></script>
-  <script src="js/depositUi.js?v=20260514-deposit-mobile-fix-2"></script>
+  <script src="js/depositUi.js?v=20260514-deposit-polish-1"></script>
   <script src="js/pos.js?v=20260514-pos-global-fix-1"></script>
 
   <!-- ══════════════════════════════════════════
