@@ -80,6 +80,13 @@ const depositService = {
     }
   },
 
+  isStoragePolicyError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return message.includes('row-level security')
+      || message.includes('violates row-level security')
+      || message.includes('permission denied');
+  },
+
   async submitDeposit({ branchId, sessionId = null, staffId, accountId, amount, cashBalance = null, file = null, notes = null, requireProof = true }) {
     // Basic validation
     amount = safeNum(amount, 'Jumlah setoran');
@@ -99,10 +106,20 @@ const depositService = {
 
       const path = `${branchId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       const { error: uploadErr } = await db.storage.from('deposit-proofs').upload(path, file, { contentType: file.type, upsert: false });
-      if (uploadErr) throw uploadErr;
+      if (uploadErr) {
+        if (this.isStoragePolicyError(uploadErr)) {
+          throw new Error('Upload bukti belum diizinkan oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
+        }
+        throw new Error('Upload bukti gagal: ' + (uploadErr.message || uploadErr));
+      }
       const oneYear = 365 * 24 * 3600;
       const { data: signed, error: signErr } = await db.storage.from('deposit-proofs').createSignedUrl(path, oneYear);
-      if (signErr) throw signErr;
+      if (signErr) {
+        if (this.isStoragePolicyError(signErr)) {
+          throw new Error('Bukti berhasil diupload, tetapi belum bisa dibaca oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
+        }
+        throw new Error('Gagal membuat URL bukti setoran: ' + (signErr.message || signErr));
+      }
       proofUrl = signed?.signedUrl || null;
       if (!proofUrl) throw new Error('Gagal membuat URL bukti setoran');
     }
@@ -202,7 +219,12 @@ const depositService = {
     const scope = branchId || 'global';
     const path = `qris/${scope}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     const { data: uploadData, error } = await db.storage.from('deposit-qris').upload(path, file, { contentType: file.type, upsert: true });
-    if (error) throw new Error('Upload QRIS gagal: ' + error.message);
+    if (error) {
+      if (this.isStoragePolicyError(error)) {
+        throw new Error('Upload QRIS belum diizinkan oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
+      }
+      throw new Error('Upload QRIS gagal: ' + error.message);
+    }
     const { data: pub } = await db.storage.from('deposit-qris').getPublicUrl(path);
     return pub?.publicUrl || null;
   },
