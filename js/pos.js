@@ -1081,7 +1081,7 @@ const POS = {
 
     if (tab === 'kasir') {
       document.getElementById('panel-kasir').style.display = '';
-      ['panel-summary','panel-stock','panel-cash','panel-transactions'].forEach(id => {
+      ['panel-summary','panel-stock','panel-cash','panel-deposits','panel-transactions'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.remove('active');
       });
