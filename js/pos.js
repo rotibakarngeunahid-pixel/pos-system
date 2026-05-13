@@ -2551,6 +2551,8 @@ POS.testPrint = function() {
   setTimeout(() => window.print(), 400);
 };
 
+window.POS = POS;
+
 document.addEventListener('DOMContentLoaded', () => POS.init());
 
 // Global overlay click handler: close modal when clicking the backdrop

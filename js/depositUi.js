@@ -12,6 +12,12 @@ const depositUi = {
   accountLoadError: null,
   didBind: false,
 
+  getPOS() {
+    if (typeof window !== 'undefined' && window.POS) return window.POS;
+    if (typeof POS !== 'undefined') return POS;
+    return null;
+  },
+
   init() {
     const start = () => {
       try {
@@ -57,7 +63,8 @@ const depositUi = {
   },
 
   refreshWhenReady(attempt = 0) {
-    if (window.POS && POS.user && POS.branch) {
+    const pos = this.getPOS();
+    if (pos?.user && pos?.branch) {
       this.refresh();
       return;
     }
@@ -67,9 +74,10 @@ const depositUi = {
   },
 
   async refresh() {
-    if (!window.POS || !POS.branch) return;
-    const branchId = POS.branch.id;
-    const sessionId = POS.session?.id || null;
+    const pos = this.getPOS();
+    if (!pos?.branch) return;
+    const branchId = pos.branch.id;
+    const sessionId = pos.session?.id || null;
     this.accountLoadError = null;
     if (this.el.accountSelect) {
       this.el.accountSelect.disabled = true;
@@ -112,7 +120,7 @@ const depositUi = {
 
     // load history
     try {
-      const rows = await depositService.getMyDeposits({ staffId: POS.user.id, branchId });
+      const rows = await depositService.getMyDeposits({ staffId: pos.user.id, branchId });
       this.renderHistory(rows);
     } catch (e) {
       console.error('getMyDeposits', e);
@@ -233,9 +241,10 @@ const depositUi = {
   },
 
   async onSubmit() {
-    if (!window.POS || !POS.branch) { showToast('Cabang belum dipilih', 'error'); return; }
-    const branchId = POS.branch.id;
-    const sessionId = POS.session?.id || null;
+    const pos = this.getPOS();
+    if (!pos?.branch) { showToast('Cabang belum dipilih', 'error'); return; }
+    const branchId = pos.branch.id;
+    const sessionId = pos.session?.id || null;
     const { amount, valid } = this.validateAmount({ showEmpty: true });
     if (!valid) { showToast(this.el.amountError?.textContent || 'Nominal setoran tidak valid', 'error'); return; }
     const accId = this.el.accountSelect.value;
@@ -258,7 +267,7 @@ const depositUi = {
       await depositService.submitDeposit({
         branchId,
         sessionId,
-        staffId: POS.user.id,
+        staffId: pos.user.id,
         accountId: accId,
         amount,
         cashBalance: this.expectedCash,
