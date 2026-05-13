@@ -2,13 +2,12 @@
 
 const depositService = {
 
-  async getAccounts(branchId) {
-    if (!branchId) throw new Error('branchId wajib diisi');
+  async getAccounts() {
     const { data, error } = await db.from('deposit_accounts')
       .select('*')
-      .eq('branch_id', branchId)
       .eq('is_active', true)
-      .order('type');
+      .order('type')
+      .order('label');
     if (error) throw error;
     return data || [];
   },
@@ -97,10 +96,10 @@ const depositService = {
     return true;
   },
 
-  async saveAccount({ id = null, branchId, type, label, bankName, accountNumber, accountHolder, qrisImageUrl, isActive = true }) {
-    if (!branchId || !type || !label) throw new Error('branchId, type, dan label wajib diisi');
+  async saveAccount({ id = null, branchId = null, type, label, bankName, accountNumber, accountHolder, qrisImageUrl, isActive = true }) {
+    if (!type || !label) throw new Error('Tipe dan label wajib diisi');
     const payload = {
-      branch_id: branchId,
+      branch_id: branchId || null,
       type,
       label,
       bank_name: bankName || null,
@@ -123,7 +122,8 @@ const depositService = {
     if (file.size <= 0) throw new Error('File tidak boleh kosong');
     if (file.size > 5 * 1024 * 1024) throw new Error('Ukuran file maksimal 5 MB');
     const ext = (file.name || '').split('.').pop() || file.type.split('/').pop();
-    const path = `qris/${branchId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const scope = branchId || 'global';
+    const path = `qris/${scope}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     const { data: uploadData, error } = await db.storage.from('deposit-qris').upload(path, file, { contentType: file.type, upsert: true });
     if (error) throw new Error('Upload QRIS gagal: ' + error.message);
     const { data: pub } = await db.storage.from('deposit-qris').getPublicUrl(path);

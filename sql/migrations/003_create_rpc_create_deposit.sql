@@ -46,4 +46,7 @@ BEGIN
 END;
 $$;
 
+GRANT EXECUTE ON FUNCTION public.create_deposit(bigint, bigint, bigint, uuid, numeric, numeric, text, text)
+  TO anon, authenticated;
+
 COMMIT;

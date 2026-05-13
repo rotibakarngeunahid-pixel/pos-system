@@ -38,4 +38,7 @@ END$$;
 CREATE POLICY anon_read_active ON public.deposit_accounts FOR SELECT USING (is_active = true);
 CREATE POLICY admin_all ON public.deposit_accounts FOR ALL USING (true);
 
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.deposit_accounts TO anon, authenticated;
+
 COMMIT;

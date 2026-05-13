@@ -19,8 +19,16 @@ CREATE TABLE IF NOT EXISTS public.deposit_accounts (
 );
 
 ALTER TABLE public.deposit_accounts
+  ADD COLUMN IF NOT EXISTS branch_id bigint REFERENCES public.branches(id) ON DELETE CASCADE;
+
+ALTER TABLE public.deposit_accounts
+  ALTER COLUMN branch_id DROP NOT NULL,
   ADD COLUMN IF NOT EXISTS account_holder text,
   ADD COLUMN IF NOT EXISTS qris_image_url text;
+
+UPDATE public.deposit_accounts
+SET branch_id = NULL
+WHERE branch_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_deposit_accounts_branch
   ON public.deposit_accounts(branch_id);
@@ -49,6 +57,9 @@ BEGIN
       USING (true);
   END IF;
 END$$;
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.deposit_accounts TO anon, authenticated;
 
 CREATE TABLE IF NOT EXISTS public.cash_deposits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,6 +119,8 @@ BEGIN
       USING (true);
   END IF;
 END$$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_deposits TO anon, authenticated;
 
 UPDATE public.cash_deposits
 SET proof_url = ''
@@ -205,6 +218,9 @@ BEGIN
 END;
 $$;
 
+GRANT EXECUTE ON FUNCTION public.create_deposit(bigint, bigint, bigint, uuid, numeric, numeric, text, text)
+  TO anon, authenticated;
+
 DROP FUNCTION IF EXISTS public.confirm_deposit(uuid, uuid, text, text);
 
 CREATE OR REPLACE FUNCTION public.confirm_deposit(
@@ -260,5 +276,8 @@ BEGIN
   END IF;
 END;
 $$;
+
+GRANT EXECUTE ON FUNCTION public.confirm_deposit(uuid, bigint, text, text)
+  TO anon, authenticated;
 
 COMMIT;

@@ -45,4 +45,7 @@ CREATE POLICY staff_self_read ON public.cash_deposits FOR SELECT USING (true);
 CREATE POLICY staff_insert ON public.cash_deposits FOR INSERT WITH CHECK (true);
 CREATE POLICY admin_all ON public.cash_deposits FOR ALL USING (true);
 
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cash_deposits TO anon, authenticated;
+
 COMMIT;

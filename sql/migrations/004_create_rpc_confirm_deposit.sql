@@ -47,4 +47,7 @@ BEGIN
 END;
 $$;
 
+GRANT EXECUTE ON FUNCTION public.confirm_deposit(uuid, bigint, text, text)
+  TO anon, authenticated;
+
 COMMIT;

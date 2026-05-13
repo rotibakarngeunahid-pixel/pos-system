@@ -857,7 +857,7 @@
         <div class="card">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>ID</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Saat Setor</th><th>Metode</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
+              <thead><tr><th>ID</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas Tunai Saat Setor</th><th>Metode</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
               <tbody id="deposits-table-body"><tr><td colspan="9" class="empty-td">Memuat...</td></tr></tbody>
             </table>
           </div>
@@ -1021,21 +1021,13 @@
           <label class="form-label">Label *</label>
           <input type="text" class="form-control" id="deposit-account-label" placeholder="BCA - 1234567890" />
         </div>
-        <div class="grid-2-col-s3">
-          <div class="form-group">
-            <label class="form-label">Tipe *</label>
-            <select class="form-control" id="deposit-account-type">
-              <option value="bank">Bank</option>
-              <option value="qris">QRIS</option>
-              <option value="cash">Cash</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Cabang *</label>
-            <select class="form-control" id="deposit-account-branch-id">
-              <option value="">Pilih Cabang</option>
-            </select>
-          </div>
+        <div class="form-group">
+          <label class="form-label">Tipe *</label>
+          <select class="form-control" id="deposit-account-type">
+            <option value="bank">Bank</option>
+            <option value="qris">QRIS</option>
+            <option value="cash">Cash</option>
+          </select>
         </div>
         <div id="deposit-account-bank-fields" class="grid-2-col-s3">
           <div class="form-group">

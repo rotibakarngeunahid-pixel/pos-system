@@ -36,7 +36,6 @@ const adminDepositUi = {
     this.el.accountId = document.getElementById('deposit-account-id');
     this.el.accountLabel = document.getElementById('deposit-account-label');
     this.el.accountType = document.getElementById('deposit-account-type');
-    this.el.accountBranch = document.getElementById('deposit-account-branch-id');
     this.el.bankFields = document.getElementById('deposit-account-bank-fields');
     this.el.bankName = document.getElementById('deposit-account-bank-name');
     this.el.accountNumber = document.getElementById('deposit-account-number');
@@ -62,7 +61,6 @@ const adminDepositUi = {
     this.branches = branches || [];
     const options = this.branches.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
     if (this.el.branch) this.el.branch.innerHTML = '<option value="">Semua Cabang</option>' + options;
-    if (this.el.accountBranch) this.el.accountBranch.innerHTML = '<option value="">Pilih Cabang</option>' + options;
   },
 
   async loadDeposits() {
@@ -158,7 +156,7 @@ const adminDepositUi = {
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Label</th><th>Tipe</th><th>Cabang</th><th>Bank</th><th>No. Rekening</th><th>Pemilik</th><th>Status</th><th>Aksi</th></tr>
+                <tr><th>Label</th><th>Tipe</th><th>Bank</th><th>No. Rekening</th><th>Pemilik</th><th>Status</th><th>Aksi</th></tr>
               </thead>
               <tbody>${this.accounts.map(a => this.renderAccountRow(a)).join('')}</tbody>
             </table>
@@ -174,14 +172,12 @@ const adminDepositUi = {
   },
 
   renderAccountRow(a) {
-    const branchName = this.branches.find(b => String(b.id) === String(a.branch_id))?.name || '-';
     const active = a.is_active
       ? '<span class="badge badge-success">Aktif</span>'
       : '<span class="badge badge-danger">Nonaktif</span>';
     return `<tr>
       <td class="fw-700">${escHtml(a.label)}</td>
       <td>${escHtml(a.type)}</td>
-      <td>${escHtml(branchName)}</td>
       <td>${escHtml(a.bank_name || '-')}</td>
       <td>${escHtml(a.account_number || '-')}</td>
       <td>${escHtml(a.account_holder || '-')}</td>
@@ -202,7 +198,6 @@ const adminDepositUi = {
     if (this.el.accountId) this.el.accountId.value = row?.id || '';
     if (this.el.accountLabel) this.el.accountLabel.value = row?.label || '';
     if (this.el.accountType) this.el.accountType.value = row?.type || 'bank';
-    if (this.el.accountBranch) this.el.accountBranch.value = row?.branch_id || '';
     if (this.el.bankName) this.el.bankName.value = row?.bank_name || '';
     if (this.el.accountNumber) this.el.accountNumber.value = row?.account_number || '';
     if (this.el.accountHolder) this.el.accountHolder.value = row?.account_holder || '';
@@ -253,7 +248,6 @@ const adminDepositUi = {
 
   async saveAccount() {
     const id = this.el.accountId?.value || null;
-    const branchId = this.el.accountBranch?.value || '';
     const type = this.el.accountType?.value || '';
     const label = (this.el.accountLabel?.value || '').trim();
     const bankName = (this.el.bankName?.value || '').trim();
@@ -262,8 +256,8 @@ const adminDepositUi = {
     let qrisImageUrl = (this.el.qrisImageUrl?.value || '').trim();
     const isActive = Boolean(this.el.accountActive?.checked);
 
-    if (!label || !type || !branchId) {
-      showToast('Label, tipe, dan cabang wajib diisi', 'error');
+    if (!label || !type) {
+      showToast('Label dan tipe wajib diisi', 'error');
       return;
     }
     if (type === 'bank' && (!bankName || !accountNumber || !accountHolder)) {
@@ -278,13 +272,13 @@ const adminDepositUi = {
     }
     try {
       if (type === 'qris' && this.selectedQrisFile) {
-        qrisImageUrl = await depositService.uploadQrisImage(branchId, this.selectedQrisFile);
+        qrisImageUrl = await depositService.uploadQrisImage(null, this.selectedQrisFile);
         if (this.el.qrisImageUrl) this.el.qrisImageUrl.value = qrisImageUrl || '';
         this.renderQrisPreview(qrisImageUrl);
       }
       await depositService.saveAccount({
         id,
-        branchId,
+        branchId: null,
         type,
         label,
         bankName: type === 'bank' ? bankName : null,
@@ -315,7 +309,7 @@ const adminDepositUi = {
       const next = !data.is_active;
       await depositService.saveAccount({
         id,
-        branchId: data.branch_id,
+        branchId: null,
         type: data.type,
         label: data.label,
         bankName: data.bank_name,
