@@ -2,16 +2,29 @@
 
 const depositService = {
 
-  async getAccounts(branchId = null) {
-    let query = db.from('deposit_accounts')
+  async withTimeout(promise, ms, message) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  async getAccounts() {
+    const query = db.from('deposit_accounts')
       .select('*')
       .eq('is_active', true)
-      .order('type')
-      .order('label');
+      .order('created_at', { ascending: false });
 
-    if (branchId) query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
-
-    const { data, error } = await query;
+    const { data, error } = await this.withTimeout(
+      query,
+      8000,
+      'Timeout memuat metode setoran. Periksa koneksi atau izin tabel deposit_accounts.'
+    );
     if (error) throw error;
     return data || [];
   },
