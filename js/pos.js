@@ -1047,7 +1047,11 @@ const POS = {
   switchMainTab(tab, btnEl) {
     this.currentMainTab = tab;
     document.querySelectorAll('.pos-tab-item').forEach(b => b.classList.remove('active'));
-    if (btnEl) btnEl.classList.add('active');
+    if (btnEl?.classList?.contains('pos-tab-item')) {
+      btnEl.classList.add('active');
+    } else {
+      document.querySelector(`.pos-tab-item[data-tab="${tab}"]`)?.classList.add('active');
+    }
 
     const altPanels = ['panel-summary','panel-stock','panel-cash','panel-deposits','panel-transactions'];
     document.getElementById('panel-kasir').style.display = tab === 'kasir' ? '' : 'none';

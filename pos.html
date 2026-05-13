@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="RBN POS" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=20260514-deposit-ui-prd-1" />
   <script>
     /* Fix: Viewport height correction for Android nav bar
        dvh/vh pada Android Chrome sering TIDAK mengecualikan navigation bar,
@@ -382,59 +382,112 @@
     </div>
 
     <!-- ═══ SETORAN TUNAI (Staff) ═══ -->
-    <div class="pos-alt-panel" id="panel-deposits">
-      <div class="panel-header">
-        <h2 class="h2">Setoran Tunai</h2>
+    <div class="pos-alt-panel deposit-page" id="panel-deposits">
+      <div class="panel-header deposit-page-header">
+        <div class="deposit-page-title">
+          <button type="button" class="btn btn-ghost btn-sm deposit-back-btn" data-action="switch-main-tab" data-tab="kasir" aria-label="Kembali ke kasir">
+            <i data-lucide="chevron-left" class="icon-sm"></i>
+            <span>Kembali</span>
+          </button>
+          <div>
+            <h2 class="h2">Setoran Tunai</h2>
+            <div class="deposit-header-meta" id="deposit-header-shift">Shift aktif belum terbaca</div>
+          </div>
+        </div>
         <button class="btn btn-outline btn-sm" id="deposit-refresh-btn" data-action="refresh-deposits">
           <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
         </button>
       </div>
-      <div class="card">
-        <div class="card-body">
-          <div class="form-group">
-            <label class="form-label">Kas Tunai Saat Ini</label>
-            <div id="deposit-expected-cash" class="fw-700">Rp 0</div>
-            <div id="deposit-no-cash" class="form-hint text-danger" style="display:none">Tidak ada saldo kas yang bisa disetor.</div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Jumlah Setoran (Rp)</label>
-            <div class="deposit-amount-stepper">
-              <button type="button" class="btn btn-outline btn-sm" id="deposit-amount-dec">-50rb</button>
-              <input type="number" class="form-control" id="deposit-amount" min="50000" step="50000" inputmode="numeric" />
-              <button type="button" class="btn btn-outline btn-sm" id="deposit-amount-inc">+50rb</button>
-            </div>
-            <div id="deposit-amount-error" class="form-error"></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Metode Setoran</label>
-            <select id="deposit-account-select" class="form-control">
-              <option value="">Memuat metode...</option>
-            </select>
-            <div id="deposit-account-empty" class="form-hint text-danger" style="display:none">Belum ada metode setoran aktif. Hubungi admin.</div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Bukti Setoran</label>
-            <input type="file" id="deposit-proof-file" accept=".jpg,.jpeg,.png,.webp,.pdf" />
-            <div id="deposit-proof-preview" style="margin-top:8px"></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Catatan (opsional)</label>
-            <textarea id="deposit-notes" class="form-control" rows="2"></textarea>
-          </div>
-          <div style="margin-top:12px">
-            <button class="btn btn-primary" id="btn-submit-deposit">Setor Sekarang</button>
-          </div>
-        </div>
-      </div>
 
-      <div class="card mt-4">
-        <div class="card-header"><span class="card-title">Riwayat Setoran</span></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Tanggal</th><th>Jumlah</th><th>Metode</th><th>Bukti</th><th>Status</th><th>Catatan</th></tr></thead>
-            <tbody id="deposit-history-body"><tr><td colspan="6" class="empty-td">Memuat...</td></tr></tbody>
-          </table>
+      <section class="deposit-cash-card" id="deposit-cash-card" tabindex="0" aria-label="Ringkasan kas tunai">
+        <div class="deposit-cash-card-top">
+          <div>
+            <div class="deposit-card-label">Nominal Kas</div>
+            <div id="deposit-expected-cash" class="deposit-card-amount">Rp 0</div>
+          </div>
+          <i data-lucide="banknote" class="deposit-card-icon"></i>
         </div>
+        <div class="deposit-card-meta-grid">
+          <div>
+            <span>Shift Aktif</span>
+            <strong id="deposit-summary-shift">-</strong>
+          </div>
+          <div>
+            <span>Staff</span>
+            <strong id="deposit-summary-staff">-</strong>
+          </div>
+          <div>
+            <span>Waktu</span>
+            <strong id="deposit-summary-time">-</strong>
+          </div>
+        </div>
+        <div id="deposit-no-cash" class="deposit-no-cash" style="display:none">Tidak ada kas untuk disetor</div>
+      </section>
+
+      <div class="deposit-content-grid">
+        <section class="card deposit-form-card">
+          <div class="card-body">
+            <div id="deposit-success" class="deposit-success-state" style="display:none" role="status"></div>
+
+            <div class="form-group">
+              <label class="form-label" for="deposit-amount">Jumlah Setoran</label>
+              <div class="deposit-currency-field">
+                <span>Rp</span>
+                <input type="text" class="form-control" id="deposit-amount" inputmode="numeric" autocomplete="off" placeholder="0" aria-describedby="deposit-amount-error" />
+              </div>
+              <div class="deposit-quick-grid" aria-label="Pilihan cepat nominal setoran">
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="50000">Rp 50.000</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="100000">Rp 100.000</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="500000">Rp 500.000</button>
+                <button type="button" class="deposit-quick-btn deposit-quick-all" data-deposit-quick="all">Setor Semua</button>
+              </div>
+              <div id="deposit-amount-error" class="form-error"></div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Metode Setoran</label>
+              <input type="hidden" id="deposit-account-select" />
+              <div id="deposit-account-options" class="deposit-method-grid" role="radiogroup" aria-label="Metode setoran"></div>
+              <div id="deposit-account-empty" class="form-hint text-danger" style="display:none">Belum ada metode setoran aktif. Hubungi admin.</div>
+            </div>
+
+            <div class="form-group" id="deposit-reference-wrap" style="display:none">
+              <label class="form-label" for="deposit-transfer-reference">No. Referensi Transfer</label>
+              <input type="text" class="form-control" id="deposit-transfer-reference" placeholder="Masukkan nomor referensi" autocomplete="off" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Bukti Setoran</label>
+              <input class="deposit-file-input" type="file" id="deposit-proof-file" accept="image/jpeg,image/png,application/pdf" capture="environment" />
+              <div id="deposit-proof-zone" class="deposit-upload-zone" role="button" tabindex="0" aria-label="Pilih atau seret bukti setoran">
+                <div class="deposit-upload-empty" id="deposit-upload-empty">
+                  <i data-lucide="upload-cloud" class="icon-lg"></i>
+                  <strong>Klik untuk upload bukti</strong>
+                  <span>JPG, PNG, atau PDF maksimal 5MB. Bisa langsung ambil foto dari kamera HP.</span>
+                </div>
+                <div id="deposit-proof-preview" class="deposit-proof-preview"></div>
+              </div>
+              <div id="deposit-proof-hint" class="form-hint">Wajib untuk transfer bank. Opsional untuk Tunai ke Manager.</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="deposit-notes">Catatan (opsional)</label>
+              <textarea id="deposit-notes" class="form-control" rows="2" placeholder="Tambahkan catatan bila diperlukan"></textarea>
+            </div>
+
+            <button class="btn btn-primary btn-full deposit-submit-btn" id="btn-submit-deposit">
+              <i data-lucide="send" class="icon-sm"></i>
+              <span>Setor Sekarang</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="card deposit-history-card-wrap">
+          <div class="card-header"><span class="card-title">Riwayat Setoran</span></div>
+          <div id="deposit-history-body" class="deposit-history-list">
+            <div class="deposit-history-loading">Memuat riwayat...</div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -843,8 +896,8 @@
   <script src="js/services/inventoryService.js"></script>
   <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
   <script src="js/services/transactionService.js"></script>
-  <script src="js/depositService.js?v=20260514-pos-global-fix-1"></script>
-  <script src="js/depositUi.js?v=20260514-pos-global-fix-1"></script>
+  <script src="js/depositService.js?v=20260514-deposit-ui-prd-1"></script>
+  <script src="js/depositUi.js?v=20260514-deposit-ui-prd-1"></script>
   <script src="js/pos.js?v=20260514-pos-global-fix-1"></script>
 
   <!-- ══════════════════════════════════════════

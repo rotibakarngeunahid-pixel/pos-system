@@ -80,30 +80,32 @@ const depositService = {
     }
   },
 
-  async submitDeposit({ branchId, sessionId = null, staffId, accountId, amount, cashBalance = null, file = null, notes = null }) {
+  async submitDeposit({ branchId, sessionId = null, staffId, accountId, amount, cashBalance = null, file = null, notes = null, requireProof = true }) {
     // Basic validation
     amount = safeNum(amount, 'Jumlah setoran');
     if (amount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
     if (amount % 50000 !== 0) throw new Error('Nominal harus kelipatan Rp 50.000');
     if (cashBalance != null && amount > cashBalance) throw new Error('Jumlah setoran melebihi saldo kas');
-    if (!file) throw new Error('Bukti setoran wajib dilampirkan');
+    if (requireProof && !file) throw new Error('Bukti setoran wajib dilampirkan');
 
-    // Upload proof before creating the pending deposit row.
     let proofUrl = null;
-    const allowed = ['image/jpeg','image/png','image/webp','application/pdf'];
-    if (!allowed.includes(file.type)) throw new Error('Hanya JPG, PNG, WEBP, PDF yang diterima');
-    if (file.size <= 0) throw new Error('File tidak boleh kosong');
-    if (file.size > 5 * 1024 * 1024) throw new Error('Ukuran file maksimal 5 MB');
+    if (file) {
+      const allowed = ['image/jpeg','image/png','application/pdf'];
+      const ext = (file.name || '').split('.').pop().toLowerCase() || file.type.split('/').pop();
+      const allowedExt = ['jpg','jpeg','png','pdf'];
+      if (!allowed.includes(file.type) && !allowedExt.includes(ext)) throw new Error('Hanya JPG, PNG, atau PDF yang diterima');
+      if (file.size <= 0) throw new Error('File tidak boleh kosong');
+      if (file.size > 5 * 1024 * 1024) throw new Error('Ukuran file maksimal 5 MB');
 
-    const ext = (file.name || '').split('.').pop() || file.type.split('/').pop();
-    const path = `${branchId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error: uploadErr } = await db.storage.from('deposit-proofs').upload(path, file, { contentType: file.type, upsert: false });
-    if (uploadErr) throw uploadErr;
-    const oneYear = 365 * 24 * 3600;
-    const { data: signed, error: signErr } = await db.storage.from('deposit-proofs').createSignedUrl(path, oneYear);
-    if (signErr) throw signErr;
-    proofUrl = signed?.signedUrl || null;
-    if (!proofUrl) throw new Error('Gagal membuat URL bukti setoran');
+      const path = `${branchId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: uploadErr } = await db.storage.from('deposit-proofs').upload(path, file, { contentType: file.type, upsert: false });
+      if (uploadErr) throw uploadErr;
+      const oneYear = 365 * 24 * 3600;
+      const { data: signed, error: signErr } = await db.storage.from('deposit-proofs').createSignedUrl(path, oneYear);
+      if (signErr) throw signErr;
+      proofUrl = signed?.signedUrl || null;
+      if (!proofUrl) throw new Error('Gagal membuat URL bukti setoran');
+    }
 
     const { data, error } = await db.rpc('create_deposit', {
       p_branch_id: branchId,
@@ -120,10 +122,17 @@ const depositService = {
   },
 
   async getMyDeposits({ staffId, branchId, limit = 30 }) {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
     const { data, error } = await db.from('cash_deposits')
       .select('*, deposit_accounts(label, type, bank_name, account_number)')
       .eq('staff_id', staffId)
       .eq('branch_id', branchId)
+      .gte('created_at', start.toISOString())
+      .lt('created_at', end.toISOString())
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
