@@ -1,7 +1,32 @@
--- 003_create_rpc_create_deposit.sql
--- RPC: create_deposit — insert a pending cash_deposits row and return id
+-- 007_enforce_deposit_requirements.sql
+-- Enforce deposit amount/proof rules and refresh create_deposit validation.
 
 BEGIN;
+
+ALTER TABLE public.deposit_accounts
+  ADD COLUMN IF NOT EXISTS account_holder text,
+  ADD COLUMN IF NOT EXISTS qris_image_url text;
+
+UPDATE public.cash_deposits
+SET proof_url = ''
+WHERE proof_url IS NULL;
+
+ALTER TABLE public.cash_deposits
+  ALTER COLUMN proof_url SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'chk_deposit_multiple_50k'
+      AND conrelid = 'public.cash_deposits'::regclass
+  ) THEN
+    ALTER TABLE public.cash_deposits
+      ADD CONSTRAINT chk_deposit_multiple_50k
+      CHECK (amount % 50000 = 0);
+  END IF;
+END$$;
 
 CREATE OR REPLACE FUNCTION public.create_deposit(
   p_branch_id bigint,
@@ -40,6 +65,7 @@ BEGIN
     p_branch_id, p_session_id, p_staff_id, p_deposit_account_id,
     p_amount, p_cash_balance_at_deposit, p_proof_url, p_notes, 'pending'
   ) RETURNING id INTO v_id;
+
   RETURN v_id;
 END;
 $$;

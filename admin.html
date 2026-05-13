@@ -834,6 +834,46 @@
         </div>
       </section>
 
+      <!-- CASH DEPOSITS -->
+      <section class="admin-section" id="section-cash-deposits">
+        <div class="section-header">
+          <h2 class="section-title">Setoran Tunai</h2>
+          <div class="section-actions">
+            <select id="deposits-filter-branch" class="form-control">
+              <option value="">Semua Cabang</option>
+            </select>
+            <select id="deposits-filter-status" class="form-control">
+              <option value="">Semua Status</option>
+              <option value="pending">pending</option>
+              <option value="confirmed">confirmed</option>
+              <option value="rejected">rejected</option>
+            </select>
+            <input type="date" id="deposits-filter-from" class="form-control" />
+            <input type="date" id="deposits-filter-to" class="form-control" />
+            <button id="deposits-filter-btn" class="btn btn-primary">Filter</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Saat Setor</th><th>Metode</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
+              <tbody id="deposits-table-body"><tr><td colspan="9" class="empty-td">Memuat...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-header" style="margin-top:18px">
+          <h3 class="section-title">Deposit Accounts</h3>
+          <div class="section-actions">
+            <button class="btn btn-primary" id="btn-add-deposit-account">
+              <i data-lucide="plus" class="icon-sm"></i> Tambah Metode
+            </button>
+          </div>
+        </div>
+        <div id="deposit-accounts-list"></div>
+      </section>
+
       <!-- ══════════ CASH CATEGORIES ══════════ -->
       <section class="admin-section" id="section-cash-categories">
         <div class="section-header">
@@ -961,43 +1001,78 @@
         </div>
       </div>
       
-      <!-- ══════════ SETORAN TUNAI (ADMIN) ══════════ -->
-      <section class="admin-section" id="section-cash-deposits">
-        <div class="section-header">
-          <h2 class="section-title">Setoran Tunai</h2>
-          <div class="section-actions">
-            <select id="deposits-filter-branch" class="form-control">
-              <option value="">Semua Cabang</option>
-            </select>
-            <select id="deposits-filter-status" class="form-control">
-              <option value="">Semua Status</option>
-              <option value="pending">pending</option>
-              <option value="confirmed">confirmed</option>
-              <option value="rejected">rejected</option>
-            </select>
-            <input type="date" id="deposits-filter-from" class="form-control" />
-            <input type="date" id="deposits-filter-to" class="form-control" />
-            <button id="deposits-filter-btn" class="btn btn-primary">Filter</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>ID</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Saat Setor</th><th>Metode</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
-              <tbody id="deposits-table-body"><tr><td colspan="9" class="empty-td">Memuat...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="section-header" style="margin-top:18px">
-          <h3 class="section-title">Rekening & QRIS</h3>
-        </div>
-        <div id="deposit-accounts-list" class="grid-1fr-420"></div>
-      </section>
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-branch">Batal</button>
         <button class="btn btn-primary" data-admin-action="save-branch">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deposit Account Modal -->
+  <div class="modal-overlay" id="modal-deposit-account">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="deposit-account-modal-title">Tambah Metode Setoran</span>
+        <button class="modal-close" data-admin-action="close-generic-modal" data-modal-id="modal-deposit-account">&times;</button>
+      </div>
+      <div class="modal-body flex flex-col gap-3">
+        <input type="hidden" id="deposit-account-id" />
+        <div class="form-group">
+          <label class="form-label">Label *</label>
+          <input type="text" class="form-control" id="deposit-account-label" placeholder="BCA - 1234567890" />
+        </div>
+        <div class="grid-2-col-s3">
+          <div class="form-group">
+            <label class="form-label">Tipe *</label>
+            <select class="form-control" id="deposit-account-type">
+              <option value="bank">Bank</option>
+              <option value="qris">QRIS</option>
+              <option value="cash">Cash</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cabang *</label>
+            <select class="form-control" id="deposit-account-branch-id">
+              <option value="">Pilih Cabang</option>
+            </select>
+          </div>
+        </div>
+        <div id="deposit-account-bank-fields" class="grid-2-col-s3">
+          <div class="form-group">
+            <label class="form-label">Nama Bank *</label>
+            <input type="text" class="form-control" id="deposit-account-bank-name" placeholder="BCA" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nomor Rekening *</label>
+            <input type="text" class="form-control" id="deposit-account-number" placeholder="1234567890" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Pemilik Rekening *</label>
+            <input type="text" class="form-control" id="deposit-account-holder" placeholder="Roti Bakar Ngeunah" />
+          </div>
+        </div>
+        <div id="deposit-account-qris-fields" class="flex flex-col gap-3" style="display:none">
+          <div class="form-group">
+            <label class="form-label">URL Gambar QRIS</label>
+            <input type="url" class="form-control" id="deposit-account-qris-image-url" placeholder="https://..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Upload Gambar QRIS</label>
+            <input type="file" id="deposit-account-qris-file" accept=".jpg,.jpeg,.png,.webp" />
+            <div id="deposit-account-qris-preview"></div>
+          </div>
+        </div>
+        <div class="toggle-wrap">
+          <label class="toggle">
+            <input type="checkbox" id="deposit-account-is-active" checked />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">Aktif dan muncul di POS</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-admin-action="close-generic-modal" data-modal-id="modal-deposit-account">Batal</button>
+        <button class="btn btn-primary" id="btn-save-deposit-account">Simpan</button>
       </div>
     </div>
   </div>

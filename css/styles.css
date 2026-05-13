@@ -297,6 +297,17 @@ body, .body { font-size: 14px; font-weight: 400; }
 .form-error { font-size: 11px; color: var(--danger); margin-top: 2px; display: none; }
 .form-error.show { display: block; }
 
+.deposit-amount-stepper {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--s2);
+  align-items: center;
+}
+.deposit-amount-stepper .btn {
+  min-width: 76px;
+  white-space: nowrap;
+}
+
 select.form-control { cursor: pointer; appearance: auto; }
 textarea.form-control { resize: vertical; min-height: 80px; }
 
@@ -337,6 +348,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 .badge-orange  { background: var(--orange-light); color: var(--orange-dark); border: 1px solid rgba(251,140,0,.2); }
 .badge-green   { background: var(--success-bg);   color: var(--success); border: 1px solid rgba(22,163,74,.2); }
 .badge-yellow  { background: var(--yellow-light); color: #78600A; border: 1px solid rgba(253,216,53,.3); }
+.badge-warning { background: var(--yellow-light); color: #78600A; border: 1px solid rgba(253,216,53,.3); }
 .badge-success { background: var(--success-bg);   color: var(--success); border: 1px solid rgba(22,163,74,.2); }
 .badge-danger  { background: var(--danger-bg);    color: var(--danger);  border: 1px solid rgba(220,38,38,.2); }
 .badge-info    { background: var(--info-bg);      color: var(--info);    border: 1px solid rgba(37,99,235,.2); }

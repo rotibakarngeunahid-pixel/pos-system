@@ -394,14 +394,21 @@
           <div class="form-group">
             <label class="form-label">Kas Akhir Saat Ini</label>
             <div id="deposit-expected-cash" class="fw-700">Rp 0</div>
+            <div id="deposit-no-cash" class="form-hint text-danger" style="display:none">Tidak ada saldo kas yang bisa disetor.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Jumlah Setoran (Rp)</label>
-            <input type="number" class="form-control" id="deposit-amount" min="0" />
+            <div class="deposit-amount-stepper">
+              <button type="button" class="btn btn-outline btn-sm" id="deposit-amount-dec">-50rb</button>
+              <input type="number" class="form-control" id="deposit-amount" min="50000" step="50000" inputmode="numeric" />
+              <button type="button" class="btn btn-outline btn-sm" id="deposit-amount-inc">+50rb</button>
+            </div>
+            <div id="deposit-amount-error" class="form-error"></div>
           </div>
           <div class="form-group">
             <label class="form-label">Metode Setoran</label>
             <select id="deposit-account-select" class="form-control"></select>
+            <div id="deposit-account-empty" class="form-hint text-danger" style="display:none">Belum ada metode setoran aktif. Hubungi admin.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Bukti Setoran</label>
