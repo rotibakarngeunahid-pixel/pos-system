@@ -402,7 +402,7 @@
       <section class="deposit-cash-card" id="deposit-cash-card" tabindex="0" aria-label="Ringkasan kas tunai">
         <div class="deposit-cash-card-top">
           <div>
-            <div class="deposit-card-label">Nominal Kas</div>
+            <div class="deposit-card-label" id="deposit-card-label">Saldo Kas Aktif</div>
             <div id="deposit-expected-cash" class="deposit-card-amount">Rp 0</div>
           </div>
           <i data-lucide="banknote" class="deposit-card-icon"></i>
@@ -436,9 +436,11 @@
                 <input type="text" class="form-control" id="deposit-amount" inputmode="numeric" autocomplete="off" placeholder="0" aria-describedby="deposit-amount-error" />
               </div>
               <div class="deposit-quick-grid" aria-label="Pilihan cepat nominal setoran">
-                <button type="button" class="deposit-quick-btn" data-deposit-quick="50000">Rp 50.000</button>
-                <button type="button" class="deposit-quick-btn" data-deposit-quick="100000">Rp 100.000</button>
-                <button type="button" class="deposit-quick-btn" data-deposit-quick="500000">Rp 500.000</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="50000">50rb</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="100000">100rb</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="200000">200rb</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="500000">500rb</button>
+                <button type="button" class="deposit-quick-btn" data-deposit-quick="1000000">1 Juta</button>
                 <button type="button" class="deposit-quick-btn deposit-quick-all" data-deposit-quick="all">Setor Semua</button>
               </div>
               <div id="deposit-amount-error" class="form-error"></div>
@@ -618,6 +620,30 @@
       <div class="modal-body">
         <p class="text-sub mb-4 small">Pilih cabang tempat Anda bertugas hari ini.</p>
         <div id="branch-list" class="flex-col gap-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Setelah Tutup Shift — opsi setoran
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-post-close-shift">
+    <div class="modal modal-sm post-shift-modal">
+      <div class="post-shift-icon-wrap">
+        <i data-lucide="check-circle-2" class="post-shift-icon"></i>
+      </div>
+      <div class="modal-body" style="text-align:center;padding-top:0">
+        <h3 class="post-shift-title">Shift Berhasil Ditutup</h3>
+        <p class="post-shift-desc">Apakah Anda ingin melakukan setoran tunai sekarang?</p>
+      </div>
+      <div class="modal-footer post-shift-footer">
+        <button class="btn btn-primary btn-full post-shift-btn-deposit" data-action="post-shift-setor">
+          <i data-lucide="send" class="icon-sm"></i>
+          Setor Tunai Sekarang
+        </button>
+        <button class="btn btn-outline btn-full post-shift-btn-newshift" data-action="post-shift-buka-shift">
+          Tidak, Buka Shift Baru
+        </button>
       </div>
     </div>
   </div>
@@ -893,9 +919,9 @@
   <script src="js/services/inventoryService.js"></script>
   <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
   <script src="js/services/transactionService.js"></script>
-  <script src="js/depositService.js?v=20260514-storage-policy-error-1"></script>
-  <script src="js/depositUi.js?v=20260514-deposit-polish-1"></script>
-  <script src="js/pos.js?v=20260514-deposit-panel-clear-1"></script>
+  <script src="js/depositService.js?v=20260514-deposit-nosession-1"></script>
+  <script src="js/depositUi.js?v=20260514-deposit-nosession-1"></script>
+  <script src="js/pos.js?v=20260514-deposit-nosession-1"></script>
 
   <!-- ══════════════════════════════════════════
        MODAL: Pilih Topping

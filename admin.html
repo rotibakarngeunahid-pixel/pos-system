@@ -844,9 +844,9 @@
             </select>
             <select id="deposits-filter-status" class="form-control">
               <option value="">Semua Status</option>
-              <option value="pending">pending</option>
-              <option value="confirmed">confirmed</option>
-              <option value="rejected">rejected</option>
+              <option value="pending">Menunggu</option>
+              <option value="confirmed">Dikonfirmasi</option>
+              <option value="rejected">Ditolak</option>
             </select>
             <input type="date" id="deposits-filter-from" class="form-control" />
             <input type="date" id="deposits-filter-to" class="form-control" />
@@ -857,8 +857,9 @@
         <div class="card">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>ID</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas Tunai Saat Setor</th><th>Metode</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
-              <tbody id="deposits-table-body"><tr><td colspan="9" class="empty-td">Memuat...</td></tr></tbody>
+              <thead><tr><th>#</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas</th><th>Metode</th><th>Catatan</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
+              <tbody id="deposits-table-body"><tr><td colspan="10" class="empty-td">Memuat...</td></tr></tbody>
+              <tfoot id="deposits-table-foot"></tfoot>
             </table>
           </div>
         </div>
@@ -1702,8 +1703,8 @@
   <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js"></script>
-  <script src="js/depositService.js?v=20260514-pos-global-fix-1"></script>
-  <script src="js/adminDepositUi.js?v=20260514-pos-global-fix-1"></script>
+  <script src="js/depositService.js?v=20260514-deposit-security-1"></script>
+  <script src="js/adminDepositUi.js?v=20260514-deposit-security-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260514-pos-global-fix-1"></script>

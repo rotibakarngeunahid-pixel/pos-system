@@ -23,6 +23,10 @@ const depositUi = {
     return null;
   },
 
+  hasSession() {
+    return Boolean(this.getPOS()?.session?.id);
+  },
+
   init() {
     const start = () => {
       try {
@@ -168,7 +172,11 @@ const depositUi = {
     this.updateSubmitState();
 
     try {
-      const rows = await depositService.getMyDeposits({ staffId: pos.user.id, branchId });
+      const rows = await depositService.getMyDeposits({
+        staffId: pos.user.id,
+        branchId,
+        daysBack: sessionId ? 0 : 7
+      });
       this.renderHistory(rows);
     } catch (e) {
       console.error('getMyDeposits', e);
@@ -189,15 +197,42 @@ const depositUi = {
 
   updateSummaryCard() {
     const pos = this.getPOS();
-    const shiftLabel = pos?.session?.id ? `#${pos.session.id}` : 'Belum ada shift aktif';
+    const hasSession = this.hasSession();
+    const shiftLabel = hasSession ? `Shift #${pos.session.id}` : 'Tanpa shift aktif';
     const staffLabel = pos?.user?.name || '-';
-    if (this.el.expectedCashEl) this.el.expectedCashEl.textContent = fRp(this.expectedCash);
+
+    const cardLabel = document.getElementById('deposit-card-label');
+    if (cardLabel) cardLabel.textContent = hasSession ? 'Saldo Kas Aktif' : 'Mode Setoran Manual';
+    if (this.el.expectedCashEl) {
+      this.el.expectedCashEl.textContent = hasSession ? fRp(this.expectedCash) : '—';
+    }
     if (this.el.summaryShift) this.el.summaryShift.textContent = shiftLabel;
     if (this.el.summaryStaff) this.el.summaryStaff.textContent = staffLabel;
-    if (this.el.headerShift) this.el.headerShift.textContent = pos?.session?.id ? `Shift aktif ${shiftLabel}` : 'Shift aktif belum terbaca';
-    if (this.el.infoNoCash) this.el.infoNoCash.style.display = this.expectedCash <= 0 ? '' : 'none';
-    if (this.el.panel) this.el.panel.classList.toggle('no-cash', this.expectedCash <= 0);
-    if (this.el.cashCard) this.el.cashCard.classList.toggle('no-cash', this.expectedCash <= 0);
+
+    const headerText = hasSession
+      ? `${shiftLabel} berjalan`
+      : 'Mode setoran tanpa shift';
+    if (this.el.headerShift) this.el.headerShift.textContent = headerText;
+
+    const noCash = hasSession && this.expectedCash <= 0;
+    const noSession = !hasSession;
+    if (this.el.infoNoCash) {
+      if (noSession) {
+        this.el.infoNoCash.textContent = 'Shift sudah ditutup — masukkan nominal setoran secara manual';
+        this.el.infoNoCash.style.display = '';
+      } else if (noCash) {
+        this.el.infoNoCash.textContent = 'Tidak ada kas untuk disetor';
+        this.el.infoNoCash.style.display = '';
+      } else {
+        this.el.infoNoCash.style.display = 'none';
+      }
+    }
+
+    if (this.el.panel)    this.el.panel.classList.toggle('no-cash', noCash && !noSession);
+    if (this.el.cashCard) {
+      this.el.cashCard.classList.toggle('no-cash', noCash && !noSession);
+      this.el.cashCard.classList.toggle('no-session', noSession);
+    }
     this.updateClock();
   },
 
@@ -322,9 +357,15 @@ const depositUi = {
   updateMethodDependentFields() {
     const account = this.getSelectedAccount();
     if (this.el.proofHint) {
-      this.el.proofHint.textContent = this.isProofRequired(account)
-        ? 'Bukti wajib untuk transfer bank.'
-        : 'Bukti opsional untuk Tunai ke Manager.';
+      if (!account) {
+        this.el.proofHint.textContent = 'Pilih metode setoran terlebih dahulu.';
+      } else if (account.type === 'cash') {
+        this.el.proofHint.textContent = 'Bukti opsional untuk penyerahan tunai langsung.';
+      } else if (account.type === 'qris') {
+        this.el.proofHint.textContent = 'Bukti wajib untuk pembayaran QRIS.';
+      } else {
+        this.el.proofHint.textContent = 'Bukti wajib untuk transfer bank.';
+      }
     }
     this.el.proofZone?.classList.toggle('optional', !this.isProofRequired(account));
   },
@@ -405,7 +446,7 @@ const depositUi = {
 
     if (amount <= 0) {
       message = showEmpty ? 'Jumlah setoran harus lebih dari 0' : '';
-    } else if (amount > this.expectedCash) {
+    } else if (this.hasSession() && amount > this.expectedCash) {
       message = `Melebihi saldo kas (${fRp(this.expectedCash)})`;
     } else if (amount % DEPOSIT_STEP !== 0) {
       message = 'Nominal harus kelipatan Rp 50.000';
@@ -424,9 +465,17 @@ const depositUi = {
     const { valid } = this.validateAmount();
     const account = this.getSelectedAccount();
     const proofOk = !this.isProofRequired(account) || Boolean(this.selectedFile);
-    const disabled = this.isSubmitting || !valid || this.expectedCash <= 0 || !account || !proofOk;
+    const hasSession = this.hasSession();
+    // Blokir hanya jika shift aktif tapi kas sudah 0 (tidak ada yang bisa disetor)
+    const emptyShiftCash = hasSession && this.expectedCash <= 0;
+    const disabled = this.isSubmitting || !valid || emptyShiftCash || !account || !proofOk;
     if (this.el.submitBtn) this.el.submitBtn.disabled = disabled;
-    this.el.quickButtons.forEach(btn => { btn.disabled = this.isSubmitting || this.expectedCash <= 0; });
+    this.el.quickButtons.forEach(btn => {
+      const isAll = btn.dataset.depositQuick === 'all';
+      btn.disabled = this.isSubmitting
+        || (isAll && (!hasSession || this.expectedCash <= 0))
+        || (!isAll && hasSession && this.expectedCash <= 0);
+    });
   },
 
   onFileChange(files) {
@@ -552,7 +601,7 @@ const depositUi = {
         staffId: pos.user.id,
         accountId: account.id,
         amount,
-        cashBalance: this.expectedCash,
+        cashBalance: this.hasSession() ? this.expectedCash : null,
         file: this.selectedFile,
         notes: this.composeNotes(),
         requireProof: proofRequired
@@ -605,6 +654,12 @@ const depositUi = {
 
   showDepositConfirm({ amount, account }) {
     return new Promise(resolve => {
+      const hasSession = this.hasSession();
+      const remaining = this.expectedCash - amount;
+      const kasRows = hasSession ? `
+        <div><span>Saldo Kas Saat Ini</span><strong>${this.esc(fRp(this.expectedCash))}</strong></div>
+        <div><span>Sisa Kas Setelah Setor</span><strong class="${remaining < 0 ? 'text-danger' : ''}">${this.esc(fRp(remaining))}</strong></div>` : `
+        <div><span>Mode</span><strong>Setoran tanpa shift aktif</strong></div>`;
       const overlay = document.createElement('div');
       overlay.className = 'deposit-confirm-overlay';
       overlay.innerHTML = `
@@ -622,6 +677,7 @@ const depositUi = {
             <div class="deposit-confirm-amount">${this.esc(fRp(amount))}</div>
             <div class="deposit-confirm-summary">
               <div><span>Metode</span><strong>${this.esc(account.label || '-')}</strong></div>
+              ${kasRows}
               <div><span>Waktu</span><strong>${this.esc(this.formatDateTime(new Date().toISOString()))}</strong></div>
             </div>
           </div>
@@ -682,12 +738,15 @@ const depositUi = {
       const proof = row.proof_url
         ? `<a href="${this.esc(row.proof_url)}" target="_blank" rel="noopener">Lihat bukti</a>`
         : '<span class="text-muted">Tidak ada bukti</span>';
+      const rejectRow = row.status === 'rejected' && row.reject_reason
+        ? `<div><span>Alasan Penolakan</span><strong class="text-danger">${this.esc(row.reject_reason)}</strong></div>`
+        : '';
       return `
         <details class="deposit-history-card">
           <summary class="deposit-history-summary">
             <div class="deposit-history-main">
               <strong>${this.esc(fRp(row.amount))}</strong>
-              <span>${this.esc(method)} - ${this.esc(this.formatDateTime(row.created_at))}</span>
+              <span>${this.esc(method)} &mdash; ${this.esc(this.formatDateTime(row.created_at))}</span>
             </div>
             <span class="badge ${status.className}">${this.esc(status.label)}</span>
           </summary>
@@ -696,6 +755,7 @@ const depositUi = {
             <div><span>Metode</span><strong>${this.esc(method)}</strong></div>
             <div><span>Bukti</span><strong>${proof}</strong></div>
             <div><span>Catatan</span><strong>${this.esc(row.notes || '-')}</strong></div>
+            ${rejectRow}
           </div>
         </details>`;
     }).join('');

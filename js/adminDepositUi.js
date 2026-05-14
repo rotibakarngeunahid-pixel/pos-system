@@ -63,50 +63,93 @@ const adminDepositUi = {
     if (this.el.branch) this.el.branch.innerHTML = '<option value="">Semua Cabang</option>' + options;
   },
 
+  statusLabel(status) {
+    if (status === 'confirmed') return { text: 'Dikonfirmasi', cls: 'badge-success' };
+    if (status === 'rejected')  return { text: 'Ditolak',      cls: 'badge-danger' };
+    return                              { text: 'Menunggu',     cls: 'badge-warning' };
+  },
+
   async loadDeposits() {
     if (!this.el.tableBody) return;
     const branchId = this.el.branch?.value || null;
-    const status = this.el.status?.value || null;
+    const status   = this.el.status?.value || null;
     const dateFrom = this.el.dateFrom?.value || null;
-    const dateTo = this.el.dateTo?.value || null;
+    const dateTo   = this.el.dateTo?.value || null;
     try {
       const rows = await depositService.getAllDeposits({ branchId, status, dateFrom, dateTo, limit: 200 });
       if (!rows || !rows.length) {
-        this.el.tableBody.innerHTML = '<tr><td colspan="9" class="empty-td">Tidak ada data</td></tr>';
+        this.el.tableBody.innerHTML = '<tr><td colspan="11" class="empty-td">Tidak ada data setoran</td></tr>';
+        this.renderDepositTotals([]);
         return;
       }
+
       this.el.tableBody.innerHTML = rows.map(r => {
-        const date = fDate(r.created_at);
-        const staff = r.staff?.name || '-';
-        const br = r.branches?.name || '-';
-        const method = r.deposit_accounts?.label || '-';
-        const proof = r.proof_url ? `<a href="${r.proof_url}" target="_blank">Bukti</a>` : '-';
-        const statusBadge = r.status === 'pending'
-          ? '<span class="badge badge-warning">pending</span>'
-          : (r.status === 'confirmed' ? '<span class="badge badge-success">confirmed</span>' : '<span class="badge badge-danger">rejected</span>');
+        const shortId   = String(r.id).slice(0, 8).toUpperCase();
+        const date      = fDate(r.created_at);
+        const staff     = escHtml(r.staff?.name || '-');
+        const br        = escHtml(r.branches?.name || '-');
+        const method    = escHtml(r.deposit_accounts?.label || '-');
+        const proof     = r.proof_url
+          ? `<a href="${escHtml(r.proof_url)}" target="_blank" rel="noopener">Lihat</a>`
+          : '<span class="text-muted">-</span>';
+        const notes     = escHtml(r.notes || '-');
+
+        const sl        = this.statusLabel(r.status);
+        const reviewer  = r.reviewer?.name || null;
+
+        let statusCell = `<span class="badge ${sl.cls}">${sl.text}</span>`;
+        if (reviewer && r.status !== 'pending') {
+          statusCell += `<br><span class="text-xs text-muted">oleh ${escHtml(reviewer)}</span>`;
+        }
+        if (r.status === 'rejected' && r.reject_reason) {
+          statusCell += `<br><span class="text-xs text-danger">${escHtml(r.reject_reason)}</span>`;
+        }
+
         const actions = r.status === 'pending' ? `
-          <button class="btn btn-success btn-sm" data-action="confirm-deposit" data-id="${r.id}">Konfirmasi</button>
-          <button class="btn btn-danger btn-sm" data-action="reject-deposit" data-id="${r.id}">Tolak</button>
-        ` : '';
+          <div class="flex gap-1 mt-1">
+            <button class="btn btn-success btn-sm" data-action="confirm-deposit" data-id="${escHtml(r.id)}">Konfirmasi</button>
+            <button class="btn btn-danger btn-sm"  data-action="reject-deposit"  data-id="${escHtml(r.id)}">Tolak</button>
+          </div>` : '';
+
         return `<tr>
-          <td>${escHtml(r.id)}</td>
+          <td class="text-mono text-xs" title="${escHtml(r.id)}">${shortId}</td>
           <td>${date}</td>
-          <td>${escHtml(staff)}</td>
-          <td>${escHtml(br)}</td>
-          <td>${fRp(r.amount)}</td>
-          <td>${fRp(r.cash_balance_at_deposit)}</td>
-          <td>${escHtml(method)}</td>
+          <td>${staff}</td>
+          <td>${br}</td>
+          <td class="text-right fw-700">${fRp(r.amount)}</td>
+          <td class="text-right">${fRp(r.cash_balance_at_deposit)}</td>
+          <td>${method}</td>
+          <td class="text-xs text-muted" style="max-width:120px;word-break:break-word">${notes}</td>
           <td>${proof}</td>
-          <td>${statusBadge} ${actions}</td>
+          <td>${statusCell}${actions}</td>
         </tr>`;
       }).join('');
 
       this.el.tableBody.querySelectorAll('[data-action="confirm-deposit"]').forEach(btn => btn.addEventListener('click', e => this.handleConfirm(e)));
-      this.el.tableBody.querySelectorAll('[data-action="reject-deposit"]').forEach(btn => btn.addEventListener('click', e => this.handleReject(e)));
+      this.el.tableBody.querySelectorAll('[data-action="reject-deposit"]').forEach(btn =>  btn.addEventListener('click', e => this.handleReject(e)));
+      this.renderDepositTotals(rows);
     } catch (e) {
       console.error('loadDeposits', e);
       showToast('Gagal memuat setoran', 'error');
     }
+  },
+
+  renderDepositTotals(rows) {
+    const tfoot = document.getElementById('deposits-table-foot');
+    if (!tfoot) return;
+    const pending   = rows.filter(r => r.status === 'pending').reduce((s, r) => s + Number(r.amount || 0), 0);
+    const confirmed = rows.filter(r => r.status === 'confirmed').reduce((s, r) => s + Number(r.amount || 0), 0);
+    const rejected  = rows.filter(r => r.status === 'rejected').reduce((s, r) => s + Number(r.amount || 0), 0);
+    tfoot.innerHTML = rows.length ? `
+      <tr class="table-footer-totals">
+        <td colspan="4" class="fw-700">Total (${rows.length} setoran)</td>
+        <td class="text-right fw-700">${fRp(pending + confirmed + rejected)}</td>
+        <td colspan="5"></td>
+      </tr>
+      <tr class="text-xs text-muted">
+        <td colspan="4">Dikonfirmasi ${fRp(confirmed)} &nbsp;|&nbsp; Menunggu ${fRp(pending)} &nbsp;|&nbsp; Ditolak ${fRp(rejected)}</td>
+        <td colspan="6"></td>
+      </tr>` : '';
   },
 
   async handleConfirm(e) {

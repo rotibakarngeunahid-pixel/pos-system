@@ -53,6 +53,14 @@ const POS = {
         case 'test-print': POS.testPrint(); break;
         case 'confirm-open-shift': POS.confirmOpenShift(); break;
         case 'confirm-close-shift': POS.confirmCloseShift(); break;
+        case 'post-shift-setor':
+          closeModal('modal-post-close-shift');
+          POS.switchMainTab('deposits', document.querySelector('.pos-tab-item[data-tab="deposits"]'));
+          break;
+        case 'post-shift-buka-shift':
+          closeModal('modal-post-close-shift');
+          setTimeout(() => openModal('modal-shift'), 150);
+          break;
         case 'close-payment-modal': POS.closePaymentModal(); break;
         case 'apply-discount': POS.applyDiscount(); break;
         case 'confirm-checkout': POS.confirmCheckout(); break;
@@ -398,10 +406,11 @@ const POS = {
       this.updateShiftUI();
       const diff = cash - result.expected_cash;
       showToast(`Shift ditutup. Selisih kas: ${formatRupiah(Math.abs(diff))} ${diff >= 0 ? 'lebih' : 'kurang'}`, diff >= 0 ? 'success' : 'warning');
-      // Reset input kas awal lalu minta buka shift baru
       const kasInput = document.getElementById('shift-opening-cash');
       if (kasInput) kasInput.value = '';
-      setTimeout(() => openModal('modal-shift'), 400);
+      // Refresh deposit UI agar siap untuk setoran tanpa shift
+      if (window.depositUi) depositUi.refreshWhenReady();
+      setTimeout(() => openModal('modal-post-close-shift'), 400);
     } catch (e) {
       showToast(e.message, 'error');
     } finally {

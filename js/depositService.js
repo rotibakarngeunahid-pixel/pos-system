@@ -138,18 +138,19 @@ const depositService = {
     return data;
   },
 
-  async getMyDeposits({ staffId, branchId, limit = 30 }) {
-    const start = new Date();
+  async getMyDeposits({ staffId, branchId, limit = 50, daysBack = 0 }) {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(end);
+    start.setDate(start.getDate() - daysBack);
     start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
 
     const { data, error } = await db.from('cash_deposits')
       .select('*, deposit_accounts(label, type, bank_name, account_number)')
       .eq('staff_id', staffId)
       .eq('branch_id', branchId)
       .gte('created_at', start.toISOString())
-      .lt('created_at', end.toISOString())
+      .lte('created_at', end.toISOString())
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
@@ -170,8 +171,8 @@ const depositService = {
       .limit(limit);
     if (branchId) q = q.eq('branch_id', branchId);
     if (status)   q = q.eq('status', status);
-    if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
-    if (dateTo)   q = q.lte('created_at', dateTo + 'T23:59:59');
+    if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00+07:00');
+    if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59+07:00');
     const { data, error } = await q;
     if (error) throw error;
     return data || [];
