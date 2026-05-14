@@ -179,11 +179,20 @@ const depositService = {
   },
 
   async confirmDeposit({ depositId, adminId, action, rejectReason = null }) {
-    if (!depositId || !adminId) throw new Error('depositId dan adminId wajib diisi');
+    const normalizedDepositId = String(depositId || '').trim();
+    const normalizedAdminId = Number(adminId);
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    if (!normalizedDepositId || !Number.isInteger(normalizedAdminId) || normalizedAdminId <= 0) {
+      throw new Error('depositId dan adminId wajib diisi');
+    }
+    if (!uuidPattern.test(normalizedDepositId)) {
+      throw new Error('ID setoran tidak valid. Muat ulang halaman lalu coba lagi.');
+    }
     if (!['confirmed','rejected'].includes(action)) throw new Error('action tidak valid');
     const { error } = await db.rpc('confirm_deposit', {
-      p_deposit_id: depositId,
-      p_admin_id: adminId,
+      p_deposit_id: normalizedDepositId,
+      p_admin_id: normalizedAdminId,
       p_action: action,
       p_reject_reason: rejectReason || null
     });
