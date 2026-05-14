@@ -89,12 +89,12 @@ const adminDepositUi = {
 
       // Build HTML without storing IDs in attributes — use closure binding instead
       this.el.tableBody.innerHTML = rows.map((r, i) => {
-        // deposit_id is the aliased cash_deposits.id UUID (avoids join ID collision)
-        const depositId = r.deposit_id;
+        // r.id is the cash_deposits UUID — safe because branches join was removed from getAllDeposits
+        const depositId = r.id;
         const shortId   = String(depositId || '').slice(0, 8).toUpperCase();
         const date      = fDate(r.created_at);
         const staff     = escHtml(r.staff?.name || '-');
-        const br        = escHtml(r.branches?.name || '-');
+        const br        = escHtml(this.branches.find(b => b.id === r.branch_id)?.name || '-');
         const method    = escHtml(r.deposit_accounts?.label || '-');
         const typeIcon  = r.deposit_accounts?.type === 'qris' ? 'qr-code'
                         : r.deposit_accounts?.type === 'cash' ? 'hand-coins'
@@ -153,7 +153,7 @@ const adminDepositUi = {
       this.el.tableBody.querySelectorAll('.deposit-admin-actions').forEach(wrap => {
         const rowIdx = parseInt(wrap.dataset.row, 10);
         const row    = rows[rowIdx];
-        const depositId = row.deposit_id;
+        const depositId = row.id;
 
         wrap.querySelector('.dep-confirm-btn')?.addEventListener('click', () => {
           this.doConfirm(depositId);

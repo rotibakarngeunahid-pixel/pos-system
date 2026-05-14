@@ -158,16 +158,16 @@ const depositService = {
   },
 
   async getAllDeposits({ branchId = null, status = null, dateFrom = null, dateTo = null, limit = 100 } = {}) {
-    // Alias id → deposit_id to avoid PostgREST join ambiguity with branches.id
+    // Omit branches(name) join — its id column (bigint) overwrites cash_deposits.id (UUID) in the SDK response.
+    // Branch name is resolved client-side from adminDepositUi.branches.
     let q = db.from('cash_deposits')
       .select(`
-        deposit_id:id,
+        id, branch_id,
         amount, cash_balance_at_deposit, proof_url, notes,
         status, reject_reason, created_at, reviewed_at,
         deposit_accounts(label, type, bank_name, account_number),
         staff:users!staff_id(name),
-        reviewer:users!reviewed_by(name),
-        branches(name)
+        reviewer:users!reviewed_by(name)
       `)
       .order('created_at', { ascending: false })
       .limit(limit);
