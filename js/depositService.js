@@ -158,16 +158,14 @@ const depositService = {
   },
 
   async getAllDeposits({ branchId = null, status = null, dateFrom = null, dateTo = null, limit = 100 } = {}) {
-    // Omit branches(name) join — its id column (bigint) overwrites cash_deposits.id (UUID) in the SDK response.
-    // Branch name is resolved client-side from adminDepositUi.branches.
+    // No embedded joins at all: every joined table with a bigint id column (users, branches)
+    // causes the Supabase SDK to overwrite cash_deposits.id (UUID) with that bigint in r.id.
+    // deposit_accounts.id is UUID but we still skip the join — caller resolves names client-side.
     let q = db.from('cash_deposits')
       .select(`
-        id, branch_id,
+        id, branch_id, staff_id, reviewed_by, deposit_account_id,
         amount, cash_balance_at_deposit, proof_url, notes,
-        status, reject_reason, created_at, reviewed_at,
-        deposit_accounts(label, type, bank_name, account_number),
-        staff:users!staff_id(name),
-        reviewer:users!reviewed_by(name)
+        status, reject_reason, created_at, reviewed_at
       `)
       .order('created_at', { ascending: false })
       .limit(limit);

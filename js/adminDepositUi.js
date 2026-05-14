@@ -4,6 +4,7 @@ const adminDepositUi = {
   el: {},
   branches: [],
   accounts: [],
+  staffMap: {},
   selectedQrisFile: null,
 
   init() {
@@ -14,6 +15,7 @@ const adminDepositUi = {
         this.bindElements();
         await this.loadBranches();
         await this.loadAccounts();
+        await this.loadStaff();
         await this.loadDeposits();
       } catch (e) {
         console.error('adminDepositUi.init', e);
@@ -63,6 +65,12 @@ const adminDepositUi = {
     if (this.el.branch) this.el.branch.innerHTML = '<option value="">Semua Cabang</option>' + options;
   },
 
+  async loadStaff() {
+    const { data } = await db.from('users').select('id, name');
+    this.staffMap = {};
+    (data || []).forEach(u => { this.staffMap[u.id] = u.name; });
+  },
+
   statusLabel(status) {
     if (status === 'confirmed') return { text: 'Dikonfirmasi', cls: 'badge-success' };
     if (status === 'rejected')  return { text: 'Ditolak',      cls: 'badge-danger' };
@@ -89,15 +97,16 @@ const adminDepositUi = {
 
       // Build HTML without storing IDs in attributes — use closure binding instead
       this.el.tableBody.innerHTML = rows.map((r, i) => {
-        // r.id is the cash_deposits UUID — safe because branches join was removed from getAllDeposits
+        // r.id is always the cash_deposits UUID — no joins means no bigint-id collision
         const depositId = r.id;
         const shortId   = String(depositId || '').slice(0, 8).toUpperCase();
         const date      = fDate(r.created_at);
-        const staff     = escHtml(r.staff?.name || '-');
+        const staff     = escHtml(this.staffMap[r.staff_id] || '-');
         const br        = escHtml(this.branches.find(b => b.id === r.branch_id)?.name || '-');
-        const method    = escHtml(r.deposit_accounts?.label || '-');
-        const typeIcon  = r.deposit_accounts?.type === 'qris' ? 'qr-code'
-                        : r.deposit_accounts?.type === 'cash' ? 'hand-coins'
+        const acc       = this.accounts.find(a => a.id === r.deposit_account_id);
+        const method    = escHtml(acc?.label || '-');
+        const typeIcon  = acc?.type === 'qris' ? 'qr-code'
+                        : acc?.type === 'cash' ? 'hand-coins'
                         : 'landmark';
         const proof     = r.proof_url
           ? `<a class="deposit-admin-proof-link" href="${escHtml(r.proof_url)}" target="_blank" rel="noopener">
@@ -107,7 +116,7 @@ const adminDepositUi = {
         const notes     = r.notes ? `<span title="${escHtml(r.notes)}" class="deposit-admin-notes">${escHtml(r.notes)}</span>` : '<span class="text-muted">—</span>';
 
         const sl       = this.statusLabel(r.status);
-        const reviewer = r.reviewer?.name || null;
+        const reviewer = this.staffMap[r.reviewed_by] || null;
 
         let statusCell = `<div class="deposit-admin-status-wrap">
           <span class="badge ${sl.cls} deposit-admin-badge">${sl.text}</span>`;
