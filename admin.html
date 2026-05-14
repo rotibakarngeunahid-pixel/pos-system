@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#f97316" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="RBN Admin" />
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=20260514-2" />
   <style>
     /* Page-specific overrides */
     .bg-alt { background: var(--bg-alt); }
@@ -838,23 +838,44 @@
       <section class="admin-section" id="section-cash-deposits">
         <div class="section-header">
           <h2 class="section-title">Setoran Tunai</h2>
-          <div class="section-actions">
-            <select id="deposits-filter-branch" class="form-control">
-              <option value="">Semua Cabang</option>
-            </select>
-            <select id="deposits-filter-status" class="form-control">
-              <option value="">Semua Status</option>
-              <option value="pending">Menunggu</option>
-              <option value="confirmed">Dikonfirmasi</option>
-              <option value="rejected">Ditolak</option>
-            </select>
-            <input type="date" id="deposits-filter-from" class="form-control" />
-            <input type="date" id="deposits-filter-to" class="form-control" />
-            <button id="deposits-filter-btn" class="btn btn-primary">Filter</button>
+        </div>
+
+        <!-- Filter card -->
+        <div class="card dep-filter-card">
+          <div class="dep-filter-row">
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Cabang</label>
+              <select id="deposits-filter-branch" class="form-control dep-filter-select">
+                <option value="">Semua Cabang</option>
+              </select>
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Status</label>
+              <select id="deposits-filter-status" class="form-control dep-filter-select">
+                <option value="">Semua Status</option>
+                <option value="pending">Menunggu</option>
+                <option value="confirmed">Dikonfirmasi</option>
+                <option value="rejected">Ditolak</option>
+              </select>
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Dari Tanggal</label>
+              <input type="date" id="deposits-filter-from" class="form-control dep-filter-select" />
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Sampai Tanggal</label>
+              <input type="date" id="deposits-filter-to" class="form-control dep-filter-select" />
+            </div>
+            <div class="dep-filter-group dep-filter-action">
+              <label class="dep-filter-label" style="visibility:hidden">Filter</label>
+              <button id="deposits-filter-btn" class="btn btn-primary dep-filter-btn">
+                <i data-lucide="search" style="width:15px;height:15px"></i> Tampilkan
+              </button>
+            </div>
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" style="margin-top:12px">
           <div class="table-wrap">
             <table>
               <thead><tr><th>#</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas</th><th>Metode</th><th>Catatan</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
@@ -1703,8 +1724,8 @@
   <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js"></script>
-  <script src="js/depositService.js?v=20260514-deposit-security-1"></script>
-  <script src="js/adminDepositUi.js?v=20260514-deposit-security-1"></script>
+  <script src="js/depositService.js?v=20260514-deposit-security-2"></script>
+  <script src="js/adminDepositUi.js?v=20260514-deposit-security-2"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260514-pos-global-fix-1"></script>

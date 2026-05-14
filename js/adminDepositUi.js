@@ -75,108 +75,145 @@ const adminDepositUi = {
     const status   = this.el.status?.value || null;
     const dateFrom = this.el.dateFrom?.value || null;
     const dateTo   = this.el.dateTo?.value || null;
+
+    this.el.tableBody.innerHTML = '<tr><td colspan="10" class="empty-td" style="padding:24px">Memuat data...</td></tr>';
+
     try {
       const rows = await depositService.getAllDeposits({ branchId, status, dateFrom, dateTo, limit: 200 });
+
       if (!rows || !rows.length) {
-        this.el.tableBody.innerHTML = '<tr><td colspan="11" class="empty-td">Tidak ada data setoran</td></tr>';
+        this.el.tableBody.innerHTML = '<tr><td colspan="10" class="empty-td">Tidak ada data setoran untuk filter ini</td></tr>';
         this.renderDepositTotals([]);
         return;
       }
 
-      this.el.tableBody.innerHTML = rows.map(r => {
-        const shortId   = String(r.id).slice(0, 8).toUpperCase();
+      // Build HTML without storing IDs in attributes — use closure binding instead
+      this.el.tableBody.innerHTML = rows.map((r, i) => {
+        // deposit_id is the aliased cash_deposits.id UUID (avoids join ID collision)
+        const depositId = r.deposit_id;
+        const shortId   = String(depositId || '').slice(0, 8).toUpperCase();
         const date      = fDate(r.created_at);
         const staff     = escHtml(r.staff?.name || '-');
         const br        = escHtml(r.branches?.name || '-');
         const method    = escHtml(r.deposit_accounts?.label || '-');
+        const typeIcon  = r.deposit_accounts?.type === 'qris' ? 'qr-code'
+                        : r.deposit_accounts?.type === 'cash' ? 'hand-coins'
+                        : 'landmark';
         const proof     = r.proof_url
-          ? `<a href="${escHtml(r.proof_url)}" target="_blank" rel="noopener">Lihat</a>`
-          : '<span class="text-muted">-</span>';
-        const notes     = escHtml(r.notes || '-');
+          ? `<a class="deposit-admin-proof-link" href="${escHtml(r.proof_url)}" target="_blank" rel="noopener">
+               <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle"></i> Lihat
+             </a>`
+          : '<span class="text-muted">—</span>';
+        const notes     = r.notes ? `<span title="${escHtml(r.notes)}" class="deposit-admin-notes">${escHtml(r.notes)}</span>` : '<span class="text-muted">—</span>';
 
-        const sl        = this.statusLabel(r.status);
-        const reviewer  = r.reviewer?.name || null;
+        const sl       = this.statusLabel(r.status);
+        const reviewer = r.reviewer?.name || null;
 
-        let statusCell = `<span class="badge ${sl.cls}">${sl.text}</span>`;
+        let statusCell = `<div class="deposit-admin-status-wrap">
+          <span class="badge ${sl.cls} deposit-admin-badge">${sl.text}</span>`;
         if (reviewer && r.status !== 'pending') {
-          statusCell += `<br><span class="text-xs text-muted">oleh ${escHtml(reviewer)}</span>`;
+          statusCell += `<span class="deposit-admin-reviewer">oleh ${escHtml(reviewer)}</span>`;
         }
         if (r.status === 'rejected' && r.reject_reason) {
-          statusCell += `<br><span class="text-xs text-danger">${escHtml(r.reject_reason)}</span>`;
+          statusCell += `<span class="deposit-admin-reject-reason">${escHtml(r.reject_reason)}</span>`;
         }
+        statusCell += `</div>`;
 
-        const actions = r.status === 'pending' ? `
-          <div class="flex gap-1 mt-1">
-            <button class="btn btn-success btn-sm" data-action="confirm-deposit" data-id="${escHtml(r.id)}">Konfirmasi</button>
-            <button class="btn btn-danger btn-sm"  data-action="reject-deposit"  data-id="${escHtml(r.id)}">Tolak</button>
-          </div>` : '';
+        const actionBtns = r.status === 'pending'
+          ? `<div class="deposit-admin-actions" data-row="${i}">
+               <button type="button" class="btn btn-success btn-sm dep-confirm-btn">
+                 <i data-lucide="check" style="width:13px;height:13px"></i> Konfirmasi
+               </button>
+               <button type="button" class="btn btn-danger btn-sm dep-reject-btn">
+                 <i data-lucide="x" style="width:13px;height:13px"></i> Tolak
+               </button>
+             </div>`
+          : '';
 
-        return `<tr>
-          <td class="text-mono text-xs" title="${escHtml(r.id)}">${shortId}</td>
-          <td>${date}</td>
+        return `<tr class="deposit-admin-row ${r.status}">
+          <td class="deposit-admin-id" title="${escHtml(depositId)}">${shortId}</td>
+          <td class="deposit-admin-date">${date}</td>
           <td>${staff}</td>
           <td>${br}</td>
-          <td class="text-right fw-700">${fRp(r.amount)}</td>
-          <td class="text-right">${fRp(r.cash_balance_at_deposit)}</td>
-          <td>${method}</td>
-          <td class="text-xs text-muted" style="max-width:120px;word-break:break-word">${notes}</td>
+          <td class="deposit-admin-amount">${fRp(r.amount)}</td>
+          <td class="deposit-admin-kas text-muted">${fRp(r.cash_balance_at_deposit)}</td>
+          <td>
+            <span class="deposit-admin-method">
+              <i data-lucide="${typeIcon}" style="width:12px;height:12px;flex-shrink:0"></i>
+              ${method}
+            </span>
+          </td>
+          <td>${notes}</td>
           <td>${proof}</td>
-          <td>${statusCell}${actions}</td>
+          <td>${statusCell}${actionBtns}</td>
         </tr>`;
       }).join('');
 
-      this.el.tableBody.querySelectorAll('[data-action="confirm-deposit"]').forEach(btn => btn.addEventListener('click', e => this.handleConfirm(e)));
-      this.el.tableBody.querySelectorAll('[data-action="reject-deposit"]').forEach(btn =>  btn.addEventListener('click', e => this.handleReject(e)));
+      // Bind confirm/reject using closure — no data-id attribute reliance
+      this.el.tableBody.querySelectorAll('.deposit-admin-actions').forEach(wrap => {
+        const rowIdx = parseInt(wrap.dataset.row, 10);
+        const row    = rows[rowIdx];
+        const depositId = row.deposit_id;
+
+        wrap.querySelector('.dep-confirm-btn')?.addEventListener('click', () => {
+          this.doConfirm(depositId);
+        });
+        wrap.querySelector('.dep-reject-btn')?.addEventListener('click', () => {
+          this.doReject(depositId);
+        });
+      });
+
       this.renderDepositTotals(rows);
+      if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
     } catch (e) {
       console.error('loadDeposits', e);
-      showToast('Gagal memuat setoran', 'error');
+      this.el.tableBody.innerHTML = '<tr><td colspan="10" class="empty-td text-danger">Gagal memuat data setoran</td></tr>';
+      showToast('Gagal memuat setoran: ' + (e.message || ''), 'error');
     }
   },
 
   renderDepositTotals(rows) {
     const tfoot = document.getElementById('deposits-table-foot');
     if (!tfoot) return;
-    const pending   = rows.filter(r => r.status === 'pending').reduce((s, r) => s + Number(r.amount || 0), 0);
+    if (!rows.length) { tfoot.innerHTML = ''; return; }
+    const pending   = rows.filter(r => r.status === 'pending').reduce((s, r)   => s + Number(r.amount || 0), 0);
     const confirmed = rows.filter(r => r.status === 'confirmed').reduce((s, r) => s + Number(r.amount || 0), 0);
-    const rejected  = rows.filter(r => r.status === 'rejected').reduce((s, r) => s + Number(r.amount || 0), 0);
-    tfoot.innerHTML = rows.length ? `
-      <tr class="table-footer-totals">
-        <td colspan="4" class="fw-700">Total (${rows.length} setoran)</td>
-        <td class="text-right fw-700">${fRp(pending + confirmed + rejected)}</td>
-        <td colspan="5"></td>
-      </tr>
-      <tr class="text-xs text-muted">
-        <td colspan="4">Dikonfirmasi ${fRp(confirmed)} &nbsp;|&nbsp; Menunggu ${fRp(pending)} &nbsp;|&nbsp; Ditolak ${fRp(rejected)}</td>
-        <td colspan="6"></td>
-      </tr>` : '';
+    const rejected  = rows.filter(r => r.status === 'rejected').reduce((s, r)  => s + Number(r.amount || 0), 0);
+    tfoot.innerHTML = `
+      <tr class="deposit-totals-row">
+        <td colspan="4"><strong>${rows.length} setoran</strong></td>
+        <td class="deposit-admin-amount"><strong>${fRp(pending + confirmed + rejected)}</strong></td>
+        <td colspan="6">
+          <span class="badge badge-success" style="margin-right:4px">${fRp(confirmed)}</span>
+          <span class="badge badge-warning" style="margin-right:4px">${fRp(pending)}</span>
+          <span class="badge badge-danger">${fRp(rejected)}</span>
+        </td>
+      </tr>`;
   },
 
-  async handleConfirm(e) {
-    const id = e.currentTarget.dataset.id;
+  async doConfirm(depositId) {
     const ok = await showConfirm({
       title: 'Konfirmasi Setoran',
       message: 'Konfirmasi setoran ini? Setelah dikonfirmasi, kas akan berkurang.',
-      confirmText: 'Konfirmasi'
+      confirmText: 'Ya, Konfirmasi'
     });
     if (!ok) return;
     try {
       const adminId = auth.getSession()?.id || null;
-      await depositService.confirmDeposit({ depositId: id, adminId, action: 'confirmed' });
-      showToast('Setoran dikonfirmasi', 'success');
+      await depositService.confirmDeposit({ depositId, adminId, action: 'confirmed' });
+      showToast('Setoran berhasil dikonfirmasi', 'success');
       await this.loadDeposits();
     } catch (err) {
       showToast(err.message || 'Gagal konfirmasi', 'error');
     }
   },
 
-  async handleReject(e) {
-    const id = e.currentTarget.dataset.id;
+  async doReject(depositId) {
     const reason = await showPrompt({ title: 'Tolak Setoran', placeholder: 'Alasan penolakan (opsional)' });
     if (reason === null) return;
     try {
       const adminId = auth.getSession()?.id || null;
-      await depositService.confirmDeposit({ depositId: id, adminId, action: 'rejected', rejectReason: reason || null });
+      await depositService.confirmDeposit({ depositId, adminId, action: 'rejected', rejectReason: reason || null });
       showToast('Setoran ditolak', 'success');
       await this.loadDeposits();
     } catch (err) {

@@ -1306,6 +1306,145 @@ body, .body { font-size: 14px; font-weight: 400; }
   }
 }
 
+/* ── Admin Deposit Filter Card ───────────────────────────── */
+.dep-filter-card { padding: 16px 20px; margin-bottom: 0; }
+.dep-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.dep-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 130px;
+}
+.dep-filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+.dep-filter-select { height: 38px; padding-top: 0; padding-bottom: 0; }
+.dep-filter-action { flex: 0 0 auto; min-width: auto; }
+.dep-filter-btn {
+  height: 38px;
+  padding: 0 18px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Admin Deposit Table ─────────────────────────────────── */
+.deposit-admin-row { transition: background .15s; }
+.deposit-admin-row:hover { background: var(--bg-alt); }
+.deposit-admin-row.pending  { background: rgba(245, 158, 11, 0.04); }
+.deposit-admin-row.confirmed { background: rgba(22, 163, 74, 0.04); }
+.deposit-admin-row.rejected { background: rgba(220, 38, 38, 0.04); }
+
+.deposit-admin-id {
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.deposit-admin-date { white-space: nowrap; font-size: 13px; }
+.deposit-admin-amount {
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: right;
+}
+.deposit-admin-kas {
+  white-space: nowrap;
+  text-align: right;
+  font-size: 13px;
+}
+.deposit-admin-method {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.deposit-admin-notes {
+  display: block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: default;
+}
+.deposit-admin-proof-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.deposit-admin-proof-link:hover { text-decoration: underline; }
+
+.deposit-admin-status-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 100px;
+}
+.deposit-admin-badge { font-size: 11px; }
+.deposit-admin-reviewer {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.deposit-admin-reject-reason {
+  font-size: 11px;
+  color: var(--danger, #dc2626);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deposit-admin-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  margin-top: 4px;
+}
+.deposit-admin-actions .btn-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 4px 10px;
+  height: 28px;
+}
+
+.deposit-totals-row {
+  background: var(--bg-alt);
+  font-size: 13px;
+}
+.deposit-totals-row td { border-top: 2px solid var(--border); }
+
+@media (max-width: 900px) {
+  .dep-filter-group { min-width: 110px; }
+}
+@media (max-width: 600px) {
+  .dep-filter-card { padding: 12px 14px; }
+  .dep-filter-row { gap: 10px; }
+  .dep-filter-group { min-width: calc(50% - 5px); flex: 0 0 calc(50% - 5px); }
+  .dep-filter-action { flex: 1; }
+  .dep-filter-btn { width: 100%; justify-content: center; }
+}
+
 select.form-control { cursor: pointer; appearance: auto; }
 textarea.form-control { resize: vertical; min-height: 80px; }
 
