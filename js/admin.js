@@ -1632,13 +1632,15 @@ const ADMIN = {
   // ── Inventory Logs ────────────────────────────────────────────
   async loadInventoryLogs() {
     const branchId = document.getElementById('inv-log-branch-filter').value;
+    const type     = document.getElementById('inv-log-type-filter')?.value || '';
     const tbody    = document.getElementById('inv-log-body');
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-td">Memuat...</td></tr>';
 
     let q = db.from('inventory_logs')
       .select('*, ingredients(name, unit), branches(name), users!created_by(name)')
       .order('created_at', { ascending:false }).limit(300);
     if (branchId) q = q.eq('branch_id', branchId);
+    if (type)     q = q.eq('type', type);
 
     const { data } = await q;
     const typeLabel = { in:'Masuk', out:'Keluar', opname:'Opname', transfer_in:'Transfer Masuk', transfer_out:'Transfer Keluar' };
@@ -1652,9 +1654,10 @@ const ADMIN = {
         <td><span class="badge ${typeBadge[log.type]||'badge-orange'}">${typeLabel[log.type]||log.type}</span></td>
         <td class="fw-700">${log.qty > 0 ? '+'+log.qty : log.qty} ${escHtml(log.ingredients?.unit||'')}</td>
         <td>${log.stock_before} → ${log.stock_after}</td>
+        <td>${escHtml(log.users?.name||'Sistem')}</td>
         <td class="text-xs text-muted">${escHtml(log.notes||log.reference_type||'—')}</td>
       </tr>`).join('')
-    : `<tr><td colspan="7" class="empty-td">Belum ada log inventori</td></tr>`;
+    : `<tr><td colspan="8" class="empty-td">Belum ada log inventori</td></tr>`;
   },
 
   // ── Staff ─────────────────────────────────────────────────────
