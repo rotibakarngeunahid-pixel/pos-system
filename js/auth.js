@@ -121,6 +121,18 @@ const auth = {
     const local = this.getSession();
     if (!local) return null;
     try {
+      const activeRes = await db.from('users')
+        .select('is_active')
+        .eq('id', local.id)
+        .maybeSingle();
+      const activeErrMsg = (activeRes.error?.message || '').toLowerCase();
+      if (activeRes.error && activeRes.error.code !== '42703' && !activeErrMsg.includes('is_active')) {
+        throw activeRes.error;
+      }
+      if (activeRes.data?.is_active === false) {
+        throw new Error('Akun sudah dinonaktifkan');
+      }
+
       const { data, error } = await db.rpc('get_current_user');
       if (error) throw error;
       if (!data) throw new Error('Session tidak valid');

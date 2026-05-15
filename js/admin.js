@@ -1784,9 +1784,14 @@ const ADMIN = {
     
     // Populate Staff
     try {
-      const { data: users } = await db.from('users').select('id, name').order('name');
+      let { data: users, error: usersErr } = await db.from('users').select('id, name, is_active').order('name');
+      const usersErrMsg = (usersErr?.message || '').toLowerCase();
+      if (usersErr && (usersErr.code === '42703' || usersErrMsg.includes('is_active'))) {
+        ({ data: users, error: usersErr } = await db.from('users').select('id, name').order('name'));
+      }
+      if (usersErr) throw usersErr;
       if (users) {
-        const staffOpts = users.map(u => `<option value="${u.id}">${escHtml(u.name)}</option>`).join('');
+        const staffOpts = this._activeUsers(users).map(u => `<option value="${u.id}">${escHtml(u.name)}</option>`).join('');
         setSelect('report-staff-filter', `<option value="">Semua Kasir</option>${staffOpts}`);
       }
     } catch(e) { console.error('Failed to load staff for reports', e); }
@@ -1978,8 +1983,9 @@ const ADMIN = {
     if (error) { showToast('Gagal memuat staff: ' + error.message, 'error'); return; }
     const container = document.getElementById('staff-list');
     if (!container) return;
-    container.innerHTML = data?.length
-      ? `<div class="admin-list">${data.map(u => {
+    const activeUsers = this._activeUsers(data);
+    container.innerHTML = activeUsers.length
+      ? `<div class="admin-list">${activeUsers.map(u => {
           const branch = this.branches.find(b => b.id === u.branch_id);
           const roleIconSvg = u.role === 'admin'
             ? '<i data-lucide="shield" class="icon"></i>'
@@ -2071,6 +2077,19 @@ const ADMIN = {
       .map(cb => Number(cb.value));
   },
 
+  _activeUsers(rows = []) {
+    return (rows || []).filter(u => u.is_active !== false);
+  },
+
+  _makeArchivedPassword() {
+    const bytes = new Uint8Array(16);
+    if (window.crypto?.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+      return 'archived_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+    return 'archived_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  },
+
   async saveStaff() {
     const id       = document.getElementById('staff-id').value;
     const name     = document.getElementById('staff-username').value.trim();
@@ -2119,17 +2138,44 @@ const ADMIN = {
   },
 
   async deleteStaff(id, name) {
+    if (id === this.user.id) {
+      showToast('Akun yang sedang login tidak bisa dihapus', 'warning');
+      return;
+    }
+
     const ok = await showConfirm({
       title:       `Hapus User "${name}"?`,
-      message:     'Akun user ini akan dihapus.',
+      message:     'Akun user ini akan dinonaktifkan dan disembunyikan dari daftar staff. Riwayat transaksi tetap tersimpan.',
       confirmText: 'Ya, Hapus',
       danger:      true,
     });
     if (!ok) return;
-    const { error } = await db.from('users').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+
+    const { error } = await db.from('users')
+      .update({
+        is_active: false,
+        deleted_at: new Date().toISOString(),
+        branch_id: null,
+        password: this._makeArchivedPassword()
+      })
+      .eq('id', id);
+
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (error.code === '42703' || msg.includes('is_active') || msg.includes('deleted_at')) {
+        showToast('Gagal: jalankan sql/migrations/019_soft_delete_users.sql di Supabase SQL Editor terlebih dahulu.', 'error');
+      } else {
+        showToast('Gagal: ' + error.message, 'error');
+      }
+      return;
+    }
+
+    await db.from('investor_branch_access').delete().eq('user_id', id);
+    await db.from('investor_feature_access').delete().eq('user_id', id);
+
     await this.loadStaff();
-    showToast('User dihapus', 'success');
+    if (this.currentSection === 'investor-access') await this.loadInvestorAccess();
+    showToast('User dihapus dari daftar aktif', 'success');
   },
 
   // ── Investor Access ───────────────────────────────────────────
@@ -2145,8 +2191,9 @@ const ADMIN = {
     if (error) { showToast('Gagal memuat investor: ' + error.message, 'error'); return; }
     const container = document.getElementById('investor-access-list');
     if (!container) return;
+    const activeInvestors = this._activeUsers(investors);
 
-    if (!investors?.length) {
+    if (!activeInvestors.length) {
       container.innerHTML = `<div class="empty-state">
         <div class="empty-icon"><i data-lucide="bar-chart-3" class="icon"></i></div>
         <div class="empty-title">Belum ada investor</div>
@@ -2174,7 +2221,7 @@ const ADMIN = {
     }
 
     const labels = this._FEATURE_LABELS;
-    container.innerHTML = `<div class="admin-list">${investors.map(u => {
+    container.innerHTML = `<div class="admin-list">${activeInvestors.map(u => {
       const branchList  = branchMap[u.id]  || [];
       const featureList = featureMap[u.id] || [];
       const hasBranch  = branchList.length  > 0;
