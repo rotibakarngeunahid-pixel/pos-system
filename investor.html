@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Investor — Roti Bakar Ngeunah</title>
+  <link rel="icon" type="image/png" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="apple-touch-icon" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#f97316" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    /* ── Investor layout ─────────────────────────────────── */
+    .investor-wrap { display:flex; flex-direction:column; min-height:100vh; background:var(--bg-alt); }
+
+    /* Header */
+    .inv-header { background:var(--bg); border-bottom:1px solid var(--border); padding:0 20px; height:60px; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:100; }
+    .inv-header-logo { height:32px; width:32px; border-radius:8px; object-fit:cover; }
+    .inv-header-brand { font-weight:800; font-size:15px; color:var(--text); flex:1; }
+    .inv-header-user { font-size:13px; color:var(--text-muted); }
+
+    /* Filter bar */
+    .inv-filters { background:var(--bg); border-bottom:1px solid var(--border); padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+    .inv-filters .form-group { margin:0; }
+    .inv-filters label { font-size:11px; font-weight:600; }
+    .inv-filters .form-control { font-size:13px; padding:6px 10px; height:36px; }
+
+    /* Tabs */
+    .inv-tabs { background:var(--bg); border-bottom:1px solid var(--border); padding:0 20px; display:flex; gap:0; overflow-x:auto; }
+    .inv-tab { padding:12px 18px; font-size:13px; font-weight:600; color:var(--text-muted); border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; transition:color .15s, border-color .15s; }
+    .inv-tab:hover { color:var(--text); }
+    .inv-tab.active { color:var(--primary); border-bottom-color:var(--primary); }
+
+    /* Main content */
+    .inv-main { flex:1; padding:20px; max-width:1200px; margin:0 auto; width:100%; box-sizing:border-box; }
+
+    /* Tab panels */
+    .inv-panel { display:none; }
+    .inv-panel.active { display:block; }
+
+    /* Stats grid */
+    .inv-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
+    .inv-stat { background:var(--bg); border-radius:var(--r-lg); padding:16px 18px; border:1px solid var(--border); }
+    .inv-stat-label { font-size:11px; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+    .inv-stat-value { font-size:1.4rem; font-weight:900; color:var(--text); line-height:1.1; }
+    .inv-stat-value.text-success { color:var(--success); }
+    .inv-stat-value.text-danger  { color:var(--danger); }
+    .inv-stat-value.text-primary { color:var(--primary); }
+
+    /* Table */
+    .inv-table-wrap { background:var(--bg); border-radius:var(--r-lg); border:1px solid var(--border); overflow:hidden; }
+    .inv-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .inv-table th { background:var(--bg-alt); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); padding:10px 14px; text-align:left; border-bottom:1px solid var(--border); }
+    .inv-table td { padding:10px 14px; border-bottom:1px solid var(--border); color:var(--text); vertical-align:middle; }
+    .inv-table tr:last-child td { border-bottom:none; }
+    .inv-table tr:hover td { background:var(--bg-alt); }
+
+    /* Badges */
+    .badge-void { background:rgba(220,38,38,.1); color:var(--danger); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+    .badge-completed { background:rgba(22,163,74,.1); color:var(--success); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+
+    /* Empty / loading state */
+    .inv-empty { text-align:center; padding:48px 24px; color:var(--text-muted); }
+    .inv-empty-icon { font-size:2.5rem; margin-bottom:12px; opacity:.4; }
+    .inv-loading { text-align:center; padding:40px; color:var(--text-muted); font-size:13px; }
+    .inv-error { background:var(--danger-bg,#fff0f0); border:1px solid rgba(220,38,38,.3); border-radius:var(--r-lg); padding:14px 18px; color:var(--danger); font-size:13px; margin-bottom:16px; }
+
+    /* No branch warning */
+    .inv-no-branch { background:var(--bg); border:1px solid var(--border); border-radius:var(--r-lg); padding:48px 24px; text-align:center; margin:24px 0; }
+
+    @media (max-width:600px) {
+      .inv-filters { padding:10px 12px; }
+      .inv-main { padding:12px; }
+      .inv-header { padding:0 12px; }
+      .inv-tabs { padding:0 8px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="toast-container"></div>
+
+  <div class="investor-wrap">
+
+    <!-- Header -->
+    <header class="inv-header">
+      <img src="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png"
+           alt="Logo" class="inv-header-logo" />
+      <div class="inv-header-brand">Roti Bakar Ngeunah — Investor</div>
+      <span class="inv-header-user" id="inv-user-name"></span>
+      <button class="btn btn-outline btn-sm" id="inv-logout-btn">
+        <i data-lucide="log-out" class="icon-sm"></i> Keluar
+      </button>
+    </header>
+
+    <!-- Filter Bar -->
+    <div class="inv-filters" id="inv-filters">
+      <div class="form-group">
+        <label class="form-label">Cabang</label>
+        <select class="form-control" id="inv-branch-filter">
+          <option value="">Memuat...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Dari</label>
+        <input type="date" class="form-control" id="inv-date-from" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sampai</label>
+        <input type="date" class="form-control" id="inv-date-to" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Metode Bayar</label>
+        <select class="form-control" id="inv-payment-method">
+          <option value="">Semua</option>
+          <option value="cash">Tunai</option>
+          <option value="qris">QRIS</option>
+          <option value="transfer">Transfer</option>
+        </select>
+      </div>
+      <div style="padding-bottom:1px;">
+        <button class="btn btn-primary" id="inv-refresh-btn">
+          <i data-lucide="refresh-cw" class="icon-sm"></i> Tampilkan
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <nav class="inv-tabs">
+      <button class="inv-tab active" data-inv-tab="overview">Overview</button>
+      <button class="inv-tab" data-inv-tab="sales">Penjualan</button>
+      <button class="inv-tab" data-inv-tab="products">Produk</button>
+      <button class="inv-tab" data-inv-tab="inventory">Stok</button>
+      <button class="inv-tab" data-inv-tab="usage">Pemakaian Bahan</button>
+    </nav>
+
+    <!-- Main content -->
+    <main class="inv-main">
+
+      <div id="inv-error-banner" class="inv-error" style="display:none;"></div>
+
+      <!-- Overview -->
+      <div class="inv-panel active" id="inv-panel-overview">
+        <div class="inv-stats" id="inv-overview-stats">
+          <div class="inv-stat"><div class="inv-stat-label">Pilih cabang dan periode untuk memuat data</div></div>
+        </div>
+      </div>
+
+      <!-- Penjualan -->
+      <div class="inv-panel" id="inv-panel-sales">
+        <div class="inv-table-wrap">
+          <table class="inv-table">
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Kasir</th>
+                <th>Metode</th>
+                <th>Status</th>
+                <th style="text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody id="inv-sales-tbody">
+              <tr><td colspan="5" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Produk -->
+      <div class="inv-panel" id="inv-panel-products">
+        <div class="inv-table-wrap">
+          <table class="inv-table">
+            <thead>
+              <tr>
+                <th>Produk</th>
+                <th>Varian</th>
+                <th style="text-align:right;">Qty Terjual</th>
+                <th style="text-align:right;">Revenue</th>
+              </tr>
+            </thead>
+            <tbody id="inv-products-tbody">
+              <tr><td colspan="4" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Stok -->
+      <div class="inv-panel" id="inv-panel-inventory">
+        <div class="inv-table-wrap">
+          <table class="inv-table">
+            <thead>
+              <tr>
+                <th>Bahan</th>
+                <th>Stok Saat Ini</th>
+                <th>Satuan</th>
+                <th style="text-align:right;">Pemakaian Hari Ini</th>
+                <th>Update Terakhir</th>
+              </tr>
+            </thead>
+            <tbody id="inv-inventory-tbody">
+              <tr><td colspan="5" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Pemakaian Bahan -->
+      <div class="inv-panel" id="inv-panel-usage">
+        <div class="inv-table-wrap">
+          <table class="inv-table">
+            <thead>
+              <tr>
+                <th>Bahan</th>
+                <th style="text-align:right;">Total Terpakai</th>
+                <th>Satuan</th>
+              </tr>
+            </thead>
+            <tbody id="inv-usage-tbody">
+              <tr><td colspan="3" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils/formatter.js"></script>
+  <script src="js/utils/safeNum.js"></script>
+  <script src="js/investorService.js"></script>
+  <script src="js/investor.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.lucide) lucide.createIcons();
+      INVESTOR.init();
+    });
+  </script>
+</body>
+</html>

@@ -84,6 +84,13 @@ const auth = {
   },
 
   // ── Guards ───────────────────────────────────────────────
+  getDefaultPageByRole(role) {
+    if (role === 'admin')    return 'admin.html';
+    if (role === 'staff')    return 'pos.html';
+    if (role === 'investor') return 'investor.html';
+    return 'index.html';
+  },
+
   requireAuth() {
     const s = this.getSession();
     if (!s) { window.location.href = 'index.html'; return null; }
@@ -94,7 +101,17 @@ const auth = {
     const s = this.requireAuth();
     if (!s) return null;
     if (s.role !== role) {
-      window.location.href = s.role === 'admin' ? 'admin.html' : 'pos.html';
+      window.location.href = this.getDefaultPageByRole(s.role);
+      return null;
+    }
+    return s;
+  },
+
+  requireAnyRole(roles = []) {
+    const s = this.requireAuth();
+    if (!s) return null;
+    if (!roles.includes(s.role)) {
+      window.location.href = this.getDefaultPageByRole(s.role);
       return null;
     }
     return s;

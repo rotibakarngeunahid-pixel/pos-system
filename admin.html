@@ -114,6 +114,9 @@
       <button class="nav-item" data-admin-action="navigate" data-section="staff" title="Staff">
         <i data-lucide="users"></i><span class="nav-text">Staff</span>
       </button>
+      <button class="nav-item" data-admin-action="navigate" data-section="investor-access" title="Investor Access">
+        <i data-lucide="bar-chart-3"></i><span class="nav-text">Investor Access</span>
+      </button>
       <button class="nav-item" data-admin-action="navigate" data-section="toppings" title="Topping">
         <i data-lucide="cherry"></i><span class="nav-text">Topping</span>
       </button>
@@ -769,6 +772,21 @@
         </div>
       </section>
 
+      <!-- ══════════ INVESTOR ACCESS ══════════ -->
+      <section class="admin-section" id="section-investor-access">
+        <div class="section-header">
+          <h2 class="section-title">Investor Access</h2>
+          <div class="section-actions">
+            <button class="btn btn-primary" data-admin-action="open-investor-modal">
+              <i data-lucide="plus" class="icon-sm"></i> Tambah Investor
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <div id="investor-access-list"></div>
+        </div>
+      </section>
+
       <!-- ══════════ CASH REPORT ══════════ -->
       <section class="admin-section" id="section-cash-report">
         <div class="section-header"><h2 class="section-title">Laporan &amp; Cek Saldo Kas</h2></div>
@@ -1379,21 +1397,53 @@
         </div>
         <div class="form-group">
           <label class="form-label">Role *</label>
-          <select class="form-control" id="staff-role">
+          <select class="form-control" id="staff-role" onchange="ADMIN.onStaffRoleChange()">
             <option value="staff">Staff / Kasir</option>
             <option value="admin">Admin</option>
+            <option value="investor">Investor</option>
           </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="staff-branch-group">
           <label class="form-label">Cabang Penugasan</label>
           <select class="form-control" id="staff-branch-id">
             <option value="">— Tidak Ditentukan —</option>
           </select>
         </div>
+        <div class="form-group hidden" id="investor-branches-group">
+          <label class="form-label">Cabang yang Dapat Diakses Investor</label>
+          <div id="investor-branch-checkboxes" style="display:flex;flex-direction:column;gap:8px;padding:8px 0;max-height:200px;overflow-y:auto;"></div>
+          <span class="form-hint">Centang satu atau lebih cabang yang boleh dilihat investor</span>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-staff">Batal</button>
-        <button class="btn btn-primary" data-admin-action="save-staff">Simpan Staff</button>
+        <button class="btn btn-primary" data-admin-action="save-staff">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Investor Access Modal -->
+  <div class="modal-overlay" id="modal-investor-access">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <span class="modal-title" id="investor-modal-title">Atur Akses Cabang Investor</span>
+        <button class="modal-close" data-admin-action="close-modal" data-modal-id="modal-investor-access">✕</button>
+      </div>
+      <div class="modal-body flex flex-col gap-3">
+        <input type="hidden" id="investor-access-user-id" />
+        <div class="form-group">
+          <label class="form-label">Investor</label>
+          <div id="investor-access-name" class="form-control" style="background:var(--bg-alt);cursor:default;"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cabang yang Dapat Diakses</label>
+          <div id="investor-access-checkboxes" style="display:flex;flex-direction:column;gap:8px;padding:8px 0;max-height:220px;overflow-y:auto;"></div>
+          <span class="form-hint">Centang cabang yang boleh dilihat investor ini</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-investor-access">Batal</button>
+        <button class="btn btn-primary" data-admin-action="save-investor-access">Simpan Akses</button>
       </div>
     </div>
   </div>

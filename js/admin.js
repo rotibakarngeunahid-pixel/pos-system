@@ -44,6 +44,9 @@ const ADMIN = {
         case 'create-recipe': this.createRecipe(btn.dataset.variantId, btn.dataset.variantName || 'Resep'); break;
         case 'open-staff-modal': this.openStaffModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
         case 'delete-staff': this.deleteStaff(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'open-investor-modal': this.openInvestorModal(btn.dataset.id ? Number(btn.dataset.id) : null); break;
+        case 'delete-investor': this.deleteStaff(Number(btn.dataset.id), btn.dataset.name || ''); break;
+        case 'edit-investor-access': this.openInvestorAccessModal(Number(btn.dataset.id)); break;
         case 'open-ingredient-modal': this.openIngredientModal(); break;
         case 'open-edit-ingredient-modal': this.openEditIngredientModal(Number(btn.dataset.id)); break;
         case 'delete-ingredient': this.deleteIngredient(Number(btn.dataset.id), btn.dataset.name || ''); break;
@@ -79,6 +82,7 @@ const ADMIN = {
         case 'save-recipe-item': this.saveRecipeItem(); break;
         case 'save-inventory-adjust': this.saveInventoryAdjust(); break;
         case 'save-staff': this.saveStaff(); break;
+        case 'save-investor-access': this.saveInvestorAccess(); break;
         case 'confirm-refund': this.confirmRefund(); break;
         case 'confirm-void': this.confirmVoid(); break;
         case 'save-cash-category': this.saveCashCategory(); break;
@@ -285,7 +289,8 @@ const ADMIN = {
       reports:     'Laporan',           'inv-logs':   'Log Inventori',
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
-      'toppings':    'Manajemen Topping', 'api-keys': 'API Keys'
+      'toppings':    'Manajemen Topping', 'api-keys': 'API Keys',
+      'investor-access': 'Investor Access'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
     this.currentSection = section;
@@ -303,8 +308,9 @@ const ADMIN = {
       case 'settings':        this.loadSettings();        break;
       case 'cash-report':     this.loadCashReport();      break;
       case 'cash-categories': this.loadCashCategories();  break;
-      case 'toppings':        this.loadToppingSection();  break;
-      case 'api-keys':        this.loadApiKeysSection();  break;
+      case 'toppings':          this.loadToppingSection();    break;
+      case 'api-keys':          this.loadApiKeysSection();    break;
+      case 'investor-access':   this.loadInvestorAccess();    break;
     }
   },
 
@@ -1662,14 +1668,17 @@ const ADMIN = {
           const branch = this.branches.find(b => b.id === u.branch_id);
           const roleIconSvg = u.role === 'admin'
             ? '<i data-lucide="shield" class="icon"></i>'
-            : '<i data-lucide="user" class="icon"></i>';
+            : u.role === 'investor'
+              ? '<i data-lucide="bar-chart-3" class="icon"></i>'
+              : '<i data-lucide="user" class="icon"></i>';
+          const roleBadgeClass = u.role === 'admin' ? 'badge-red' : u.role === 'investor' ? 'badge-blue' : 'badge-orange';
           return `<div class="admin-list-card">
             <div class="list-card-icon">${roleIconSvg}</div>
             <div class="list-card-info">
               <div class="list-card-title">${escHtml(u.name)}</div>
               <div class="list-card-sub">${escHtml(branch?.name||'Tidak ada cabang')}</div>
             </div>
-            <div class="list-card-meta"><span class="badge ${u.role==='admin'?'badge-red':'badge-orange'}">${u.role}</span></div>
+            <div class="list-card-meta"><span class="badge ${roleBadgeClass}">${u.role}</span></div>
             <div class="list-card-actions">
               <button class="btn btn-outline btn-sm" data-admin-action="open-staff-modal" data-id="${u.id}">Edit</button>
               ${u.id !== this.user.id ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="delete-staff" data-id="${u.id}" data-name="${escHtml(u.name)}">Hapus</button>` : ''}
@@ -1690,44 +1699,82 @@ const ADMIN = {
     document.getElementById('staff-username').value = '';
     document.getElementById('staff-password').value = '';
     document.getElementById('staff-role').value     = 'staff';
-    document.getElementById('staff-modal-title').textContent = id ? 'Edit Staff' : 'Tambah Staff';
+    document.getElementById('staff-modal-title').textContent = id ? 'Edit User' : 'Tambah User';
     setSelect('staff-branch-id', `<option value="">— Tidak Ditentukan —</option>${this.branches.map(b=>`<option value="${b.id}">${escHtml(b.name)}</option>`).join('')}`);
+
+    let checkedBranches = [];
     if (id) {
-      const { data: u } = await db.from('users').select('*').eq('id', id).maybeSingle();
+      const [{ data: u }, { data: iba }] = await Promise.all([
+        db.from('users').select('*').eq('id', id).maybeSingle(),
+        db.from('investor_branch_access').select('branch_id').eq('user_id', id)
+      ]);
       if (u) {
         document.getElementById('staff-name').value      = u.name;
-        document.getElementById('staff-username').value  = u.name; // username mirrors name (same DB column)
-        // BUG-C1 FIX: Jangan tampilkan password lama dalam bentuk plaintext
+        document.getElementById('staff-username').value  = u.name;
         document.getElementById('staff-password').value  = '';
         document.getElementById('staff-role').value      = u.role;
         document.getElementById('staff-branch-id').value = u.branch_id || '';
+        checkedBranches = (iba || []).map(r => r.branch_id);
       }
     }
+
+    this._renderInvestorBranchCheckboxes('investor-branch-checkboxes', checkedBranches);
+    this.onStaffRoleChange();
     openModal('modal-staff');
+  },
+
+  onStaffRoleChange() {
+    const role = document.getElementById('staff-role')?.value;
+    const branchGroup    = document.getElementById('staff-branch-group');
+    const investorGroup  = document.getElementById('investor-branches-group');
+    if (!branchGroup || !investorGroup) return;
+    if (role === 'investor') {
+      branchGroup.classList.add('hidden');
+      investorGroup.classList.remove('hidden');
+    } else {
+      branchGroup.classList.remove('hidden');
+      investorGroup.classList.add('hidden');
+    }
+  },
+
+  _renderInvestorBranchCheckboxes(containerId, checkedIds = []) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = this.branches.map(b => `
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 0;">
+        <input type="checkbox" value="${b.id}" ${checkedIds.includes(b.id) ? 'checked' : ''}
+          style="width:16px;height:16px;flex-shrink:0;" />
+        <span>${escHtml(b.name)}</span>
+      </label>
+    `).join('');
+  },
+
+  _getCheckedBranchIds(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    return [...container.querySelectorAll('input[type=checkbox]:checked')]
+      .map(cb => Number(cb.value));
   },
 
   async saveStaff() {
     const id       = document.getElementById('staff-id').value;
-    // BUG FIX: Read staff-username as the login name (what pos_login uses).
-    // staff-name (Nama Lengkap) is only a UI label here — the DB has one `name` column
-    // that serves as both display name and login. We use staff-username as the authoritative source.
     const name     = document.getElementById('staff-username').value.trim();
     const password = document.getElementById('staff-password').value || '';
     const role     = document.getElementById('staff-role').value;
-    const branchId = document.getElementById('staff-branch-id').value || null;
+    const branchId = role !== 'investor' ? (document.getElementById('staff-branch-id').value || null) : null;
 
     if (!name) { showToast('Username wajib diisi', 'error'); return; }
 
+    let savedUserId = id ? Number(id) : null;
     const payload = { name, role, branch_id: branchId };
     try {
       if (!id) {
-        // Create new user — password required
         if (!password.trim()) { showToast('Password wajib diisi', 'error'); return; }
         payload.password = password.trim();
-        const { error } = await db.from('users').insert(payload);
+        const { data: inserted, error } = await db.from('users').insert(payload).select('id').single();
         if (error) throw error;
+        savedUserId = inserted.id;
       } else {
-        // Update existing user — only include password if provided
         if (password.trim()) payload.password = password.trim();
         const { error } = await db.from('users').update(payload).eq('id', id);
         if (error) throw error;
@@ -1740,23 +1787,117 @@ const ADMIN = {
       }
       return;
     }
-    showToast('Staff berhasil disimpan', 'success');
+
+    if (role === 'investor' && savedUserId) {
+      const selectedBranches = this._getCheckedBranchIds('investor-branch-checkboxes');
+      await db.from('investor_branch_access').delete().eq('user_id', savedUserId);
+      if (selectedBranches.length) {
+        const rows = selectedBranches.map(bid => ({ user_id: savedUserId, branch_id: bid, created_by: this.user.id }));
+        const { error: iaErr } = await db.from('investor_branch_access').insert(rows);
+        if (iaErr) { showToast('User disimpan tapi akses cabang gagal: ' + iaErr.message, 'warn'); }
+      }
+    }
+
+    showToast('User berhasil disimpan', 'success');
     this.closeModal('modal-staff');
     this.loadStaff();
   },
 
   async deleteStaff(id, name) {
     const ok = await showConfirm({
-      title:       `Hapus Staff "${name}"?`,
-      message:     'Akun staff ini akan dihapus.',
+      title:       `Hapus User "${name}"?`,
+      message:     'Akun user ini akan dihapus.',
       confirmText: 'Ya, Hapus',
       danger:      true,
     });
     if (!ok) return;
     const { error } = await db.from('users').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
-    showToast('Staff dihapus', 'success');
+    showToast('User dihapus', 'success');
     this.loadStaff();
+  },
+
+  // ── Investor Access ───────────────────────────────────────────
+  async loadInvestorAccess() {
+    const { data: investors, error } = await db.from('users').select('*').eq('role', 'investor').order('name');
+    if (error) { showToast('Gagal memuat investor: ' + error.message, 'error'); return; }
+    const container = document.getElementById('investor-access-list');
+    if (!container) return;
+
+    if (!investors?.length) {
+      container.innerHTML = `<div class="empty-state">
+        <div class="empty-icon"><i data-lucide="bar-chart-3" class="icon"></i></div>
+        <div class="empty-title">Belum ada investor</div>
+        <div class="empty-desc">Tambahkan akun investor melalui menu Staff lalu atur akses cabangnya di sini</div>
+      </div>`;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    const { data: allAccess } = await db.from('investor_branch_access').select('user_id, branch_id');
+    const accessMap = {};
+    for (const a of (allAccess || [])) {
+      if (!accessMap[a.user_id]) accessMap[a.user_id] = [];
+      const b = this.branches.find(br => br.id === a.branch_id);
+      if (b) accessMap[a.user_id].push(b.name);
+    }
+
+    container.innerHTML = `<div class="admin-list">${investors.map(u => {
+      const branchNames = (accessMap[u.id] || []).join(', ') || '— Belum ada akses cabang —';
+      return `<div class="admin-list-card">
+        <div class="list-card-icon"><i data-lucide="bar-chart-3" class="icon"></i></div>
+        <div class="list-card-info">
+          <div class="list-card-title">${escHtml(u.name)}</div>
+          <div class="list-card-sub">${escHtml(branchNames)}</div>
+        </div>
+        <div class="list-card-meta"><span class="badge badge-blue">investor</span></div>
+        <div class="list-card-actions">
+          <button class="btn btn-outline btn-sm" data-admin-action="edit-investor-access" data-id="${u.id}">Atur Cabang</button>
+          <button class="btn btn-outline btn-sm" data-admin-action="open-staff-modal" data-id="${u.id}">Edit</button>
+          ${u.id !== this.user.id ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="delete-investor" data-id="${u.id}" data-name="${escHtml(u.name)}">Hapus</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  async openInvestorModal(id = null) {
+    await this.openStaffModal(id);
+    document.getElementById('staff-role').value = 'investor';
+    this.onStaffRoleChange();
+    if (id) {
+      const { data: iba } = await db.from('investor_branch_access').select('branch_id').eq('user_id', id);
+      this._renderInvestorBranchCheckboxes('investor-branch-checkboxes', (iba || []).map(r => r.branch_id));
+    }
+  },
+
+  async openInvestorAccessModal(userId) {
+    const user = this.branches && await db.from('users').select('id,name').eq('id', userId).maybeSingle();
+    const { data: u } = user;
+    if (!u) { showToast('Investor tidak ditemukan', 'error'); return; }
+    const { data: iba } = await db.from('investor_branch_access').select('branch_id').eq('user_id', userId);
+    const checkedIds = (iba || []).map(r => r.branch_id);
+
+    document.getElementById('investor-access-user-id').value = userId;
+    document.getElementById('investor-access-name').textContent = u.name;
+    document.getElementById('investor-modal-title').textContent = `Akses Cabang: ${u.name}`;
+    this._renderInvestorBranchCheckboxes('investor-access-checkboxes', checkedIds);
+    openModal('modal-investor-access');
+  },
+
+  async saveInvestorAccess() {
+    const userId = Number(document.getElementById('investor-access-user-id').value);
+    if (!userId) return;
+    const selectedBranches = this._getCheckedBranchIds('investor-access-checkboxes');
+    await db.from('investor_branch_access').delete().eq('user_id', userId);
+    if (selectedBranches.length) {
+      const rows = selectedBranches.map(bid => ({ user_id: userId, branch_id: bid, created_by: this.user.id }));
+      const { error } = await db.from('investor_branch_access').insert(rows);
+      if (error) { showToast('Gagal menyimpan akses: ' + error.message, 'error'); return; }
+    }
+    showToast('Akses cabang investor berhasil disimpan', 'success');
+    this.closeModal('modal-investor-access');
+    this.loadInvestorAccess();
   },
 
   // ── Bahan Baku / Ingredients ────────────────────────────────

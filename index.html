@@ -115,7 +115,7 @@
       // Redirect jika sudah login
       const s = auth.getSession();
       if (s) {
-        window.location.href = s.role === 'admin' ? 'admin.html' : 'pos.html';
+        window.location.href = auth.getDefaultPageByRole(s.role);
         return;
       }
 
@@ -218,7 +218,7 @@
           const user = await auth.login(name, password);
           btnText.textContent = 'Berhasil!';
           setTimeout(() => {
-            window.location.href = user.role === 'admin' ? 'admin.html' : 'pos.html';
+            window.location.href = auth.getDefaultPageByRole(user.role);
           }, 400);
         } catch (err) {
           errorEl.textContent = err.message;
