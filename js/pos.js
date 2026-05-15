@@ -1397,8 +1397,10 @@ const POS = {
     document.getElementById('stock-adj-qty').value   = '';
     document.getElementById('stock-adj-notes').value = '';
     document.getElementById('stock-adj-type').value  = 'in';
-    const transferDiv = document.getElementById('stock-adj-transfer-target');
+    const transferDiv  = document.getElementById('stock-adj-transfer-target');
+    const branchLabel  = document.getElementById('stock-adj-branch-label');
     if (transferDiv) transferDiv.style.display = 'none';
+    if (branchLabel) branchLabel.textContent = 'Outlet Tujuan';
     openModal('modal-stock-adjust');
   },
 
@@ -1417,23 +1419,30 @@ const POS = {
     if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
 
     try {
-      if (type === 'transfer') {
-        const targetBranchId = parseInt(document.getElementById('stock-adj-target-branch').value);
-        if (!targetBranchId) throw new Error('Pilih outlet tujuan');
-        if (targetBranchId === this.branch.id) throw new Error('Outlet tujuan tidak boleh sama');
+      if (type === 'transfer_in' || type === 'transfer_out') {
+        const otherBranchId = parseInt(document.getElementById('stock-adj-target-branch').value);
+        if (!otherBranchId) throw new Error(type === 'transfer_in' ? 'Pilih outlet sumber' : 'Pilih outlet tujuan');
+        if (otherBranchId === this.branch.id) throw new Error('Outlet tidak boleh sama dengan cabang sendiri');
+
+        const fromBranchId = type === 'transfer_in' ? otherBranchId    : this.branch.id;
+        const toBranchId   = type === 'transfer_in' ? this.branch.id    : otherBranchId;
+        const defaultNotes = type === 'transfer_in'
+          ? `Transfer masuk ke ${this.branch.name}`
+          : `Transfer keluar dari ${this.branch.name}`;
 
         await inventoryService.transferStock({
-          fromBranchId: this.branch.id,
-          toBranchId:   targetBranchId,
+          fromBranchId,
+          toBranchId,
           ingredientId,
           qty,
-          notes:        notes || `Transfer dari ${this.branch.name}`,
-          userId:       this.user.id
+          notes:  notes || defaultNotes,
+          userId: this.user.id
         });
 
+        // Notify the other branch so they see the stock movement
         await db.from('stock_transfer_notifications').insert({
           from_branch_id: this.branch.id,
-          to_branch_id:   targetBranchId,
+          to_branch_id:   otherBranchId,
           ingredient_id:  ingredientId,
           qty,
           notes:          notes || null,
@@ -1472,7 +1481,10 @@ const POS = {
   toggleStockAdjType() {
     const type        = document.getElementById('stock-adj-type').value;
     const transferDiv = document.getElementById('stock-adj-transfer-target');
-    if (transferDiv) transferDiv.style.display = type === 'transfer' ? '' : 'none';
+    const branchLabel = document.getElementById('stock-adj-branch-label');
+    const isTransfer  = type === 'transfer_in' || type === 'transfer_out';
+    if (transferDiv) transferDiv.style.display = isTransfer ? '' : 'none';
+    if (branchLabel) branchLabel.textContent = type === 'transfer_in' ? 'Outlet Sumber' : 'Outlet Tujuan';
   },
 
   // ── Transfer Notifications Polling ───────────────────────────

@@ -349,7 +349,7 @@
             style="width:130px;height:32px;font-size:12px;padding:4px 8px;"
             data-action-change="load-inventory-summary" />
           <button class="btn btn-primary btn-sm" data-action="open-stock-adjust-modal">
-            <i data-lucide="plus" class="icon-sm"></i> Tambah Stok
+            <i data-lucide="package" class="icon-sm"></i> Ubah Stok
           </button>
           <button class="btn btn-outline btn-sm" data-action="load-inventory-summary" title="Refresh">
             <i data-lucide="refresh-cw" class="icon-sm"></i>
@@ -732,11 +732,12 @@
           <select class="form-control" id="stock-adj-type" data-action-change="toggle-stock-adj-type">
             <option value="in">Stok Masuk (Pembelian / Tambah)</option>
             <option value="out">Stok Keluar (Koreksi / Susut)</option>
-            <option value="transfer">Transfer ke Outlet Lain</option>
+            <option value="transfer_in">Transfer Masuk (Ambil dari Outlet Lain)</option>
+            <option value="transfer_out">Transfer Keluar (Kirim ke Outlet Lain)</option>
           </select>
         </div>
         <div id="stock-adj-transfer-target" class="form-group" style="margin:0;display:none;">
-          <label class="form-label">Outlet Tujuan</label>
+          <label class="form-label" id="stock-adj-branch-label">Outlet Tujuan</label>
           <select id="stock-adj-target-branch" class="form-control">
             <!-- populated dynamically -->
           </select>
