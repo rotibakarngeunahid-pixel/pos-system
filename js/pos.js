@@ -24,6 +24,14 @@ const POS = {
   _pendingVariantId: null,   // staged while topping modal is open
   _pendingProduct:   null,
 
+  // ── Cache dirty flags (set by cross-page events from Admin) ──
+  _productsDirty:     false,
+  _bomDirty:          false,
+  _stockDirty:        false,
+  _toppingsDirty:     false,
+  _paymentsDirty:     false,
+  _cashDirty:         false,
+
   // ── Init ─────────────────────────────────────────────────────
   async init() {
     // Event Delegation
@@ -164,6 +172,16 @@ const POS = {
     this.hideLoader();
     if (window.depositUi && typeof depositUi.refreshWhenReady === 'function') {
       depositUi.refreshWhenReady();
+    }
+
+    // Subscribe to cross-page data change events from Admin
+    if (window.RBNDataEvents) {
+      RBNDataEvents.subscribe('products:changed', () => { this._productsDirty = true; });
+      RBNDataEvents.subscribe('recipes:changed',  () => { this._bomDirty      = true; });
+      RBNDataEvents.subscribe('inventory:changed',() => { this._stockDirty    = true; });
+      RBNDataEvents.subscribe('toppings:changed', () => { this._toppingsDirty = true; });
+      RBNDataEvents.subscribe('settings:changed', () => { this._paymentsDirty = true; });
+      RBNDataEvents.subscribe('cash:changed',     () => { this._cashDirty     = true; });
     }
 
     // Poll transfer notifications every 30 seconds
@@ -1077,10 +1095,15 @@ const POS = {
       if (viewCart)  viewCart.hidden  = true;
       if (viewKasir) viewKasir.hidden = false;
       this.renderCart();
+      // Reload produk jika cache dirty (perubahan dari Admin tab lain)
+      if (this._productsDirty) {
+        this._productsDirty = false;
+        this.loadProducts().catch(e => console.warn('[POS] reload products after dirty flag:', e));
+      }
     }
     if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
-    if (tab === 'stock')        this.loadInventorySummary();
-    if (tab === 'cash')         this.updateCashSummary();
+    if (tab === 'stock')        { if (this._stockDirty) this._stockDirty = false; this.loadInventorySummary(); }
+    if (tab === 'cash')         { if (this._cashDirty) this._cashDirty = false; this.updateCashSummary(); }
     if (tab === 'deposits')     { if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi); }
     if (tab === 'transactions') this.loadSessionTransactions();
   },

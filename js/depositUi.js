@@ -607,9 +607,9 @@ const depositUi = {
         requireProof: proofRequired
       });
       this.setLastAccountId(account.id);
-      this.showSuccess(depositId);
       this.clearForm({ keepAccount: true });
       await this.refresh();
+      this.showSuccess(depositId);
     } catch (e) {
       console.error('submitDeposit', e);
       if (typeof showToast === 'function') showToast(e.message || 'Gagal mengirim setoran', 'error');

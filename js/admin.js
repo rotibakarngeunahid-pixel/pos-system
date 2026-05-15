@@ -242,6 +242,80 @@ const ADMIN = {
     this.populateProductCategorySelects();
   },
 
+  // ── Targeted cache refreshers (lighter than loadMasterData) ──
+  async _refreshBranchesCache() {
+    const { data } = await db.from('branches').select('id, name, address, created_at').order('name');
+    this.branches = data || [];
+    this.populateBranchSelects();
+  },
+
+  async _refreshProductsCache() {
+    const { data } = await db.from('products').select('*').order('name');
+    this.products = data || [];
+    this.populateProductSelects();
+  },
+
+  async _refreshIngredientsCache() {
+    const { data } = await db.from('ingredients').select('*').order('name');
+    this.ingredients = data || [];
+  },
+
+  async _refreshCategoriesCache() {
+    try {
+      const { data, error } = await db.from('product_categories').select('id, name').order('name');
+      if (!error) {
+        this.productCategories = data || [];
+        this.populateProductCategorySelects();
+      }
+    } catch (e) {
+      console.warn('[RBN] _refreshCategoriesCache failed:', e.message);
+    }
+  },
+
+  // ── Central post-mutation refresh helper ──────────────────────
+  // resources: array of cache keys to refresh in parallel
+  // views: array of view keys to re-render after cache refresh
+  // successMessage: shown after both caches and views are refreshed
+  async refreshAfterMutation({ resources = [], views = [], successMessage = '' } = {}) {
+    const cacheLoaders = {
+      branches:       () => this._refreshBranchesCache(),
+      products:       () => this._refreshProductsCache(),
+      ingredients:    () => this._refreshIngredientsCache(),
+      categories:     () => this._refreshCategoriesCache(),
+      paymentMethods: () => this.loadSettings(),
+    };
+    const viewLoaders = {
+      branches:         () => this.loadBranches(),
+      products:         () => this.loadProducts(),
+      ingredients:      () => this.loadIngredients(),
+      inventory:        () => this.loadInventory(),
+      'product-categories': () => this.loadProductCategories(),
+      transactions:     () => this.loadTransactions(),
+      staff:            () => this.loadStaff(),
+      'investor-access':() => this.loadInvestorAccess(),
+      'cash-categories':() => this.loadCashCategories(),
+      toppings:         () => this.loadToppingSection(),
+      'api-keys':       () => this.loadApiKeysSection(),
+      recipes:          () => this.loadRecipeItems(),
+      'branch-pricing': () => this.loadBranchPricing(),
+      variants:         () => this.loadVariants(),
+    };
+    try {
+      await Promise.all(resources.map(r => cacheLoaders[r]?.() ?? Promise.resolve()));
+      for (const v of views) {
+        if (viewLoaders[v]) await viewLoaders[v]();
+      }
+      if (successMessage) showToast(successMessage, 'success');
+    } catch (e) {
+      console.error('[RBN] refreshAfterMutation failed:', e);
+      if (successMessage) {
+        showToast(`Data tersimpan, tampilan gagal diperbarui — ${e.message}`, 'warning');
+      } else {
+        showToast('Tampilan gagal diperbarui. Klik Refresh jika data tidak muncul.', 'warning');
+      }
+    }
+  },
+
   populateBranchSelects() {
     const opts    = this.branches.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
     const allOpts = `<option value="">Semua Cabang</option>${opts}`;
@@ -295,8 +369,8 @@ const ADMIN = {
       reports:     'Laporan',           'inv-logs':   'Log Inventori',
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
-      'toppings':    'Manajemen Topping', 'api-keys': 'API Keys',
-      'investor-access': 'Investor Access'
+      'cash-deposits': 'Setoran Tunai', 'toppings':    'Manajemen Topping',
+      'api-keys': 'API Keys',           'investor-access': 'Investor Access'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
     this.currentSection = section;
@@ -314,6 +388,12 @@ const ADMIN = {
       case 'settings':        this.loadSettings();        break;
       case 'cash-report':     this.loadCashReport();      break;
       case 'cash-categories': this.loadCashCategories();  break;
+      case 'cash-deposits':
+        if (window.adminDepositUi) {
+          adminDepositUi.loadDeposits();
+          adminDepositUi.loadAccounts();
+        }
+        break;
       case 'toppings':          this.loadToppingSection();    break;
       case 'api-keys':          this.loadApiKeysSection();    break;
       case 'investor-access':   this.loadInvestorAccess();    break;
@@ -451,10 +531,11 @@ const ADMIN = {
       newBranchId = data?.id || null;
     }
 
-    showToast('Cabang berhasil disimpan', 'success');
     this.closeModal('modal-branch');
-    await this.loadMasterData();
-    this.loadBranches();
+    await this._refreshBranchesCache();
+    await this.loadBranches();
+    showToast('Cabang berhasil disimpan', 'success');
+    window.RBNDataEvents?.publish('settings:changed', { source: 'admin' });
 
     // Offer copy menu for newly created branch
     if (newBranchId && this.branches.some(b => b.id !== newBranchId)) {
@@ -478,9 +559,9 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('branches').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this._refreshBranchesCache();
+    await this.loadBranches();
     showToast('Cabang dihapus', 'success');
-    await this.loadMasterData();
-    this.loadBranches();
   },
 
   // ── Copy Menu ────────────────────────────────────────────────────
@@ -874,9 +955,9 @@ const ADMIN = {
         if (uErr) throw uErr;
       }
 
-      showToast('Harga cabang berhasil disimpan', 'success');
       closeModal('modal-branch-product-price');
-      this.loadBranchPricing();
+      await this.loadBranchPricing();
+      showToast('Harga cabang berhasil disimpan', 'success');
     } catch (e) {
       showToast('Gagal menyimpan: ' + e.message, 'error');
     } finally {
@@ -1053,10 +1134,11 @@ const ADMIN = {
       }
     }
 
-    showToast('Produk berhasil disimpan', 'success');
     this.closeModal('modal-product');
-    await this.loadMasterData();
-    this.loadProducts();
+    await this._refreshProductsCache();
+    await this.loadProducts();
+    showToast('Produk berhasil disimpan', 'success');
+    window.RBNDataEvents?.publish('products:changed', { source: 'admin' });
     if (savedId) await this.loadProductModalVariants(savedId);
   },
 
@@ -1070,16 +1152,17 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('products').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this._refreshProductsCache();
+    await this.loadProducts();
     showToast('Produk dihapus', 'success');
-    await this.loadMasterData();
-    this.loadProducts();
+    window.RBNDataEvents?.publish('products:changed', { source: 'admin' });
   },
 
   // ── Product Categories ───────────────────────────────────────
   async loadProductCategories() {
     const list = document.getElementById('product-categories-list');
     if (!list) return;
-    await this.loadMasterData();
+    await this._refreshCategoriesCache();
     const data = this.productCategories || [];
     list.innerHTML = data.length ? `<div class="admin-list">${data.map(c => `
       <div class="admin-list-card">
@@ -1127,10 +1210,10 @@ const ADMIN = {
       showToast('Gagal: ' + e.message, 'error');
       return;
     }
-    showToast('Kategori produk disimpan', 'success');
     closeModal('modal-product-category');
-    await this.loadMasterData();
-    this.loadProductCategories();
+    await this._refreshCategoriesCache();
+    await this.loadProductCategories();
+    showToast('Kategori produk disimpan', 'success');
   },
 
   async deleteProductCategory(id, name) {
@@ -1148,9 +1231,9 @@ const ADMIN = {
       showToast('Gagal: ' + e.message, 'error');
       return;
     }
+    await this._refreshCategoriesCache();
+    await this.loadProductCategories();
     showToast('Kategori dihapus', 'success');
-    await this.loadMasterData();
-    this.loadProductCategories();
   },
 
   // ── Variants ─────────────────────────────────────────────────
@@ -1208,9 +1291,9 @@ const ADMIN = {
       ? await db.from('product_variants').update(payload).eq('id', id)
       : await db.from('product_variants').insert(payload);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
-    showToast('Varian berhasil disimpan', 'success');
     this.closeModal('modal-variant');
-    this.loadVariants();
+    await this.loadVariants();
+    showToast('Varian berhasil disimpan', 'success');
   },
 
   async deleteVariant(id, name) {
@@ -1223,8 +1306,8 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('product_variants').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this.loadVariants();
     showToast('Varian dihapus', 'success');
-    this.loadVariants();
   },
 
 
@@ -1274,8 +1357,8 @@ const ADMIN = {
   async createRecipe(variantId, variantName) {
     const { data: nr, error } = await db.from('recipes').insert({ variant_id: variantId, name: variantName }).select().single();
     if (error) { showToast('Gagal membuat resep: ' + error.message, 'error'); return; }
+    await this.loadRecipeItems();
     showToast('Resep berhasil dibuat', 'success');
-    this.loadRecipeItems();
   },
 
   async openRecipeItemModal(id = null) {
@@ -1311,9 +1394,10 @@ const ADMIN = {
       const { error } = await db.from('recipe_items').insert({ recipe_id: recipe.id, ingredient_id: ingredientId, quantity: qty });
       if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
     }
-    showToast('Bahan resep disimpan', 'success');
     this.closeModal('modal-recipe-item');
-    this.loadRecipeItems();
+    await this.loadRecipeItems();
+    showToast('Bahan resep disimpan', 'success');
+    window.RBNDataEvents?.publish('recipes:changed', { source: 'admin' });
   },
 
   async deleteRecipeItem(id) {
@@ -1327,8 +1411,8 @@ const ADMIN = {
     // BUG-C4 FIX: cek error dari delete
     const { error } = await db.from('recipe_items').delete().eq('id', id);
     if (error) { showToast('Gagal menghapus: ' + error.message, 'error'); return; }
+    await this.loadRecipeItems();
     showToast('Bahan dihapus', 'success');
-    this.loadRecipeItems();
   },
 
   // ── Ingredients ───────────────────────────────────────────────
@@ -1402,11 +1486,11 @@ const ADMIN = {
       ? await db.from('ingredients').update(payload).eq('id', id)
       : await db.from('ingredients').insert(payload);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
-    showToast('Bahan berhasil disimpan', 'success');
     this.closeModal('modal-ingredient');
-    await this.loadMasterData();
-    if (this.currentSection === 'ingredients') this.loadIngredients();
-    else this.loadInventory();
+    await this._refreshIngredientsCache();
+    if (this.currentSection === 'ingredients') await this.loadIngredients();
+    else await this.loadInventory();
+    showToast('Bahan berhasil disimpan', 'success');
   },
 
   // ── Inventory ─────────────────────────────────────────────────
@@ -1486,10 +1570,10 @@ const ADMIN = {
           qty, type: invType, referenceType: 'manual', notes, createdBy: this.user.id
         });
       }
-      showToast('Stok berhasil diperbarui', 'success');
       this.closeModal('modal-inventory');
-      await this.loadMasterData();
-      this.loadInventory();
+      await this.loadInventory();
+      showToast('Stok berhasil diperbarui', 'success');
+      window.RBNDataEvents?.publish('inventory:changed', { source: 'admin' });
     } catch (e) {
       showToast('Gagal: ' + e.message, 'error');
     }
@@ -1642,10 +1726,10 @@ const ADMIN = {
     btn.disabled = true;
     try {
       await transactionService.voidTransaction({ transactionId, reason, userId: this.user.id });
-      showToast('Transaksi berhasil di-void', 'success');
       this.closeModal('modal-void-trx');
       this.closeModal('modal-trx-detail');
-      this.loadTransactions();
+      await this.loadTransactions();
+      showToast('Transaksi berhasil di-void', 'success');
     } catch (e) {
       showToast('Gagal void: ' + e.message, 'error');
     } finally {
@@ -1669,10 +1753,10 @@ const ADMIN = {
     btn.disabled = true;
     try {
       await transactionService.processRefund({ transactionId, refundAmount, reason, type, userId: this.user.id });
-      showToast('Refund berhasil diproses', 'success');
       this.closeModal('modal-refund');
       this.closeModal('modal-trx-detail');
-      this.loadTransactions();
+      await this.loadTransactions();
+      showToast('Refund berhasil diproses', 'success');
     } catch (e) {
       showToast('Gagal: ' + e.message, 'error');
     } finally {
@@ -2029,9 +2113,9 @@ const ADMIN = {
       }
     }
 
-    showToast('User berhasil disimpan', 'success');
     this.closeModal('modal-staff');
-    this.loadStaff();
+    await this.loadStaff();
+    showToast('User berhasil disimpan', 'success');
   },
 
   async deleteStaff(id, name) {
@@ -2044,8 +2128,8 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('users').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this.loadStaff();
     showToast('User dihapus', 'success');
-    this.loadStaff();
   },
 
   // ── Investor Access ───────────────────────────────────────────
@@ -2255,9 +2339,9 @@ const ADMIN = {
         p_features:   selectedFeatures,
       });
       if (error) throw error;
-      showToast('Akses investor berhasil disimpan', 'success');
       this.closeModal('modal-investor-access');
-      this.loadInvestorAccess();
+      await this.loadInvestorAccess();
+      showToast('Akses investor berhasil disimpan', 'success');
     } catch (e) {
       showToast('Gagal menyimpan akses: ' + (e.message || String(e)), 'error');
     } finally {
@@ -2269,7 +2353,7 @@ const ADMIN = {
   async loadIngredients() {
     const container = document.getElementById('ingredients-list');
     if (!container) return;
-    await this.loadMasterData();
+    await this._refreshIngredientsCache();
     const data = this.ingredients;
     container.innerHTML = data.length
       ? `<div class="admin-list">${data.map(ing => `
@@ -2303,10 +2387,10 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('ingredients').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this._refreshIngredientsCache();
+    if (this.currentSection === 'ingredients') await this.loadIngredients();
+    if (this.currentSection === 'inventory')   await this.loadInventory();
     showToast('Bahan dihapus', 'success');
-    await this.loadMasterData();
-    if (this.currentSection === 'ingredients') this.loadIngredients();
-    if (this.currentSection === 'inventory')   this.loadInventory();
   },
 
   // ── Product variant management (inside product modal) ────────
@@ -2419,29 +2503,24 @@ const ADMIN = {
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
     document.getElementById('new-variant-name').value  = '';
     document.getElementById('new-variant-price').value = '';
-    showToast('Varian ditambahkan', 'success');
     await this.loadProductModalVariants(parseInt(productId));
-    await this.loadMasterData();
+    await this._refreshProductsCache();
+    showToast('Varian ditambahkan', 'success');
   },
 
-  editProductVariant(variantId, currentName, currentPrice) {
-    showPrompt({ title: 'Edit Nama Varian', placeholder: 'Nama varian', defaultValue: currentName })
-      .then(newName => {
-        if (newName === null) return;
-        showPrompt({ title: 'Edit Harga Varian', placeholder: 'Harga', defaultValue: String(currentPrice), inputType: 'number' })
-          .then(newPriceStr => {
-            if (newPriceStr === null) return;
-            const newPrice = parseFloat(newPriceStr);
-            if (isNaN(newPrice) || newPrice < 0) { showToast('Harga tidak valid', 'error'); return; }
-            db.from('product_variants').update({ name: newName.trim(), price: newPrice }).eq('id', variantId).then(({ error }) => {
-              if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
-              showToast('Varian diperbarui', 'success');
-              const productId = document.getElementById('product-id').value;
-              if (productId) this.loadProductModalVariants(parseInt(productId));
-              this.loadMasterData();
-            });
-          });
-      });
+  async editProductVariant(variantId, currentName, currentPrice) {
+    const newName = await showPrompt({ title: 'Edit Nama Varian', placeholder: 'Nama varian', defaultValue: currentName });
+    if (newName === null) return;
+    const newPriceStr = await showPrompt({ title: 'Edit Harga Varian', placeholder: 'Harga', defaultValue: String(currentPrice), inputType: 'number' });
+    if (newPriceStr === null) return;
+    const newPrice = parseFloat(newPriceStr);
+    if (isNaN(newPrice) || newPrice < 0) { showToast('Harga tidak valid', 'error'); return; }
+    const { error } = await db.from('product_variants').update({ name: newName.trim(), price: newPrice }).eq('id', variantId);
+    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    const productId = document.getElementById('product-id').value;
+    if (productId) await this.loadProductModalVariants(parseInt(productId));
+    await this._refreshProductsCache();
+    showToast('Varian diperbarui', 'success');
   },
 
   async deleteProductVariant(variantId, name) {
@@ -2898,9 +2977,9 @@ const ADMIN = {
     if (!name) { showToast('Nama kategori wajib diisi', 'error'); return; }
     try {
       await cashService.saveCategory({ id: id || null, name, type });
-      showToast('Kategori disimpan', 'success');
       this.closeModal('modal-cash-category');
-      this.loadCashCategories();
+      await this.loadCashCategories();
+      showToast('Kategori disimpan', 'success');
     } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
   },
 
@@ -2914,8 +2993,8 @@ const ADMIN = {
     if (!ok) return;
     try {
       await cashService.deleteCategory(id);
+      await this.loadCashCategories();
       showToast('Kategori dihapus', 'success');
-      this.loadCashCategories();
     } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
   },
 
@@ -3559,14 +3638,14 @@ const ADMIN = {
       if (id) {
         const { error } = await db.from('toppings').update({ name, price, is_active: isActive }).eq('id', Number(id));
         if (error) throw error;
-        showToast('Topping diperbarui', 'success');
       } else {
         const { error } = await db.from('toppings').insert({ name, price, is_active: isActive });
         if (error) throw error;
-        showToast('Topping berhasil ditambahkan', 'success');
       }
       closeModal('modal-topping');
-      this.loadToppings();
+      await this.loadToppings();
+      showToast(id ? 'Topping diperbarui' : 'Topping berhasil ditambahkan', 'success');
+      window.RBNDataEvents?.publish('toppings:changed', { source: 'admin' });
     } catch (e) {
       showToast('Gagal: ' + e.message, 'error');
     }
@@ -3582,15 +3661,15 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('toppings').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this.loadToppings();
     showToast('Topping dihapus', 'success');
-    this.loadToppings();
   },
 
   async toggleToppingActive(id, currentActive) {
     const { error } = await db.from('toppings').update({ is_active: !currentActive }).eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this.loadToppings();
     showToast(currentActive ? 'Topping dinonaktifkan' : 'Topping diaktifkan', 'success');
-    this.loadToppings();
   },
 
   async loadToppingMapping(productId) {
@@ -3737,15 +3816,15 @@ const ADMIN = {
     if (!ok) return;
     const { error } = await db.from('api_keys').delete().eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this.loadApiKeys();
     showToast('API key dihapus', 'success');
-    this.loadApiKeys();
   },
 
   async toggleApiKey(id, currentActive) {
     const { error } = await db.from('api_keys').update({ is_active: !currentActive }).eq('id', id);
     if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    await this.loadApiKeys();
     showToast(currentActive ? 'API key dinonaktifkan' : 'API key diaktifkan', 'success');
-    this.loadApiKeys();
   },
 
   async copyApiKey(key) {
