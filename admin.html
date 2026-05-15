@@ -1434,29 +1434,96 @@
 
   <!-- Investor Access Modal -->
   <div class="modal-overlay" id="modal-investor-access">
-    <div class="modal modal-sm">
+    <div class="modal" style="max-width:520px;">
       <div class="modal-header">
-        <span class="modal-title" id="investor-modal-title">Atur Akses Cabang Investor</span>
-        <button class="modal-close" data-admin-action="close-modal" data-modal-id="modal-investor-access">✕</button>
-      </div>
-      <div class="modal-body flex flex-col gap-3">
-        <input type="hidden" id="investor-access-user-id" />
-        <div class="form-group">
-          <label class="form-label">Investor</label>
-          <div id="investor-access-name" class="form-control" style="background:var(--bg-alt);cursor:default;"></div>
+        <div>
+          <span class="modal-title">Atur Akses Investor</span>
+          <div id="investor-modal-subtitle" style="font-size:13px;color:var(--text-muted);margin-top:2px;"></div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Cabang yang Dapat Diakses</label>
-          <div id="investor-access-checkboxes" style="display:flex;flex-direction:column;gap:8px;padding:8px 0;max-height:220px;overflow-y:auto;"></div>
+        <button class="modal-close" data-admin-action="close-modal" data-modal-id="modal-investor-access">&#10005;</button>
+      </div>
+      <div class="modal-body flex flex-col gap-4">
+        <input type="hidden" id="investor-access-user-id" />
+
+        <!-- Cabang -->
+        <div class="form-group" style="margin:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+            <label class="form-label" style="margin:0;">Cabang yang Dapat Diakses</label>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-outline btn-sm" id="ia-branch-all" style="font-size:11px;padding:2px 8px;height:auto;">Pilih Semua</button>
+              <button class="btn btn-outline btn-sm" id="ia-branch-none" style="font-size:11px;padding:2px 8px;height:auto;">Kosongkan</button>
+            </div>
+          </div>
+          <div style="margin-bottom:6px;">
+            <input type="text" class="form-control form-control-sm" id="ia-branch-search" placeholder="Cari cabang..." style="font-size:13px;" />
+          </div>
+          <div id="investor-access-checkboxes" style="display:flex;flex-direction:column;gap:6px;padding:4px 0;max-height:180px;overflow-y:auto;"></div>
           <span class="form-hint">Centang cabang yang boleh dilihat investor ini</span>
         </div>
+
+        <div style="border-top:1px solid var(--border);"></div>
+
+        <!-- Modul -->
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="margin-bottom:10px;display:block;">Modul yang Boleh Dilihat</label>
+          <div style="display:flex;flex-direction:column;gap:10px;" id="investor-feature-toggles">
+            <label class="inv-feature-row" data-feature="sales">
+              <div class="inv-feature-info">
+                <span class="inv-feature-name">Penjualan</span>
+                <span class="inv-feature-desc">KPI penjualan, transaksi, diskon, void</span>
+              </div>
+              <input type="checkbox" class="inv-feature-cb" value="sales" />
+            </label>
+            <label class="inv-feature-row" data-feature="products">
+              <div class="inv-feature-info">
+                <span class="inv-feature-name">Performa Produk</span>
+                <span class="inv-feature-desc">Produk &amp; varian terlaris, qty, revenue</span>
+              </div>
+              <input type="checkbox" class="inv-feature-cb" value="products" />
+            </label>
+            <label class="inv-feature-row" data-feature="inventory_stock">
+              <div class="inv-feature-info">
+                <span class="inv-feature-name">Stok Bahan</span>
+                <span class="inv-feature-desc">Stok saat ini, satuan, pemakaian hari ini</span>
+              </div>
+              <input type="checkbox" class="inv-feature-cb" value="inventory_stock" />
+            </label>
+            <label class="inv-feature-row" data-feature="inventory_usage">
+              <div class="inv-feature-info">
+                <span class="inv-feature-name">Pemakaian Bahan</span>
+                <span class="inv-feature-desc">Total bahan terpakai dalam periode</span>
+              </div>
+              <input type="checkbox" class="inv-feature-cb" value="inventory_usage" />
+            </label>
+          </div>
+        </div>
+
+        <!-- Preview akses -->
+        <div id="ia-access-preview" style="background:var(--bg-alt);border-radius:var(--r-lg);padding:10px 14px;font-size:13px;color:var(--text-muted);"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-investor-access">Batal</button>
-        <button class="btn btn-primary" data-admin-action="save-investor-access">Simpan Akses</button>
+        <button class="btn btn-primary" id="ia-save-btn" data-admin-action="save-investor-access">Simpan Akses</button>
       </div>
     </div>
   </div>
+  <style>
+    .inv-feature-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      cursor: pointer;
+      transition: background .12s;
+    }
+    .inv-feature-row:hover { background: var(--bg-alt); }
+    .inv-feature-info { flex: 1; }
+    .inv-feature-name { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
+    .inv-feature-desc { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .inv-feature-cb   { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; accent-color: var(--primary); }
+  </style>
 
   <!-- Transaction Detail Modal -->
   <div class="modal-overlay" id="modal-trx-detail">

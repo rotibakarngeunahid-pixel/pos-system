@@ -3,22 +3,32 @@
 const INVESTOR = {
   user:             null,
   branches:         [],
+  features:         [],   // active feature keys from permission config
   selectedBranchId: null,
   currentTab:       'overview',
-  salesCache:       null,
+  cache:            null, // { salesData, productData, inventoryData, usageData }
+  _swipeObserver:   null,
+
+  // Tab config: key, label, feature (null = always show)
+  _TAB_CONFIG: [
+    { key: 'overview',   label: 'Overview',        feature: null },
+    { key: 'sales',      label: 'Penjualan',        feature: 'sales' },
+    { key: 'products',   label: 'Produk',           feature: 'products' },
+    { key: 'inventory',  label: 'Stok',             feature: 'inventory_stock' },
+    { key: 'usage',      label: 'Pemakaian Bahan',  feature: 'inventory_usage' },
+  ],
 
   async init() {
     this.user = auth.requireRole('investor');
     if (!this.user) return;
-
     this.user = await auth.validateCurrentUser();
     if (!this.user) return;
 
     document.getElementById('inv-user-name').textContent = this.user.name || '';
-
     this._setDefaultDates();
-    await this.loadAllowedBranches();
-    this._bindEvents();
+    this._bindFilterToggle();
+
+    await this._loadAccessConfig();
   },
 
   _setDefaultDates() {
@@ -26,59 +36,150 @@ const INVESTOR = {
     const yyyy  = today.getFullYear();
     const mm    = String(today.getMonth() + 1).padStart(2, '0');
     const dd    = String(today.getDate()).padStart(2, '0');
-    const first = `${yyyy}-${mm}-01`;
-    const last  = `${yyyy}-${mm}-${dd}`;
-    document.getElementById('inv-date-from').value = first;
-    document.getElementById('inv-date-to').value   = last;
+    document.getElementById('inv-date-from').value = `${yyyy}-${mm}-01`;
+    document.getElementById('inv-date-to').value   = `${yyyy}-${mm}-${dd}`;
   },
 
-  async loadAllowedBranches() {
+  async _loadAccessConfig() {
+    this._showGlobalState('loading', 'Memuat konfigurasi akses...');
     try {
-      this.branches = await investorService.getAllowedBranches(this.user.id);
+      const config = await investorService.getAccessConfig(this.user.id);
+      this.branches = config.branches || [];
+      this.features = config.features || [];
     } catch (e) {
-      this._showError('Gagal memuat daftar cabang: ' + e.message);
+      this._showGlobalState('error', 'Gagal memuat konfigurasi: ' + e.message);
       return;
     }
 
-    const select = document.getElementById('inv-branch-filter');
     if (!this.branches.length) {
-      select.innerHTML = '<option value="">Tidak ada cabang</option>';
-      this._showError('Akun investor belum memiliki akses cabang. Hubungi admin.');
+      this._showGlobalState('no-branch', 'Akun investor belum memiliki akses cabang. Hubungi admin.');
+      return;
+    }
+    if (!this.features.length) {
+      this._showGlobalState('no-feature', 'Akun investor belum memiliki izin fitur. Hubungi admin.');
       return;
     }
 
+    this._hideGlobalState();
+    this._populateBranches();
+    this._renderTabs();
+    this._setupSwipe();
+    this._bindEvents();
+    this.selectedBranchId = this.branches[0].branch_id;
+    document.getElementById('inv-branch-filter').value = this.selectedBranchId;
+    this._updateFilterSummary();
+    await this.loadDashboard();
+  },
+
+  _populateBranches() {
+    const select = document.getElementById('inv-branch-filter');
     select.innerHTML = this.branches.map(b =>
       `<option value="${b.branch_id}">${b.branch_name}</option>`
     ).join('');
+  },
 
-    this.selectedBranchId = this.branches[0].branch_id;
-    await this.loadDashboard();
+  _visibleTabs() {
+    return this._TAB_CONFIG.filter(t =>
+      t.feature === null || this.features.includes(t.feature)
+    );
+  },
+
+  _renderTabs() {
+    const tabs     = this._visibleTabs();
+    const tabsNav  = document.getElementById('inv-tabs');
+    const container = document.getElementById('inv-panels-container');
+
+    tabsNav.innerHTML = tabs.map((t, i) =>
+      `<button class="inv-tab${i === 0 ? ' active' : ''}" data-inv-tab="${t.key}">${t.label}</button>`
+    ).join('');
+
+    // Show only panels for visible tabs, hide others
+    document.querySelectorAll('.inv-panel').forEach(p => {
+      const key = p.dataset.panel;
+      const visible = tabs.some(t => t.key === key);
+      p.style.display = visible ? '' : 'none';
+    });
+  },
+
+  _setupSwipe() {
+    const container = document.getElementById('inv-panels-container');
+    if (!container) return;
+
+    if (this._swipeObserver) this._swipeObserver.disconnect();
+
+    const visiblePanels = this._visibleTabs().map(t =>
+      document.getElementById('inv-panel-' + t.key)
+    ).filter(Boolean);
+
+    this._swipeObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.intersectionRatio >= 0.5) {
+          const key = entry.target.dataset.panel;
+          this._activateTab(key, false);
+          if (this.cache) this._renderTabFromCache(key);
+          else this.loadDashboard();
+        }
+      });
+    }, { root: container, threshold: 0.5 });
+
+    visiblePanels.forEach(p => this._swipeObserver.observe(p));
   },
 
   _bindEvents() {
     document.getElementById('inv-logout-btn').addEventListener('click', () => auth.logout());
 
-    document.getElementById('inv-refresh-btn').addEventListener('click', () => this.loadDashboard());
-
-    document.getElementById('inv-branch-filter').addEventListener('change', e => {
-      this.selectedBranchId = Number(e.target.value);
+    document.getElementById('inv-refresh-btn').addEventListener('click', () => {
+      this.cache = null;
+      this._updateFilterSummary();
       this.loadDashboard();
     });
 
-    document.querySelectorAll('[data-inv-tab]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        const tab = e.currentTarget.dataset.invTab;
-        this._switchTab(tab);
-        if (this.salesCache) this._renderTabFromCache(tab);
-        else this.loadDashboard();
-      });
+    document.getElementById('inv-branch-filter').addEventListener('change', e => {
+      this.selectedBranchId = Number(e.target.value);
+      this._updateFilterSummary();
+      this.cache = null;
+      this.loadDashboard();
+    });
+
+    document.getElementById('inv-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-inv-tab]');
+      if (!btn) return;
+      const key = btn.dataset.invTab;
+      this._activateTab(key, true);
+      if (this.cache) this._renderTabFromCache(key);
+      else this.loadDashboard();
     });
   },
 
-  _switchTab(tab) {
-    this.currentTab = tab;
-    document.querySelectorAll('.inv-tab').forEach(b => b.classList.toggle('active', b.dataset.invTab === tab));
-    document.querySelectorAll('.inv-panel').forEach(p => p.classList.toggle('active', p.id === `inv-panel-${tab}`));
+  _bindFilterToggle() {
+    const toggle = document.getElementById('inv-filter-toggle');
+    const panel  = document.getElementById('inv-filter-panel');
+    if (!toggle || !panel) return;
+    toggle.addEventListener('click', () => {
+      const open = panel.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open);
+    });
+  },
+
+  _updateFilterSummary() {
+    const branch = this.branches.find(b => b.branch_id === this.selectedBranchId);
+    const from   = document.getElementById('inv-date-from').value || '';
+    const to     = document.getElementById('inv-date-to').value   || '';
+    const el     = document.getElementById('inv-filter-summary-text');
+    if (el && branch) {
+      el.textContent = `${branch.branch_name}  |  ${from} s/d ${to}`;
+    }
+  },
+
+  _activateTab(key, scroll) {
+    this.currentTab = key;
+    document.querySelectorAll('[data-inv-tab]').forEach(b =>
+      b.classList.toggle('active', b.dataset.invTab === key)
+    );
+    if (scroll) {
+      const panel = document.getElementById('inv-panel-' + key);
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+    }
   },
 
   _getFilters() {
@@ -94,119 +195,228 @@ const INVESTOR = {
     const { branchId, dateFrom, dateTo, paymentMethod } = this._getFilters();
     if (!branchId) return;
 
-    this._hideError();
-    this.salesCache = null;
+    this.cache = null;
+    this._setPanelsLoading();
 
+    const promises = {};
+    if (this.features.includes('sales'))
+      promises.sales = investorService.getSalesReport({ userId: this.user.id, branchId, dateFrom, dateTo, paymentMethod });
+    if (this.features.includes('products'))
+      promises.products = investorService.getProductPerformance({ userId: this.user.id, branchId, dateFrom, dateTo });
+    if (this.features.includes('inventory_stock'))
+      promises.inventory = investorService.getInventorySummary({ userId: this.user.id, branchId, date: dateTo });
+    if (this.features.includes('inventory_usage'))
+      promises.usage = investorService.getInventoryUsage({ userId: this.user.id, branchId, dateFrom, dateTo });
+
+    const keys = Object.keys(promises);
     try {
-      const [salesData, productData, inventoryData, usageData] = await Promise.all([
-        investorService.getSalesReport({ userId: this.user.id, branchId, dateFrom, dateTo, paymentMethod }),
-        investorService.getProductPerformance({ userId: this.user.id, branchId, dateFrom, dateTo }),
-        investorService.getInventorySummary({ userId: this.user.id, branchId, date: dateTo }),
-        investorService.getInventoryUsage({ userId: this.user.id, branchId, dateFrom, dateTo })
-      ]);
+      const results = await Promise.all(keys.map(k => promises[k]));
+      const data = {};
+      keys.forEach((k, i) => { data[k] = results[i]; });
 
-      this.salesCache = { salesData, productData, inventoryData, usageData };
-      this._renderOverview(salesData, productData);
-      this._renderSales(salesData);
-      this._renderProducts(productData);
-      this._renderInventory(inventoryData);
-      this._renderUsage(usageData);
+      this.cache = {
+        salesData:     data.sales     || null,
+        productData:   data.products  || null,
+        inventoryData: data.inventory || null,
+        usageData:     data.usage     || null,
+      };
+
+      this._renderOverview();
+      if (this.cache.salesData)     this._renderSales(this.cache.salesData);
+      if (this.cache.productData)   this._renderProducts(this.cache.productData);
+      if (this.cache.inventoryData) this._renderInventory(this.cache.inventoryData);
+      if (this.cache.usageData)     this._renderUsage(this.cache.usageData);
     } catch (e) {
-      this._showError('Gagal memuat data: ' + e.message);
+      this._setPanelsError('Gagal memuat data: ' + e.message);
     }
   },
 
   _renderTabFromCache(tab) {
-    const { salesData, productData, inventoryData, usageData } = this.salesCache;
-    if (tab === 'overview')   this._renderOverview(salesData, productData);
-    if (tab === 'sales')      this._renderSales(salesData);
-    if (tab === 'products')   this._renderProducts(productData);
-    if (tab === 'inventory')  this._renderInventory(inventoryData);
-    if (tab === 'usage')      this._renderUsage(usageData);
+    if (!this.cache) return;
+    if (tab === 'overview')  this._renderOverview();
+    if (tab === 'sales'     && this.cache.salesData)     this._renderSales(this.cache.salesData);
+    if (tab === 'products'  && this.cache.productData)   this._renderProducts(this.cache.productData);
+    if (tab === 'inventory' && this.cache.inventoryData) this._renderInventory(this.cache.inventoryData);
+    if (tab === 'usage'     && this.cache.usageData)     this._renderUsage(this.cache.usageData);
   },
 
-  _renderOverview(sales, products) {
-    const avgTrx = sales.count > 0 ? (sales.totalRevenue / sales.count) : 0;
-    const topProduct = products?.[0];
+  _setPanelsLoading() {
+    document.getElementById('inv-overview-cards').innerHTML =
+      '<div class="inv-loading"><div class="inv-spinner"></div> Memuat data...</div>';
+    this._visibleTabs().forEach(t => {
+      if (t.key === 'overview') return;
+      const el = document.getElementById('inv-panel-' + t.key);
+      if (el) el.querySelector('.inv-panel-body').innerHTML =
+        '<div class="inv-loading"><div class="inv-spinner"></div> Memuat...</div>';
+    });
+  },
 
-    const cards = [
-      { label: 'Total Penjualan',    value: fmt.rupiah(sales.totalRevenue), cls: 'text-success' },
-      { label: 'Jumlah Transaksi',   value: sales.count,                    cls: '' },
-      { label: 'Rata-rata Transaksi',value: fmt.rupiah(avgTrx),             cls: '' },
-      { label: 'Total Diskon',       value: fmt.rupiah(sales.totalDiscount),cls: '' },
-      { label: 'Transaksi Void',     value: sales.voidCount,                cls: sales.voidCount > 0 ? 'text-danger' : '' },
-      { label: 'Produk Terlaris',    value: topProduct ? `${topProduct.product} (${topProduct.qty}x)` : '—', cls: 'text-primary' }
-    ];
+  _setPanelsError(msg) {
+    document.getElementById('inv-overview-cards').innerHTML =
+      `<div class="inv-state-msg inv-state-error"><span class="inv-state-icon">!</span>${msg}</div>`;
+  },
 
-    document.getElementById('inv-overview-stats').innerHTML = cards.map(c => `
-      <div class="inv-stat">
-        <div class="inv-stat-label">${c.label}</div>
-        <div class="inv-stat-value ${c.cls}">${c.value}</div>
+  // ── Overview ──────────────────────────────────────────────────
+  _renderOverview() {
+    const cards = [];
+
+    if (this.cache?.salesData) {
+      const s = this.cache.salesData;
+      const avg = s.count > 0 ? (s.totalRevenue / s.count) : 0;
+      cards.push({ label: 'Total Penjualan',     value: fmt.rupiah(s.totalRevenue), cls: 'text-success' });
+      cards.push({ label: 'Jumlah Transaksi',    value: s.count,                    cls: '' });
+      cards.push({ label: 'Rata-rata Transaksi', value: fmt.rupiah(avg),            cls: '' });
+      cards.push({ label: 'Total Diskon',        value: fmt.rupiah(s.totalDiscount),cls: '' });
+      cards.push({ label: 'Transaksi Void',      value: s.voidCount,                cls: s.voidCount > 0 ? 'text-danger' : '' });
+    }
+
+    if (this.cache?.productData?.length) {
+      const top = this.cache.productData[0];
+      cards.push({ label: 'Produk Terlaris', value: `${top.product} (${top.qty}x)`, cls: 'text-primary' });
+    }
+
+    if (this.cache?.inventoryData?.length) {
+      cards.push({ label: 'Total Bahan', value: this.cache.inventoryData.length + ' jenis', cls: '' });
+    }
+
+    const el = document.getElementById('inv-overview-cards');
+    if (!cards.length) {
+      el.innerHTML = '<div class="inv-state-msg">Pilih cabang dan periode untuk memuat data.</div>';
+      return;
+    }
+    el.innerHTML = cards.map(c => `
+      <div class="inv-kpi-card">
+        <div class="inv-kpi-label">${c.label}</div>
+        <div class="inv-kpi-value ${c.cls}">${c.value}</div>
       </div>
     `).join('');
   },
 
+  // ── Penjualan ─────────────────────────────────────────────────
   _renderSales(sales) {
-    const rows = (sales.transactions || []);
-    const voidRows = (sales.voidedTransactions || []);
+    const rows = sales.transactions || [];
+    const voidRows = sales.voidedTransactions || [];
     const all = [...rows, ...voidRows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-    document.getElementById('inv-sales-tbody').innerHTML = all.length
-      ? all.map(t => {
-          const isVoid = t.status === 'void' || t.status === 'voided';
-          return `<tr>
-            <td>${fmt.date(t.created_at)}</td>
-            <td>${t.staff_name || '—'}</td>
-            <td>${t.payment_method || '—'}</td>
-            <td><span class="${isVoid ? 'badge-void' : 'badge-completed'}">${isVoid ? 'VOID' : 'Selesai'}</span></td>
-            <td style="text-align:right;">${fmt.rupiah(t.total)}</td>
-          </tr>`;
-        }).join('')
-      : `<tr><td colspan="5" class="inv-empty">Tidak ada transaksi untuk periode ini</td></tr>`;
-  },
-
-  _renderProducts(products) {
-    document.getElementById('inv-products-tbody').innerHTML = products?.length
-      ? products.map(p => `<tr>
-          <td>${p.product || '—'}</td>
-          <td>${p.variant || '—'}</td>
-          <td style="text-align:right;">${p.qty}</td>
-          <td style="text-align:right;">${fmt.rupiah(p.revenue)}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="4" class="inv-empty">Tidak ada data produk untuk periode ini</td></tr>`;
-  },
-
-  _renderInventory(items) {
-    document.getElementById('inv-inventory-tbody').innerHTML = items?.length
-      ? items.map(i => `<tr>
-          <td>${i.ingredient_name || '—'}</td>
-          <td>${fmt.num(i.stock)}</td>
-          <td>${i.unit || '—'}</td>
-          <td style="text-align:right;">${fmt.num(i.used_today)}</td>
-          <td>${i.last_updated ? fmt.date(i.last_updated) : '—'}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="5" class="inv-empty">Tidak ada data stok</td></tr>`;
-  },
-
-  _renderUsage(items) {
-    document.getElementById('inv-usage-tbody').innerHTML = items?.length
-      ? items.map(i => `<tr>
-          <td>${i.ingredient_name || '—'}</td>
-          <td style="text-align:right;">${fmt.num(i.total_used)}</td>
-          <td>${i.unit || '—'}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="3" class="inv-empty">Tidak ada pemakaian bahan untuk periode ini</td></tr>`;
-  },
-
-  _showError(msg) {
-    const el = document.getElementById('inv-error-banner');
+    const el = document.getElementById('inv-sales-list');
     if (!el) return;
-    el.textContent = msg;
-    el.style.display = 'block';
+
+    if (!all.length) {
+      el.innerHTML = '<div class="inv-state-msg">Tidak ada transaksi untuk periode ini.</div>';
+      return;
+    }
+
+    el.innerHTML = all.map(t => {
+      const isVoid = t.status === 'void' || t.status === 'voided';
+      return `
+        <div class="inv-trx-card${isVoid ? ' inv-trx-void' : ''}">
+          <div class="inv-trx-row">
+            <span class="inv-trx-time">${fmt.date(t.created_at)}</span>
+            <span class="inv-trx-badge ${isVoid ? 'badge-void' : 'badge-completed'}">${isVoid ? 'VOID' : 'Selesai'}</span>
+          </div>
+          <div class="inv-trx-row">
+            <span class="inv-trx-meta">${t.payment_method || 'N/A'} &middot; ${t.staff_name || 'N/A'}</span>
+            <span class="inv-trx-total">${fmt.rupiah(t.total)}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
   },
 
-  _hideError() {
-    const el = document.getElementById('inv-error-banner');
-    if (el) el.style.display = 'none';
-  }
+  // ── Produk ────────────────────────────────────────────────────
+  _renderProducts(products) {
+    const el = document.getElementById('inv-products-list');
+    if (!el) return;
+
+    if (!products?.length) {
+      el.innerHTML = '<div class="inv-state-msg">Tidak ada data produk untuk periode ini.</div>';
+      return;
+    }
+
+    el.innerHTML = products.map((p, i) => `
+      <div class="inv-rank-card">
+        <div class="inv-rank-num">${i + 1}</div>
+        <div class="inv-rank-info">
+          <div class="inv-rank-name">${p.product || '—'}${p.variant ? ' <span class="inv-rank-variant">' + p.variant + '</span>' : ''}</div>
+          <div class="inv-rank-meta">${p.qty} terjual &middot; ${fmt.rupiah(p.revenue)}</div>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  // ── Stok ──────────────────────────────────────────────────────
+  _renderInventory(items) {
+    const el = document.getElementById('inv-inventory-list');
+    if (!el) return;
+
+    if (!items?.length) {
+      el.innerHTML = '<div class="inv-state-msg">Tidak ada data stok.</div>';
+      return;
+    }
+
+    el.innerHTML = items.map(i => {
+      const stockNum = parseFloat(i.stock) || 0;
+      const low = stockNum < 5;
+      return `
+        <div class="inv-stock-card">
+          <div class="inv-stock-top">
+            <span class="inv-stock-name">${i.ingredient_name || '—'}</span>
+            <span class="inv-stock-badge ${low ? 'badge-low' : 'badge-ok'}">${low ? 'Rendah' : 'Normal'}</span>
+          </div>
+          <div class="inv-stock-bottom">
+            <span class="inv-stock-qty">${fmt.num(i.stock)} ${i.unit || ''}</span>
+            <span class="inv-stock-meta">Pakai hari ini: ${fmt.num(i.used_today)} &middot; Update: ${i.last_updated ? fmt.date(i.last_updated) : '—'}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  },
+
+  // ── Pemakaian Bahan ───────────────────────────────────────────
+  _renderUsage(items) {
+    const el = document.getElementById('inv-usage-list');
+    if (!el) return;
+
+    if (!items?.length) {
+      el.innerHTML = '<div class="inv-state-msg">Tidak ada pemakaian bahan untuk periode ini.</div>';
+      return;
+    }
+
+    el.innerHTML = items.map(i => `
+      <div class="inv-usage-card">
+        <span class="inv-usage-name">${i.ingredient_name || '—'}</span>
+        <span class="inv-usage-qty">${fmt.num(i.total_used)} ${i.unit || ''}</span>
+      </div>
+    `).join('');
+  },
+
+  // ── Global State ──────────────────────────────────────────────
+  _showGlobalState(type, msg) {
+    const overlay = document.getElementById('inv-global-state');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    const icons = {
+      loading:    '<div class="inv-spinner"></div>',
+      error:      '<span style="font-size:2rem;opacity:.5;">!</span>',
+      'no-branch':'<span style="font-size:2rem;opacity:.4;">&#127968;</span>',
+      'no-feature':'<span style="font-size:2rem;opacity:.4;">&#128274;</span>',
+    };
+    overlay.innerHTML = `
+      <div class="inv-global-state-inner">
+        ${icons[type] || ''}
+        <p class="inv-global-msg">${msg}</p>
+      </div>
+    `;
+
+    document.getElementById('inv-tabs').style.display = 'none';
+    document.getElementById('inv-panels-container').style.display = 'none';
+  },
+
+  _hideGlobalState() {
+    const overlay = document.getElementById('inv-global-state');
+    if (overlay) overlay.style.display = 'none';
+    document.getElementById('inv-tabs').style.display = '';
+    document.getElementById('inv-panels-container').style.display = '';
+  },
 };

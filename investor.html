@@ -3,76 +3,419 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Investor — Roti Bakar Ngeunah</title>
+  <title>Investor &mdash; Roti Bakar Ngeunah</title>
   <link rel="icon" type="image/png" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
   <link rel="apple-touch-icon" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#f97316" />
   <link rel="stylesheet" href="css/styles.css" />
   <style>
-    /* ── Investor layout ─────────────────────────────────── */
-    .investor-wrap { display:flex; flex-direction:column; min-height:100vh; background:var(--bg-alt); }
+    /* ── Investor layout (mobile-first) ─────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
 
-    /* Header */
-    .inv-header { background:var(--bg); border-bottom:1px solid var(--border); padding:0 20px; height:60px; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:100; }
-    .inv-header-logo { height:32px; width:32px; border-radius:8px; object-fit:cover; }
-    .inv-header-brand { font-weight:800; font-size:15px; color:var(--text); flex:1; }
-    .inv-header-user { font-size:13px; color:var(--text-muted); }
+    .investor-wrap {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-height: 100dvh;
+      background: var(--bg-alt);
+      overflow-x: hidden;
+    }
 
-    /* Filter bar */
-    .inv-filters { background:var(--bg); border-bottom:1px solid var(--border); padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
-    .inv-filters .form-group { margin:0; }
-    .inv-filters label { font-size:11px; font-weight:600; }
-    .inv-filters .form-control { font-size:13px; padding:6px 10px; height:36px; }
+    /* ── Header ─────────────────────────────────────────────────── */
+    .inv-header {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      flex-shrink: 0;
+    }
+    .inv-header-logo {
+      height: 30px;
+      width: 30px;
+      border-radius: 8px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .inv-header-brand {
+      font-weight: 800;
+      font-size: 15px;
+      color: var(--text);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .inv-header-user {
+      font-size: 12px;
+      color: var(--text-muted);
+      max-width: 100px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .inv-btn-icon {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      transition: background .15s;
+    }
+    .inv-btn-icon:hover { background: var(--bg-alt); color: var(--text); }
 
-    /* Tabs */
-    .inv-tabs { background:var(--bg); border-bottom:1px solid var(--border); padding:0 20px; display:flex; gap:0; overflow-x:auto; }
-    .inv-tab { padding:12px 18px; font-size:13px; font-weight:600; color:var(--text-muted); border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; transition:color .15s, border-color .15s; }
-    .inv-tab:hover { color:var(--text); }
-    .inv-tab.active { color:var(--primary); border-bottom-color:var(--primary); }
+    /* ── Filter bar ──────────────────────────────────────────────── */
+    .inv-filter-bar {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .inv-filter-summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+    }
+    .inv-filter-summary-text {
+      flex: 1;
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .inv-filter-panel {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .25s ease;
+      padding: 0 16px;
+    }
+    .inv-filter-panel.open {
+      max-height: 400px;
+      padding: 0 16px 14px;
+    }
+    .inv-filter-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .inv-filter-grid .form-group { margin: 0; }
+    .inv-filter-grid .form-label { font-size: 11px; }
+    .inv-filter-grid .form-control { font-size: 13px; height: 36px; padding: 0 8px; }
+    .inv-filter-apply {
+      width: 100%;
+      justify-content: center;
+    }
 
-    /* Main content */
-    .inv-main { flex:1; padding:20px; max-width:1200px; margin:0 auto; width:100%; box-sizing:border-box; }
+    /* ── Tabs ────────────────────────────────────────────────────── */
+    .inv-tabs {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0 8px;
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    .inv-tabs::-webkit-scrollbar { display: none; }
+    .inv-tab {
+      padding: 11px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: color .15s, border-color .15s;
+      flex-shrink: 0;
+    }
+    .inv-tab:hover { color: var(--text); }
+    .inv-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
 
-    /* Tab panels */
-    .inv-panel { display:none; }
-    .inv-panel.active { display:block; }
+    /* ── Global state overlay (no branch / no feature / loading init) ── */
+    .inv-global-state {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .inv-global-state-inner {
+      text-align: center;
+      max-width: 320px;
+    }
+    .inv-global-msg {
+      margin-top: 14px;
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
 
-    /* Stats grid */
-    .inv-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
-    .inv-stat { background:var(--bg); border-radius:var(--r-lg); padding:16px 18px; border:1px solid var(--border); }
-    .inv-stat-label { font-size:11px; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
-    .inv-stat-value { font-size:1.4rem; font-weight:900; color:var(--text); line-height:1.1; }
-    .inv-stat-value.text-success { color:var(--success); }
-    .inv-stat-value.text-danger  { color:var(--danger); }
-    .inv-stat-value.text-primary { color:var(--primary); }
+    /* ── Swipe panels container ───────────────────────────────────── */
+    .inv-panels-container {
+      display: flex;
+      flex: 1;
+      overflow-x: scroll;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .inv-panels-container::-webkit-scrollbar { display: none; }
 
-    /* Table */
-    .inv-table-wrap { background:var(--bg); border-radius:var(--r-lg); border:1px solid var(--border); overflow:hidden; }
-    .inv-table { width:100%; border-collapse:collapse; font-size:13px; }
-    .inv-table th { background:var(--bg-alt); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); padding:10px 14px; text-align:left; border-bottom:1px solid var(--border); }
-    .inv-table td { padding:10px 14px; border-bottom:1px solid var(--border); color:var(--text); vertical-align:middle; }
-    .inv-table tr:last-child td { border-bottom:none; }
-    .inv-table tr:hover td { background:var(--bg-alt); }
+    .inv-panel {
+      min-width: 100%;
+      width: 100%;
+      flex-shrink: 0;
+      scroll-snap-align: start;
+      overflow-y: auto;
+      padding: 14px 14px env(safe-area-inset-bottom, 14px);
+    }
 
-    /* Badges */
-    .badge-void { background:rgba(220,38,38,.1); color:var(--danger); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
-    .badge-completed { background:rgba(22,163,74,.1); color:var(--success); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+    .inv-panel-body { min-height: 120px; }
 
-    /* Empty / loading state */
-    .inv-empty { text-align:center; padding:48px 24px; color:var(--text-muted); }
-    .inv-empty-icon { font-size:2.5rem; margin-bottom:12px; opacity:.4; }
-    .inv-loading { text-align:center; padding:40px; color:var(--text-muted); font-size:13px; }
-    .inv-error { background:var(--danger-bg,#fff0f0); border:1px solid rgba(220,38,38,.3); border-radius:var(--r-lg); padding:14px 18px; color:var(--danger); font-size:13px; margin-bottom:16px; }
+    /* ── Loading / empty states inside panels ────────────────────── */
+    .inv-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 40px 24px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .inv-spinner {
+      width: 20px; height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* No branch warning */
-    .inv-no-branch { background:var(--bg); border:1px solid var(--border); border-radius:var(--r-lg); padding:48px 24px; text-align:center; margin:24px 0; }
+    .inv-state-msg {
+      text-align: center;
+      padding: 36px 24px;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .inv-state-msg.inv-state-error {
+      color: var(--danger);
+      background: rgba(220,38,38,.06);
+      border-radius: var(--r-lg);
+    }
 
-    @media (max-width:600px) {
-      .inv-filters { padding:10px 12px; }
-      .inv-main { padding:12px; }
-      .inv-header { padding:0 12px; }
-      .inv-tabs { padding:0 8px; }
+    /* ── KPI Cards (Overview) ─────────────────────────────────────── */
+    .inv-kpi-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .inv-kpi-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 14px 14px 12px;
+    }
+    .inv-kpi-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .inv-kpi-value {
+      font-size: 1.3rem;
+      font-weight: 900;
+      color: var(--text);
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .inv-kpi-value.text-success { color: var(--success); }
+    .inv-kpi-value.text-danger  { color: var(--danger); }
+    .inv-kpi-value.text-primary { color: var(--primary); }
+
+    /* ── Transaction cards (Penjualan) ───────────────────────────── */
+    .inv-trx-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+    .inv-trx-card.inv-trx-void { opacity: .65; border-color: rgba(220,38,38,.3); }
+    .inv-trx-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .inv-trx-row + .inv-trx-row { margin-top: 6px; }
+    .inv-trx-time { font-size: 12px; color: var(--text-muted); }
+    .inv-trx-meta { font-size: 12px; color: var(--text-muted); }
+    .inv-trx-total { font-size: 14px; font-weight: 700; color: var(--text); }
+
+    .badge-void {
+      background: rgba(220,38,38,.1);
+      color: var(--danger);
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .badge-completed {
+      background: rgba(22,163,74,.1);
+      color: var(--success);
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    /* ── Product rank cards (Produk) ─────────────────────────────── */
+    .inv-rank-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .inv-rank-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .inv-rank-num:nth-child(1) { background: var(--primary); }
+    .inv-rank-info { flex: 1; min-width: 0; }
+    .inv-rank-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .inv-rank-variant {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+    .inv-rank-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Stock cards (Stok) ──────────────────────────────────────── */
+    .inv-stock-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+    .inv-stock-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .inv-stock-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .inv-stock-qty {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .inv-stock-bottom {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .inv-stock-meta { font-size: 11px; color: var(--text-muted); }
+
+    .badge-ok  { background: rgba(22,163,74,.1); color: var(--success); padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+    .badge-low { background: rgba(220,38,38,.1); color: var(--danger);  padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+
+    /* ── Usage cards (Pemakaian Bahan) ───────────────────────────── */
+    .inv-usage-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .inv-usage-name { font-size: 14px; font-weight: 500; color: var(--text); }
+    .inv-usage-qty  { font-size: 14px; font-weight: 700; color: var(--text); white-space: nowrap; }
+
+    /* ── Desktop overrides ───────────────────────────────────────── */
+    @media (min-width: 768px) {
+      .inv-header       { padding: 0 24px; height: 60px; }
+      .inv-header-brand { font-size: 16px; }
+      .inv-header-user  { max-width: none; }
+      .inv-filter-bar   { padding: 0; }
+      .inv-filter-summary { display: none; }
+      .inv-filter-panel {
+        max-height: none !important;
+        overflow: visible;
+        padding: 12px 24px 14px;
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .inv-filter-panel.open { padding: 12px 24px 14px; }
+      .inv-filter-grid {
+        display: contents;
+      }
+      .inv-filter-grid .form-group { min-width: 140px; }
+      .inv-filter-apply { width: auto; }
+      .inv-tabs { padding: 0 24px; }
+      .inv-panel { padding: 20px 24px; }
+      .inv-kpi-grid {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 14px;
+      }
+      .inv-kpi-value { font-size: 1.5rem; }
+    }
+
+    @media (max-width: 359px) {
+      .inv-kpi-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -86,144 +429,106 @@
     <header class="inv-header">
       <img src="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png"
            alt="Logo" class="inv-header-logo" />
-      <div class="inv-header-brand">Roti Bakar Ngeunah — Investor</div>
+      <div class="inv-header-brand">Investor</div>
       <span class="inv-header-user" id="inv-user-name"></span>
-      <button class="btn btn-outline btn-sm" id="inv-logout-btn">
-        <i data-lucide="log-out" class="icon-sm"></i> Keluar
+      <button class="inv-btn-icon" id="inv-logout-btn" title="Keluar">
+        <i data-lucide="log-out" class="icon-sm"></i>
       </button>
     </header>
 
-    <!-- Filter Bar -->
-    <div class="inv-filters" id="inv-filters">
-      <div class="form-group">
-        <label class="form-label">Cabang</label>
-        <select class="form-control" id="inv-branch-filter">
-          <option value="">Memuat...</option>
-        </select>
+    <!-- Filter bar -->
+    <div class="inv-filter-bar">
+      <div class="inv-filter-summary">
+        <span class="inv-filter-summary-text" id="inv-filter-summary-text">Pilih cabang dan periode</span>
+        <button class="btn btn-outline btn-sm" id="inv-filter-toggle" aria-expanded="false">
+          <i data-lucide="sliders-horizontal" class="icon-sm"></i> Filter
+        </button>
       </div>
-      <div class="form-group">
-        <label class="form-label">Dari</label>
-        <input type="date" class="form-control" id="inv-date-from" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Sampai</label>
-        <input type="date" class="form-control" id="inv-date-to" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Metode Bayar</label>
-        <select class="form-control" id="inv-payment-method">
-          <option value="">Semua</option>
-          <option value="cash">Tunai</option>
-          <option value="qris">QRIS</option>
-          <option value="transfer">Transfer</option>
-        </select>
-      </div>
-      <div style="padding-bottom:1px;">
-        <button class="btn btn-primary" id="inv-refresh-btn">
+      <div class="inv-filter-panel" id="inv-filter-panel">
+        <div class="inv-filter-grid">
+          <div class="form-group">
+            <label class="form-label">Cabang</label>
+            <select class="form-control" id="inv-branch-filter">
+              <option value="">Memuat...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Dari</label>
+            <input type="date" class="form-control" id="inv-date-from" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sampai</label>
+            <input type="date" class="form-control" id="inv-date-to" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Metode Bayar</label>
+            <select class="form-control" id="inv-payment-method">
+              <option value="">Semua</option>
+              <option value="cash">Tunai</option>
+              <option value="qris">QRIS</option>
+              <option value="transfer">Transfer</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary inv-filter-apply" id="inv-refresh-btn">
           <i data-lucide="refresh-cw" class="icon-sm"></i> Tampilkan
         </button>
       </div>
     </div>
 
-    <!-- Tabs -->
-    <nav class="inv-tabs">
-      <button class="inv-tab active" data-inv-tab="overview">Overview</button>
-      <button class="inv-tab" data-inv-tab="sales">Penjualan</button>
-      <button class="inv-tab" data-inv-tab="products">Produk</button>
-      <button class="inv-tab" data-inv-tab="inventory">Stok</button>
-      <button class="inv-tab" data-inv-tab="usage">Pemakaian Bahan</button>
-    </nav>
+    <!-- Tabs (rendered dynamically by investor.js) -->
+    <nav class="inv-tabs" id="inv-tabs" style="display:none;"></nav>
 
-    <!-- Main content -->
-    <main class="inv-main">
+    <!-- Global state (loading init / no branch / no feature) -->
+    <div class="inv-global-state" id="inv-global-state">
+      <div class="inv-global-state-inner">
+        <div class="inv-spinner" style="width:32px;height:32px;margin:0 auto;"></div>
+        <p class="inv-global-msg">Memuat konfigurasi akses...</p>
+      </div>
+    </div>
 
-      <div id="inv-error-banner" class="inv-error" style="display:none;"></div>
+    <!-- Swipe panels container (hidden until access config loaded) -->
+    <div class="inv-panels-container" id="inv-panels-container" style="display:none;">
 
       <!-- Overview -->
-      <div class="inv-panel active" id="inv-panel-overview">
-        <div class="inv-stats" id="inv-overview-stats">
-          <div class="inv-stat"><div class="inv-stat-label">Pilih cabang dan periode untuk memuat data</div></div>
+      <div class="inv-panel" id="inv-panel-overview" data-panel="overview">
+        <div class="inv-panel-body">
+          <div class="inv-kpi-grid" id="inv-overview-cards">
+            <div class="inv-state-msg">Pilih cabang dan periode untuk memuat data.</div>
+          </div>
         </div>
       </div>
 
       <!-- Penjualan -->
-      <div class="inv-panel" id="inv-panel-sales">
-        <div class="inv-table-wrap">
-          <table class="inv-table">
-            <thead>
-              <tr>
-                <th>Waktu</th>
-                <th>Kasir</th>
-                <th>Metode</th>
-                <th>Status</th>
-                <th style="text-align:right;">Total</th>
-              </tr>
-            </thead>
-            <tbody id="inv-sales-tbody">
-              <tr><td colspan="5" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
-            </tbody>
-          </table>
+      <div class="inv-panel" id="inv-panel-sales" data-panel="sales">
+        <div class="inv-panel-body" id="inv-sales-list">
+          <div class="inv-loading"><div class="inv-spinner"></div> Memuat...</div>
         </div>
       </div>
 
       <!-- Produk -->
-      <div class="inv-panel" id="inv-panel-products">
-        <div class="inv-table-wrap">
-          <table class="inv-table">
-            <thead>
-              <tr>
-                <th>Produk</th>
-                <th>Varian</th>
-                <th style="text-align:right;">Qty Terjual</th>
-                <th style="text-align:right;">Revenue</th>
-              </tr>
-            </thead>
-            <tbody id="inv-products-tbody">
-              <tr><td colspan="4" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
-            </tbody>
-          </table>
+      <div class="inv-panel" id="inv-panel-products" data-panel="products">
+        <div class="inv-panel-body" id="inv-products-list">
+          <div class="inv-loading"><div class="inv-spinner"></div> Memuat...</div>
         </div>
       </div>
 
       <!-- Stok -->
-      <div class="inv-panel" id="inv-panel-inventory">
-        <div class="inv-table-wrap">
-          <table class="inv-table">
-            <thead>
-              <tr>
-                <th>Bahan</th>
-                <th>Stok Saat Ini</th>
-                <th>Satuan</th>
-                <th style="text-align:right;">Pemakaian Hari Ini</th>
-                <th>Update Terakhir</th>
-              </tr>
-            </thead>
-            <tbody id="inv-inventory-tbody">
-              <tr><td colspan="5" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
-            </tbody>
-          </table>
+      <div class="inv-panel" id="inv-panel-inventory" data-panel="inventory">
+        <div class="inv-panel-body" id="inv-inventory-list">
+          <div class="inv-loading"><div class="inv-spinner"></div> Memuat...</div>
         </div>
       </div>
 
       <!-- Pemakaian Bahan -->
-      <div class="inv-panel" id="inv-panel-usage">
-        <div class="inv-table-wrap">
-          <table class="inv-table">
-            <thead>
-              <tr>
-                <th>Bahan</th>
-                <th style="text-align:right;">Total Terpakai</th>
-                <th>Satuan</th>
-              </tr>
-            </thead>
-            <tbody id="inv-usage-tbody">
-              <tr><td colspan="3" class="inv-empty">Belum ada data — pilih cabang dan periode</td></tr>
-            </tbody>
-          </table>
+      <div class="inv-panel" id="inv-panel-usage" data-panel="usage">
+        <div class="inv-panel-body" id="inv-usage-list">
+          <div class="inv-loading"><div class="inv-spinner"></div> Memuat...</div>
         </div>
       </div>
 
-    </main>
+    </div>
+
   </div>
 
   <!-- Scripts -->

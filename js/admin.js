@@ -1821,6 +1821,13 @@ const ADMIN = {
   },
 
   // ── Investor Access ───────────────────────────────────────────
+  _FEATURE_LABELS: {
+    sales:           'Penjualan',
+    products:        'Performa Produk',
+    inventory_stock: 'Stok Bahan',
+    inventory_usage: 'Pemakaian Bahan',
+  },
+
   async loadInvestorAccess() {
     const { data: investors, error } = await db.from('users').select('*').eq('role', 'investor').order('name');
     if (error) { showToast('Gagal memuat investor: ' + error.message, 'error'); return; }
@@ -1837,26 +1844,52 @@ const ADMIN = {
       return;
     }
 
-    const { data: allAccess } = await db.from('investor_branch_access').select('user_id, branch_id');
-    const accessMap = {};
+    const [{ data: allAccess }, { data: allFeatures }] = await Promise.all([
+      db.from('investor_branch_access').select('user_id, branch_id'),
+      db.from('investor_feature_access').select('user_id, feature_key, allowed').eq('allowed', true),
+    ]);
+
+    const branchMap = {};
     for (const a of (allAccess || [])) {
-      if (!accessMap[a.user_id]) accessMap[a.user_id] = [];
+      if (!branchMap[a.user_id]) branchMap[a.user_id] = [];
       const b = this.branches.find(br => br.id === a.branch_id);
-      if (b) accessMap[a.user_id].push(b.name);
+      if (b) branchMap[a.user_id].push(b.name);
+    }
+    const featureMap = {};
+    for (const f of (allFeatures || [])) {
+      if (!featureMap[f.user_id]) featureMap[f.user_id] = [];
+      featureMap[f.user_id].push(f.feature_key);
     }
 
+    const labels = this._FEATURE_LABELS;
     container.innerHTML = `<div class="admin-list">${investors.map(u => {
-      const branchNames = (accessMap[u.id] || []).join(', ') || '— Belum ada akses cabang —';
-      return `<div class="admin-list-card">
+      const branchList  = branchMap[u.id]  || [];
+      const featureList = featureMap[u.id] || [];
+      const hasBranch  = branchList.length  > 0;
+      const hasFeature = featureList.length > 0;
+      const status = !hasBranch ? 'Belum ada cabang' : !hasFeature ? 'Belum ada modul' : 'Lengkap';
+      const statusCls = (hasBranch && hasFeature) ? 'badge-green' : 'badge-warning';
+
+      const branchChips = branchList.map(n => `<span class="badge badge-blue" style="font-size:11px;">${escHtml(n)}</span>`).join(' ');
+      const featureChips = featureList.map(k => `<span class="badge badge-orange" style="font-size:11px;">${escHtml(labels[k] || k)}</span>`).join(' ');
+
+      return `<div class="admin-list-card" style="flex-wrap:wrap;gap:10px;">
         <div class="list-card-icon"><i data-lucide="bar-chart-3" class="icon"></i></div>
-        <div class="list-card-info">
+        <div class="list-card-info" style="min-width:0;">
           <div class="list-card-title">${escHtml(u.name)}</div>
-          <div class="list-card-sub">${escHtml(branchNames)}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">
+            ${branchChips || '<span style="font-size:11px;color:var(--text-muted);">Belum ada cabang</span>'}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">
+            ${featureChips || '<span style="font-size:11px;color:var(--text-muted);">Belum ada modul</span>'}
+          </div>
         </div>
-        <div class="list-card-meta"><span class="badge badge-blue">investor</span></div>
+        <div class="list-card-meta">
+          <span class="badge ${statusCls}" style="font-size:11px;">${status}</span>
+        </div>
         <div class="list-card-actions">
-          <button class="btn btn-outline btn-sm" data-admin-action="edit-investor-access" data-id="${u.id}">Atur Cabang</button>
-          <button class="btn btn-outline btn-sm" data-admin-action="open-staff-modal" data-id="${u.id}">Edit</button>
+          <button class="btn btn-outline btn-sm" data-admin-action="edit-investor-access" data-id="${u.id}">Atur Akses</button>
+          <button class="btn btn-outline btn-sm" data-admin-action="open-staff-modal" data-id="${u.id}">Edit User</button>
           ${u.id !== this.user.id ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="delete-investor" data-id="${u.id}" data-name="${escHtml(u.name)}">Hapus</button>` : ''}
         </div>
       </div>`;
@@ -1875,32 +1908,133 @@ const ADMIN = {
   },
 
   async openInvestorAccessModal(userId) {
-    const user = this.branches && await db.from('users').select('id,name').eq('id', userId).maybeSingle();
-    const { data: u } = user;
+    const { data: u } = await db.from('users').select('id,name').eq('id', userId).maybeSingle();
     if (!u) { showToast('Investor tidak ditemukan', 'error'); return; }
-    const { data: iba } = await db.from('investor_branch_access').select('branch_id').eq('user_id', userId);
-    const checkedIds = (iba || []).map(r => r.branch_id);
 
-    document.getElementById('investor-access-user-id').value = userId;
-    document.getElementById('investor-access-name').textContent = u.name;
-    document.getElementById('investor-modal-title').textContent = `Akses Cabang: ${u.name}`;
-    this._renderInvestorBranchCheckboxes('investor-access-checkboxes', checkedIds);
+    const [{ data: iba }, { data: ifa }] = await Promise.all([
+      db.from('investor_branch_access').select('branch_id').eq('user_id', userId),
+      db.from('investor_feature_access').select('feature_key, allowed').eq('user_id', userId),
+    ]);
+
+    const checkedBranches = (iba || []).map(r => r.branch_id);
+    const activeFeatures  = (ifa || []).filter(r => r.allowed).map(r => r.feature_key);
+
+    document.getElementById('investor-access-user-id').value      = userId;
+    document.getElementById('investor-modal-subtitle').textContent = u.name;
+    this._renderInvestorBranchCheckboxes('investor-access-checkboxes', checkedBranches);
+    this._renderFeatureToggles(activeFeatures);
+    this._updateAccessPreview();
+    this._bindInvestorAccessModalEvents();
     openModal('modal-investor-access');
+  },
+
+  _renderFeatureToggles(activeFeatures = []) {
+    document.querySelectorAll('.inv-feature-cb').forEach(cb => {
+      cb.checked = activeFeatures.includes(cb.value);
+    });
+  },
+
+  _bindInvestorAccessModalEvents() {
+    const modal = document.getElementById('modal-investor-access');
+
+    const branchAll  = document.getElementById('ia-branch-all');
+    const branchNone = document.getElementById('ia-branch-none');
+    const search     = document.getElementById('ia-branch-search');
+
+    // Clone to remove old listeners
+    [branchAll, branchNone, search].forEach(el => {
+      if (!el) return;
+      const clone = el.cloneNode(true);
+      el.parentNode.replaceChild(clone, el);
+    });
+
+    document.getElementById('ia-branch-all')?.addEventListener('click', () => {
+      document.querySelectorAll('#investor-access-checkboxes input[type=checkbox]').forEach(cb => { cb.checked = true; });
+      this._updateAccessPreview();
+    });
+    document.getElementById('ia-branch-none')?.addEventListener('click', () => {
+      document.querySelectorAll('#investor-access-checkboxes input[type=checkbox]').forEach(cb => { cb.checked = false; });
+      this._updateAccessPreview();
+    });
+    document.getElementById('ia-branch-search')?.addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('#investor-access-checkboxes label').forEach(lbl => {
+        lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+
+    document.querySelectorAll('.inv-feature-cb').forEach(cb => {
+      const clone = cb.cloneNode(true);
+      cb.parentNode.replaceChild(clone, cb);
+    });
+    document.querySelectorAll('.inv-feature-cb').forEach(cb => {
+      cb.addEventListener('change', () => this._updateAccessPreview());
+    });
+    document.querySelectorAll('#investor-access-checkboxes input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', () => this._updateAccessPreview());
+    });
+  },
+
+  _updateAccessPreview() {
+    const branchCount = document.querySelectorAll('#investor-access-checkboxes input[type=checkbox]:checked').length;
+    const features    = [...document.querySelectorAll('.inv-feature-cb:checked')].map(cb => this._FEATURE_LABELS[cb.value] || cb.value);
+    const el = document.getElementById('ia-access-preview');
+    if (!el) return;
+    if (!branchCount && !features.length) {
+      el.textContent = 'Investor ini tidak akan dapat melihat data apapun.';
+      return;
+    }
+    const parts = [];
+    if (branchCount) parts.push(`${branchCount} cabang`);
+    if (features.length) parts.push(...features);
+    el.textContent = `Investor ini akan melihat: ${parts.join(', ')}.`;
   },
 
   async saveInvestorAccess() {
     const userId = Number(document.getElementById('investor-access-user-id').value);
     if (!userId) return;
+
     const selectedBranches = this._getCheckedBranchIds('investor-access-checkboxes');
-    await db.from('investor_branch_access').delete().eq('user_id', userId);
-    if (selectedBranches.length) {
-      const rows = selectedBranches.map(bid => ({ user_id: userId, branch_id: bid, created_by: this.user.id }));
-      const { error } = await db.from('investor_branch_access').insert(rows);
-      if (error) { showToast('Gagal menyimpan akses: ' + error.message, 'error'); return; }
+    const selectedFeatures = [...document.querySelectorAll('.inv-feature-cb:checked')].map(cb => cb.value);
+
+    if (!selectedBranches.length) {
+      const ok = await showConfirm({
+        title:       'Tidak ada cabang dipilih',
+        message:     'Investor tidak akan dapat melihat data tanpa akses cabang. Lanjutkan?',
+        confirmText: 'Tetap Simpan',
+        danger:      false,
+      });
+      if (!ok) return;
     }
-    showToast('Akses cabang investor berhasil disimpan', 'success');
-    this.closeModal('modal-investor-access');
-    this.loadInvestorAccess();
+    if (!selectedFeatures.length) {
+      const ok = await showConfirm({
+        title:       'Tidak ada modul dipilih',
+        message:     'Investor tidak akan dapat melihat data apapun tanpa modul aktif. Lanjutkan?',
+        confirmText: 'Tetap Simpan',
+        danger:      false,
+      });
+      if (!ok) return;
+    }
+
+    const saveBtn = document.getElementById('ia-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Menyimpan...'; }
+
+    try {
+      const { error } = await db.rpc('admin_save_investor_access', {
+        p_admin_id:   this.user.id,
+        p_user_id:    userId,
+        p_branch_ids: selectedBranches,
+        p_features:   selectedFeatures,
+      });
+      if (error) throw error;
+      showToast('Akses investor berhasil disimpan', 'success');
+      this.closeModal('modal-investor-access');
+      this.loadInvestorAccess();
+    } catch (e) {
+      showToast('Gagal menyimpan akses: ' + (e.message || String(e)), 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Simpan Akses'; }
+    }
   },
 
   // ── Bahan Baku / Ingredients ────────────────────────────────
