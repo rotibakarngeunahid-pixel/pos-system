@@ -200,11 +200,13 @@ const POS = {
   // ── Branch ───────────────────────────────────────────────────
   async fetchBranch(id) {
     const { data } = await db.from('branches').select('*').eq('id', id).maybeSingle();
+    if (data?.is_active === false) return null;
     return data;
   },
 
   async showBranchSelector() {
-    const { data: branches } = await db.from('branches').select('*').order('name');
+    const { data } = await db.from('branches').select('*').order('name');
+    const branches = (data || []).filter(b => b.is_active !== false);
     const list = document.getElementById('branch-list');
       if (!branches?.length) {
         list.innerHTML = '<p class="text-muted text-sm">Belum ada cabang. Hubungi admin.</p>';
@@ -1397,7 +1399,7 @@ const POS = {
     if (!this.branch) return;
     const [invRes, branchRes] = await Promise.all([
       db.from('branch_inventory').select('ingredient_id, ingredients(id, name, unit)').eq('branch_id', this.branch.id),
-      db.from('branches').select('id, name').order('name')
+      db.from('branches').select('*').order('name')
     ]);
 
     const sel = document.getElementById('stock-adj-ingredient');
@@ -1420,6 +1422,7 @@ const POS = {
     const targetSel = document.getElementById('stock-adj-target-branch');
     if (targetSel) {
       targetSel.innerHTML = (branchRes.data || [])
+        .filter(b => b.is_active !== false)
         .filter(b => b.id !== this.branch.id)
         .map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`)
         .join('');
@@ -1795,7 +1798,8 @@ const POS = {
       showToast('Log kas di-void', 'success');
       this.updateCashSummary();
     } catch(e) {
-      showToast('Gagal: ' + e.message, 'error');
+      if (window.showDbError) showDbError(e, { action: 'membatalkan log kas', entity: 'Log kas' });
+      else showToast('Gagal membatalkan log kas', 'error');
     }
   },
 
@@ -1823,7 +1827,8 @@ const POS = {
       showToast(`Kas ${type === 'in' ? 'masuk' : 'keluar'} berhasil dicatat`, 'success');
       await this.updateCashSummary();
     } catch(e) {
-      showToast('Gagal: ' + e.message, 'error');
+      if (window.showDbError) showDbError(e, { action: 'mencatat kas', entity: 'Catatan kas' });
+      else showToast('Gagal mencatat kas', 'error');
     }
   },
 

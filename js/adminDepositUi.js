@@ -60,7 +60,7 @@ const adminDepositUi = {
   async loadBranches() {
     const { data: branches, error } = await db.from('branches').select('*').order('name');
     if (error) return;
-    this.branches = branches || [];
+    this.branches = (branches || []).filter(b => b.is_active !== false);
     const options = this.branches.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
     if (this.el.branch) this.el.branch.innerHTML = '<option value="">Semua Cabang</option>' + options;
   },
@@ -381,7 +381,8 @@ const adminDepositUi = {
       await this.loadAccounts();
     } catch (e) {
       console.error('saveAccount', e);
-      showToast(e.message || 'Gagal menyimpan metode setoran', 'error');
+      if (window.showDbError) showDbError(e, { action: 'menyimpan metode setoran', entity: 'Metode setoran' });
+      else showToast('Gagal menyimpan metode setoran', 'error');
     } finally {
       if (this.el.saveAccountBtn) {
         this.el.saveAccountBtn.disabled = false;
@@ -411,7 +412,8 @@ const adminDepositUi = {
       await this.loadAccounts();
     } catch (e) {
       console.error('toggleAccount', e);
-      showToast('Gagal mengubah status rekening', 'error');
+      if (window.showDbError) showDbError(e, { action: 'mengubah status rekening', entity: 'Rekening setoran' });
+      else showToast('Gagal mengubah status rekening', 'error');
     }
   }
 };

@@ -343,3 +343,50 @@
   };
 
 })();
+
+window.formatDbError = function (error, { action = 'memproses data', entity = 'data ini' } = {}) {
+  const rawMessage = String(error?.message || error?.error || error || '').trim();
+  const msg = rawMessage.toLowerCase();
+  const code = String(error?.code || '');
+
+  if (code === '23503' || msg.includes('foreign key') || msg.includes('violates foreign key constraint')) {
+    if (action.includes('hapus') || action.includes('menghapus')) {
+      return `${entity} tidak bisa dihapus permanen karena sudah dipakai di data lain, seperti transaksi, log, atau pengaturan. Riwayat tetap aman. Gunakan nonaktifkan/arsip jika tersedia.`;
+    }
+    return `${entity} belum bisa diubah karena masih terhubung dengan data lain. Periksa data terkait lalu coba lagi.`;
+  }
+
+  if (code === '23505' || msg.includes('duplicate key') || msg.includes('already exists')) {
+    return `${entity} dengan nama atau kode yang sama sudah ada. Gunakan nama atau kode lain.`;
+  }
+
+  if (code === '23502' || msg.includes('null value')) {
+    return `Ada kolom wajib yang belum diisi. Lengkapi data ${entity}, lalu simpan lagi.`;
+  }
+
+  if (code === '23514' || msg.includes('violates check constraint')) {
+    return `Nilai yang diisi belum sesuai aturan. Periksa kembali data ${entity}.`;
+  }
+
+  if (code === '22P02' || msg.includes('invalid input syntax')) {
+    return `Format data tidak sesuai. Periksa angka, tanggal, atau pilihan yang diisi.`;
+  }
+
+  if (code === '42703' || msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('relation')) {
+    return 'Database belum memakai pembaruan terbaru. Hubungi developer untuk menjalankan pembaruan database, lalu coba lagi.';
+  }
+
+  if (code === '42501' || msg.includes('permission denied')) {
+    return 'Akses ditolak. Akun ini belum punya izin untuk melakukan tindakan tersebut.';
+  }
+
+  if (msg.includes('failed to fetch') || msg.includes('network') || msg.includes('fetch')) {
+    return 'Koneksi ke server bermasalah. Periksa internet, lalu coba lagi.';
+  }
+
+  return `Gagal ${action}. Coba lagi. Jika masih gagal, hubungi developer.`;
+};
+
+window.showDbError = function (error, opts = {}) {
+  showToast(window.formatDbError(error, opts), opts.type || 'error');
+};

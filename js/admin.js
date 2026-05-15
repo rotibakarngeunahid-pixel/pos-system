@@ -217,7 +217,7 @@ const ADMIN = {
       db.from('ingredients').select('*').order('name'),
       db.from('suppliers').select('*').order('name')
     ]);
-    this.branches    = branchRes.data  || [];
+    this.branches    = this._activeBranches(branchRes.data);
     this.products    = productRes.data || [];
     this.ingredients = ingRes.data     || [];
     this.suppliers   = supRes.data     || [];
@@ -244,8 +244,8 @@ const ADMIN = {
 
   // ── Targeted cache refreshers (lighter than loadMasterData) ──
   async _refreshBranchesCache() {
-    const { data } = await db.from('branches').select('id, name, address, created_at').order('name');
-    this.branches = data || [];
+    const { data } = await db.from('branches').select('*').order('name');
+    this.branches = this._activeBranches(data);
     this.populateBranchSelects();
   },
 
@@ -477,10 +477,12 @@ const ADMIN = {
 
   // ── Branches ─────────────────────────────────────────────────
   async loadBranches() {
-    const { data } = await db.from('branches').select('*').order('created_at', { ascending:false });
+    const { data, error } = await db.from('branches').select('*').order('created_at', { ascending:false });
+    if (error) { showDbError(error, { action: 'memuat cabang', entity: 'Data cabang' }); return; }
     const container = document.getElementById('branches-list');
-    container.innerHTML = data?.length
-      ? `<div class="admin-list">${data.map(b => `
+    const activeBranches = this._activeBranches(data);
+    container.innerHTML = activeBranches.length
+      ? `<div class="admin-list">${activeBranches.map(b => `
           <div class="admin-list-card">
             <div class="list-card-icon"><i data-lucide="store" class="icon"></i></div>
             <div class="list-card-info">
@@ -524,10 +526,10 @@ const ADMIN = {
     let newBranchId = null;
     if (id) {
       const { error } = await db.from('branches').update({ name, address }).eq('id', id);
-      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menyimpan cabang', entity: 'Cabang' }); return; }
     } else {
       const { data, error } = await db.from('branches').insert({ name, address }).select('id').single();
-      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menyimpan cabang', entity: 'Cabang' }); return; }
       newBranchId = data?.id || null;
     }
 
@@ -552,16 +554,29 @@ const ADMIN = {
   async deleteBranch(id, name) {
     const ok = await showConfirm({
       title:       `Hapus Cabang "${name}"?`,
-      message:     'Cabang ini akan dihapus permanen.',
+      message:     'Cabang akan dinonaktifkan dan disembunyikan dari daftar aktif. Riwayat transaksi, log, dan laporan tetap tersimpan.',
       confirmText: 'Ya, Hapus',
       danger:      true,
     });
     if (!ok) return;
-    const { error } = await db.from('branches').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    const { error } = await db.from('branches')
+      .update({
+        is_active: false,
+        deleted_at: new Date().toISOString()
+      })
+      .eq('id', id);
+    if (error) { showDbError(error, { action: 'menghapus cabang', entity: 'Cabang' }); return; }
+
+    await Promise.allSettled([
+      db.from('branch_products').update({ is_active: false }).eq('branch_id', id),
+      db.from('users').update({ branch_id: null }).eq('branch_id', id),
+      db.from('investor_branch_access').delete().eq('branch_id', id),
+      db.from('deposit_accounts').update({ is_active: false }).eq('branch_id', id)
+    ]);
+
     await this._refreshBranchesCache();
     await this.loadBranches();
-    showToast('Cabang dihapus', 'success');
+    showToast('Cabang dihapus dari daftar aktif', 'success');
   },
 
   // ── Copy Menu ────────────────────────────────────────────────────
@@ -1093,11 +1108,11 @@ const ADMIN = {
 
     if (id) {
       const { error } = await db.from('products').update(payload).eq('id', id);
-      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menyimpan produk', entity: 'Produk' }); return; }
     } else {
       // Insert product
       const { data: inserted, error } = await db.from('products').insert(payload).select().single();
-      if (error) { showToast('Gagal menyimpan produk: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menyimpan produk', entity: 'Produk' }); return; }
       savedId = inserted.id;
       document.getElementById('product-id').value = savedId;
       document.getElementById('product-modal-title').textContent = 'Edit Produk';
@@ -1107,7 +1122,7 @@ const ADMIN = {
         const { error: vErr } = await db.from('product_variants').insert({
           product_id: savedId, name, price: defaultPrice, is_default: true
         });
-        if (vErr) showToast('Produk tersimpan, varian default gagal: ' + vErr.message, 'warning');
+        if (vErr) showToast('Produk tersimpan, tetapi varian belum tersimpan. Periksa varian produk lalu simpan ulang.', 'warning');
       } else {
         // Bulk insert pending variants
         const variantRows = this._pendingVariants
@@ -1115,7 +1130,7 @@ const ADMIN = {
           .map(v => ({ product_id: savedId, name: v.name.trim(), price: parseFloat(v.price) }));
         if (variantRows.length) {
           const { error: vErr } = await db.from('product_variants').insert(variantRows);
-          if (vErr) { showToast('Produk tersimpan, tapi gagal menyimpan varian: ' + vErr.message, 'warning'); }
+          if (vErr) { showToast('Produk tersimpan, tetapi sebagian varian belum tersimpan. Periksa varian produk lalu simpan ulang.', 'warning'); }
         }
         this._pendingVariants = [];
       }
@@ -1151,7 +1166,7 @@ const ADMIN = {
     });
     if (!ok) return;
     const { error } = await db.from('products').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus produk', entity: 'Produk' }); return; }
     await this._refreshProductsCache();
     await this.loadProducts();
     showToast('Produk dihapus', 'success');
@@ -1202,12 +1217,12 @@ const ADMIN = {
         if (msg.includes('product_categories') && (msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('relation'))) {
           showToast('Tabel product_categories belum ada. Jalankan schema_v4.sql di Supabase SQL Editor terlebih dahulu.', 'error');
         } else {
-          showToast('Gagal: ' + msg, 'error');
+          showDbError(error, { action: 'menyimpan kategori produk', entity: 'Kategori produk' });
         }
         return;
       }
     } catch (e) {
-      showToast('Gagal: ' + e.message, 'error');
+      showDbError(e, { action: 'menyimpan kategori produk', entity: 'Kategori produk' });
       return;
     }
     closeModal('modal-product-category');
@@ -1226,9 +1241,9 @@ const ADMIN = {
     if (!ok) return;
     try {
       const { error } = await db.from('product_categories').delete().eq('id', id);
-      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menghapus kategori produk', entity: 'Kategori produk' }); return; }
     } catch (e) {
-      showToast('Gagal: ' + e.message, 'error');
+      showDbError(e, { action: 'menghapus kategori produk', entity: 'Kategori produk' });
       return;
     }
     await this._refreshCategoriesCache();
@@ -1290,7 +1305,7 @@ const ADMIN = {
     const { error } = id
       ? await db.from('product_variants').update(payload).eq('id', id)
       : await db.from('product_variants').insert(payload);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menyimpan varian', entity: 'Varian' }); return; }
     this.closeModal('modal-variant');
     await this.loadVariants();
     showToast('Varian berhasil disimpan', 'success');
@@ -1305,7 +1320,7 @@ const ADMIN = {
     });
     if (!ok) return;
     const { error } = await db.from('product_variants').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus varian', entity: 'Varian' }); return; }
     await this.loadVariants();
     showToast('Varian dihapus', 'success');
   },
@@ -1356,7 +1371,7 @@ const ADMIN = {
 
   async createRecipe(variantId, variantName) {
     const { data: nr, error } = await db.from('recipes').insert({ variant_id: variantId, name: variantName }).select().single();
-    if (error) { showToast('Gagal membuat resep: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'membuat resep', entity: 'Resep' }); return; }
     await this.loadRecipeItems();
     showToast('Resep berhasil dibuat', 'success');
   },
@@ -1384,7 +1399,7 @@ const ADMIN = {
 
     if (id) {
       const { error } = await db.from('recipe_items').update({ ingredient_id: ingredientId, quantity: qty }).eq('id', id);
-      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menyimpan bahan resep', entity: 'Bahan resep' }); return; }
     } else {
       let { data: recipe } = await db.from('recipes').select('id').eq('variant_id', variantId).maybeSingle();
       if (!recipe) {
@@ -1392,7 +1407,7 @@ const ADMIN = {
         recipe = nr;
       }
       const { error } = await db.from('recipe_items').insert({ recipe_id: recipe.id, ingredient_id: ingredientId, quantity: qty });
-      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      if (error) { showDbError(error, { action: 'menyimpan bahan resep', entity: 'Bahan resep' }); return; }
     }
     this.closeModal('modal-recipe-item');
     await this.loadRecipeItems();
@@ -1410,7 +1425,7 @@ const ADMIN = {
     if (!ok) return;
     // BUG-C4 FIX: cek error dari delete
     const { error } = await db.from('recipe_items').delete().eq('id', id);
-    if (error) { showToast('Gagal menghapus: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus bahan resep', entity: 'Bahan resep' }); return; }
     await this.loadRecipeItems();
     showToast('Bahan dihapus', 'success');
   },
@@ -1485,7 +1500,7 @@ const ADMIN = {
     const { error } = id
       ? await db.from('ingredients').update(payload).eq('id', id)
       : await db.from('ingredients').insert(payload);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
     this.closeModal('modal-ingredient');
     await this._refreshIngredientsCache();
     if (this.currentSection === 'ingredients') await this.loadIngredients();
@@ -1575,7 +1590,7 @@ const ADMIN = {
       showToast('Stok berhasil diperbarui', 'success');
       window.RBNDataEvents?.publish('inventory:changed', { source: 'admin' });
     } catch (e) {
-      showToast('Gagal: ' + e.message, 'error');
+      showDbError(e, { action: 'memperbarui stok', entity: 'Stok' });
     }
   },
 
@@ -1758,7 +1773,7 @@ const ADMIN = {
       await this.loadTransactions();
       showToast('Refund berhasil diproses', 'success');
     } catch (e) {
-      showToast('Gagal: ' + e.message, 'error');
+      showDbError(e, { action: 'memproses refund', entity: 'Refund' });
     } finally {
       btn.disabled = false;
     }
@@ -2081,6 +2096,10 @@ const ADMIN = {
     return (rows || []).filter(u => u.is_active !== false);
   },
 
+  _activeBranches(rows = []) {
+    return (rows || []).filter(b => b.is_active !== false);
+  },
+
   _makeArchivedPassword() {
     const bytes = new Uint8Array(16);
     if (window.crypto?.getRandomValues) {
@@ -2117,7 +2136,7 @@ const ADMIN = {
       if (e && e.code === '23505') {
         showToast('Username sudah digunakan, pilih username lain', 'error');
       } else {
-        showToast('Gagal: ' + (e.message || e.error || String(e)), 'error');
+        showDbError(e, { action: 'menyimpan user', entity: 'User' });
       }
       return;
     }
@@ -2163,9 +2182,9 @@ const ADMIN = {
     if (error) {
       const msg = (error.message || '').toLowerCase();
       if (error.code === '42703' || msg.includes('is_active') || msg.includes('deleted_at')) {
-        showToast('Gagal: jalankan sql/migrations/019_soft_delete_users.sql di Supabase SQL Editor terlebih dahulu.', 'error');
+        showToast('Database belum memakai pembaruan terbaru untuk hapus user. Hubungi developer untuk menjalankan pembaruan database.', 'error');
       } else {
-        showToast('Gagal: ' + error.message, 'error');
+        showDbError(error, { action: 'menghapus user', entity: 'User' });
       }
       return;
     }
@@ -2390,7 +2409,7 @@ const ADMIN = {
       await this.loadInvestorAccess();
       showToast('Akses investor berhasil disimpan', 'success');
     } catch (e) {
-      showToast('Gagal menyimpan akses: ' + (e.message || String(e)), 'error');
+      showDbError(e, { action: 'menyimpan akses investor', entity: 'Akses investor' });
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Simpan Akses'; }
     }
@@ -2433,7 +2452,7 @@ const ADMIN = {
     });
     if (!ok) return;
     const { error } = await db.from('ingredients').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus bahan', entity: 'Bahan baku' }); return; }
     await this._refreshIngredientsCache();
     if (this.currentSection === 'ingredients') await this.loadIngredients();
     if (this.currentSection === 'inventory')   await this.loadInventory();
@@ -2547,7 +2566,7 @@ const ADMIN = {
     if (!name || isNaN(price) || price < 0) { showToast('Isi nama dan harga varian', 'error'); return; }
 
     const { error } = await db.from('product_variants').insert({ product_id: parseInt(productId), name, price });
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menambah varian', entity: 'Varian produk' }); return; }
     document.getElementById('new-variant-name').value  = '';
     document.getElementById('new-variant-price').value = '';
     await this.loadProductModalVariants(parseInt(productId));
@@ -2563,7 +2582,7 @@ const ADMIN = {
     const newPrice = parseFloat(newPriceStr);
     if (isNaN(newPrice) || newPrice < 0) { showToast('Harga tidak valid', 'error'); return; }
     const { error } = await db.from('product_variants').update({ name: newName.trim(), price: newPrice }).eq('id', variantId);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'mengubah varian', entity: 'Varian produk' }); return; }
     const productId = document.getElementById('product-id').value;
     if (productId) await this.loadProductModalVariants(parseInt(productId));
     await this._refreshProductsCache();
@@ -2579,7 +2598,7 @@ const ADMIN = {
     });
     if (!ok) return;
     const { error } = await db.from('product_variants').delete().eq('id', variantId);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus varian', entity: 'Varian produk' }); return; }
     showToast('Varian dihapus', 'success');
     const productId = document.getElementById('product-id').value;
     if (productId) await this.loadProductModalVariants(parseInt(productId));
@@ -2708,8 +2727,7 @@ const ADMIN = {
       }
     } catch (e) {
       console.error('saveSettings error', e);
-      const msg = (e && (e.message || e.error)) ? (e.message || e.error) : String(e);
-      showToast('Gagal menyimpan metode ke database: ' + msg, 'error');
+      showDbError(e, { action: 'menyimpan metode pembayaran', entity: 'Metode pembayaran' });
       return false;
     }
   },
@@ -3027,7 +3045,7 @@ const ADMIN = {
       this.closeModal('modal-cash-category');
       await this.loadCashCategories();
       showToast('Kategori disimpan', 'success');
-    } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
+    } catch (e) { showDbError(e, { action: 'menyimpan kategori kas', entity: 'Kategori kas' }); }
   },
 
   async deleteCashCategory(id, name) {
@@ -3042,7 +3060,7 @@ const ADMIN = {
       await cashService.deleteCategory(id);
       await this.loadCashCategories();
       showToast('Kategori dihapus', 'success');
-    } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
+    } catch (e) { showDbError(e, { action: 'menghapus kategori kas', entity: 'Kategori kas' }); }
   },
 
   // ── Cash Report ───────────────────────────────────────────────
@@ -3236,7 +3254,7 @@ const ADMIN = {
       await cashService.voidLog({ logId, reason: reason.trim(), voidedBy: this.user.id });
       showToast('Cash log di-void', 'success');
       this.loadCashReport();
-    } catch (e) { showToast('Gagal: ' + e.message, 'error'); }
+    } catch (e) { showDbError(e, { action: 'membatalkan log kas', entity: 'Log kas' }); }
   },
 
   async confirmLogout() {
@@ -3290,8 +3308,8 @@ const ADMIN = {
     if (btn) { btn.disabled = true; btn.textContent = 'Memuat...'; }
     try {
       if (!window.XLSX) throw new Error('Library SheetJS belum dimuat');
-      const { data: branches } = await db.from('branches').select('id,name').order('name');
-      const branchNames = (branches || []).map(b => b.name);
+      const { data: branches } = await db.from('branches').select('*').order('name');
+      const branchNames = this._activeBranches(branches).map(b => b.name);
 
       const header = ['product_name','variant_name','default_price','category','sku', ...branchNames];
       // Example rows — 1 sample per branch to show the override concept
@@ -3378,8 +3396,8 @@ const ADMIN = {
       if (!rawRows.length) throw new Error('File kosong atau tidak terbaca');
 
       // Fetch branches to detect branch-price columns
-      const { data: branches } = await db.from('branches').select('id,name').order('name');
-      const branchList = branches || [];
+      const { data: branches } = await db.from('branches').select('*').order('name');
+      const branchList = this._activeBranches(branches);
       const branchNameMap = {}; // lowercase name -> branch obj
       branchList.forEach(b => { branchNameMap[b.name.trim().toLowerCase()] = b; });
 
@@ -3694,7 +3712,7 @@ const ADMIN = {
       showToast(id ? 'Topping diperbarui' : 'Topping berhasil ditambahkan', 'success');
       window.RBNDataEvents?.publish('toppings:changed', { source: 'admin' });
     } catch (e) {
-      showToast('Gagal: ' + e.message, 'error');
+      showDbError(e, { action: 'menyimpan topping', entity: 'Topping' });
     }
   },
 
@@ -3707,14 +3725,14 @@ const ADMIN = {
     });
     if (!ok) return;
     const { error } = await db.from('toppings').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus topping', entity: 'Topping' }); return; }
     await this.loadToppings();
     showToast('Topping dihapus', 'success');
   },
 
   async toggleToppingActive(id, currentActive) {
     const { error } = await db.from('toppings').update({ is_active: !currentActive }).eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'mengubah status topping', entity: 'Topping' }); return; }
     await this.loadToppings();
     showToast(currentActive ? 'Topping dinonaktifkan' : 'Topping diaktifkan', 'success');
   },
@@ -3765,7 +3783,7 @@ const ADMIN = {
         if (error) throw error;
       }
     } catch (e) {
-      showToast('Gagal menyimpan mapping: ' + e.message, 'error');
+      showDbError(e, { action: 'menyimpan pilihan topping', entity: 'Mapping topping' });
       // Revert checkbox
       this.loadToppingMapping(productId);
     }
@@ -3849,7 +3867,7 @@ const ADMIN = {
         showToast('Key disalin ke clipboard!', 'success');
       } catch(e) { /* clipboard not available */ }
     } catch (e) {
-      showToast('Gagal membuat API key: ' + e.message, 'error');
+      showDbError(e, { action: 'membuat API key', entity: 'API key' });
     }
   },
 
@@ -3862,14 +3880,14 @@ const ADMIN = {
     });
     if (!ok) return;
     const { error } = await db.from('api_keys').delete().eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'menghapus API key', entity: 'API key' }); return; }
     await this.loadApiKeys();
     showToast('API key dihapus', 'success');
   },
 
   async toggleApiKey(id, currentActive) {
     const { error } = await db.from('api_keys').update({ is_active: !currentActive }).eq('id', id);
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    if (error) { showDbError(error, { action: 'mengubah status API key', entity: 'API key' }); return; }
     await this.loadApiKeys();
     showToast(currentActive ? 'API key dinonaktifkan' : 'API key diaktifkan', 'success');
   },
