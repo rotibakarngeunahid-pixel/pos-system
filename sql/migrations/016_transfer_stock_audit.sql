@@ -2,6 +2,8 @@
 -- Ensures every stock transfer creates two inventory_logs entries (transfer_out + transfer_in)
 -- with created_by, reference_type='transfer', and auto-generated notes.
 
+DROP FUNCTION IF EXISTS transfer_stock_atomic(BIGINT, BIGINT, BIGINT, NUMERIC, TEXT, BIGINT);
+
 CREATE OR REPLACE FUNCTION transfer_stock_atomic(
   p_from_branch    BIGINT,
   p_to_branch      BIGINT,
