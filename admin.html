@@ -289,6 +289,9 @@
         <div class="section-header">
           <h2 class="section-title">Manajemen Cabang</h2>
           <div class="section-actions">
+            <button class="btn btn-outline" data-admin-action="open-copy-menu-modal">
+              <i data-lucide="copy" class="icon-sm"></i> Copy Menu
+            </button>
             <button class="btn btn-primary" data-admin-action="open-branch-modal">
               <i data-lucide="plus" class="icon-sm"></i> Tambah Cabang
             </button>
@@ -413,6 +416,9 @@
             <select class="form-control w-auto" id="branch-pricing-filter" data-admin-change="load-branch-pricing">
               <option value="">— Pilih Cabang —</option>
             </select>
+            <button class="btn btn-outline btn-sm" data-admin-action="open-copy-menu-modal" id="branch-pricing-copy-btn" style="display:none">
+              <i data-lucide="copy" class="icon-sm"></i> Copy Dari Cabang Lain
+            </button>
           </div>
         </div>
         <div class="card">
@@ -1845,6 +1851,72 @@
       </div>
     </div>
   </div>
+  <!-- Copy Branch Menu Modal -->
+  <div class="modal-overlay" id="modal-copy-branch-menu">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <span class="modal-title">Copy Menu Cabang</span>
+        <button class="modal-close" data-admin-action="close-copy-menu-modal">✕</button>
+      </div>
+      <div class="modal-body flex flex-col gap-4">
+
+        <!-- Source + Target -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label">Cabang Sumber *</label>
+            <select class="form-control" id="copy-menu-source-branch">
+              <option value="">— Pilih Cabang Sumber —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cabang Tujuan *</label>
+            <select class="form-control" id="copy-menu-target-branch">
+              <option value="">— Pilih Cabang Tujuan —</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Mode -->
+        <div class="form-group">
+          <label class="form-label">Mode Copy</label>
+          <div style="display:flex;gap:24px;margin-top:6px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.875rem;">
+              <input type="radio" name="copy-menu-mode" value="replace" checked id="copy-menu-mode-replace" />
+              <span><strong>Replace</strong> — Ganti seluruh menu cabang tujuan</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.875rem;">
+              <input type="radio" name="copy-menu-mode" value="merge" id="copy-menu-mode-merge" />
+              <span><strong>Merge</strong> — Tambahkan menu sumber ke cabang tujuan</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Price note -->
+        <div class="text-xs text-muted" style="background:var(--bg-alt);padding:10px 14px;border-radius:var(--r-md);border:1px solid var(--border)">
+          <i data-lucide="info" class="icon-sm" style="vertical-align:middle;margin-right:4px"></i>
+          Harga target akan mengikuti struktur harga sumber: override dicopy, harga default tetap memakai default global.
+        </div>
+
+        <!-- Preview button -->
+        <div>
+          <button class="btn btn-outline btn-sm" id="copy-menu-preview-btn" data-admin-action="preview-copy-menu">
+            <i data-lucide="eye" class="icon-sm"></i> Preview
+          </button>
+        </div>
+
+        <!-- Preview area -->
+        <div id="copy-menu-preview-area"></div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-admin-action="close-copy-menu-modal">Batal</button>
+        <button class="btn btn-primary" id="copy-menu-confirm-btn" data-admin-action="confirm-copy-menu" disabled>
+          <i data-lucide="copy" class="icon-sm"></i> Salin Menu
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/utils/validator.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/services/inventoryService.js"></script>

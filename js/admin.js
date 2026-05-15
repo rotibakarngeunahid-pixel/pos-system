@@ -12,6 +12,8 @@ const ADMIN = {
   currentReportTab: 'sales',
   _bulkImportData: null,  // parsed rows waiting for confirmation
   _allProducts:    [],    // cache for client-side product search/filter
+  _copyMenuPreview:    null,
+  _copyMenuSubmitting: false,
 
   // ── Init ─────────────────────────────────────────────────────
   async init() {
@@ -102,6 +104,10 @@ const ADMIN = {
         case 'delete-api-key': this.deleteApiKey(Number(btn.dataset.id), btn.dataset.name || ''); break;
         case 'toggle-api-key': this.toggleApiKey(Number(btn.dataset.id), btn.dataset.active === 'true'); break;
         case 'copy-api-key': this.copyApiKey(btn.dataset.key || ''); break;
+        case 'open-copy-menu-modal': this.openCopyMenuModal(btn.dataset.targetId ? Number(btn.dataset.targetId) : null); break;
+        case 'close-copy-menu-modal': this.resetCopyMenuModal(); closeModal('modal-copy-branch-menu'); break;
+        case 'preview-copy-menu': this.loadCopyMenuPreview(); break;
+        case 'confirm-copy-menu': this.confirmCopyMenu(); break;
       }
     });
     document.addEventListener('change', (e) => {
@@ -403,6 +409,7 @@ const ADMIN = {
             </div>
             <div class="list-card-meta">${fDate(b.created_at)}</div>
             <div class="list-card-actions">
+              <button class="btn btn-outline btn-sm" data-admin-action="open-copy-menu-modal" data-target-id="${b.id}">Copy Menu</button>
               <button class="btn btn-outline btn-sm" data-admin-action="open-branch-modal" data-id="${b.id}">Edit</button>
               <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-branch" data-id="${b.id}" data-name="${escHtml(b.name)}">Hapus</button>
             </div>
@@ -434,15 +441,31 @@ const ADMIN = {
     const address = document.getElementById('branch-address').value.trim();
     if (!name) { showToast('Nama cabang wajib diisi', 'error'); return; }
 
-    const { error } = id
-      ? await db.from('branches').update({ name, address }).eq('id', id)
-      : await db.from('branches').insert({ name, address });
-    if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    let newBranchId = null;
+    if (id) {
+      const { error } = await db.from('branches').update({ name, address }).eq('id', id);
+      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+    } else {
+      const { data, error } = await db.from('branches').insert({ name, address }).select('id').single();
+      if (error) { showToast('Gagal: ' + error.message, 'error'); return; }
+      newBranchId = data?.id || null;
+    }
 
     showToast('Cabang berhasil disimpan', 'success');
     this.closeModal('modal-branch');
     await this.loadMasterData();
     this.loadBranches();
+
+    // Offer copy menu for newly created branch
+    if (newBranchId && this.branches.some(b => b.id !== newBranchId)) {
+      const ok = await showConfirm({
+        title:       'Copy menu dari cabang lain?',
+        message:     `Cabang "${name}" baru saja dibuat. Ingin menyalin menu dari cabang lain sekarang?`,
+        confirmText: 'Ya, Copy Menu',
+        danger:      false,
+      });
+      if (ok) this.openCopyMenuModal(newBranchId);
+    }
   },
 
   async deleteBranch(id, name) {
@@ -460,6 +483,205 @@ const ADMIN = {
     this.loadBranches();
   },
 
+  // ── Copy Menu ────────────────────────────────────────────────────
+  openCopyMenuModal(targetBranchId = null) {
+    this.resetCopyMenuModal();
+    const sourceEl  = document.getElementById('copy-menu-source-branch');
+    const targetEl  = document.getElementById('copy-menu-target-branch');
+
+    // Populate branch selects
+    const opts = this.branches.map(b =>
+      `<option value="${b.id}">${escHtml(b.name)}</option>`
+    ).join('');
+    sourceEl.innerHTML = '<option value="">— Pilih Cabang Sumber —</option>' + opts;
+
+    if (targetBranchId) {
+      // Opened from a specific branch card — target is locked
+      targetEl.innerHTML = '';
+      const b = this.branches.find(x => x.id === targetBranchId);
+      targetEl.innerHTML = `<option value="${targetBranchId}">${escHtml(b ? b.name : targetBranchId)}</option>`;
+      targetEl.disabled = true;
+      // Remove the locked target from source options
+      const lockedOpt = sourceEl.querySelector(`option[value="${targetBranchId}"]`);
+      if (lockedOpt) lockedOpt.remove();
+    } else {
+      targetEl.innerHTML = '<option value="">— Pilih Cabang Tujuan —</option>' + opts;
+      targetEl.disabled = false;
+    }
+
+    openModal('modal-copy-branch-menu');
+    if (window.lucide) lucide.createIcons();
+  },
+
+  resetCopyMenuModal() {
+    this._copyMenuPreview    = null;
+    this._copyMenuSubmitting = false;
+    const previewArea = document.getElementById('copy-menu-preview-area');
+    if (previewArea) previewArea.innerHTML = '';
+    const confirmBtn = document.getElementById('copy-menu-confirm-btn');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Salin Menu'; }
+    const previewBtn = document.getElementById('copy-menu-preview-btn');
+    if (previewBtn) { previewBtn.disabled = false; previewBtn.innerHTML = '<i data-lucide="eye" class="icon-sm"></i> Preview'; }
+    const targetEl = document.getElementById('copy-menu-target-branch');
+    if (targetEl) targetEl.disabled = false;
+    document.getElementById('copy-menu-mode-replace').checked = true;
+  },
+
+  async loadCopyMenuPreview() {
+    const sourceId = Number(document.getElementById('copy-menu-source-branch').value);
+    const targetId = Number(document.getElementById('copy-menu-target-branch').value);
+    const mode     = document.querySelector('input[name="copy-menu-mode"]:checked')?.value || 'replace';
+    const area     = document.getElementById('copy-menu-preview-area');
+    const btn      = document.getElementById('copy-menu-preview-btn');
+    const confirmBtn = document.getElementById('copy-menu-confirm-btn');
+
+    if (!sourceId) { showToast('Cabang sumber wajib dipilih.', 'error'); return; }
+    if (!targetId) { showToast('Cabang tujuan wajib dipilih.', 'error'); return; }
+    if (sourceId === targetId) { showToast('Cabang sumber dan tujuan tidak boleh sama.', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Memuat preview...';
+    area.innerHTML  = '';
+    confirmBtn.disabled = true;
+    this._copyMenuPreview = null;
+
+    try {
+      const { data, error } = await db.rpc('admin_preview_branch_menu_copy', {
+        p_source_branch_id: sourceId,
+        p_target_branch_id: targetId,
+        p_mode: mode,
+      });
+      if (error) throw error;
+      this._copyMenuPreview = data;
+      this.renderCopyMenuPreview(data, mode);
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = '<i data-lucide="copy" class="icon-sm"></i> Salin Menu';
+      if (window.lucide) lucide.createIcons();
+    } catch (e) {
+      area.innerHTML = `<div class="text-sm text-danger" style="padding:10px;border:1px solid var(--danger-soft);border-radius:var(--r-md)">${escHtml(e.message || 'Gagal memuat preview')}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="eye" class="icon-sm"></i> Preview';
+      if (window.lucide) lucide.createIcons();
+    }
+  },
+
+  renderCopyMenuPreview(p, mode) {
+    const area = document.getElementById('copy-menu-preview-area');
+    const warnHtml = (p.warnings && p.warnings.length)
+      ? p.warnings.map(w => `<div class="text-sm text-warning" style="margin-top:8px;padding:8px 12px;background:var(--warning-soft,#fffbeb);border-radius:var(--r-sm);border:1px solid var(--warning,#f59e0b)">⚠ ${escHtml(w.message)}</div>`).join('')
+      : '';
+
+    const replaceWarning = (mode === 'replace' && p.target_active_products > 0)
+      ? `<div class="text-sm" style="margin-top:8px;padding:10px 14px;background:#fff3cd;border-radius:var(--r-md);border:1px solid #f0c040;color:#856404">
+           <strong>Perhatian:</strong> Menu aktif cabang tujuan (${p.target_active_products} produk) akan diganti. Transaksi lama tidak berubah. Lanjutkan?
+         </div>`
+      : '';
+
+    area.innerHTML = `
+      <div style="border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-top:4px;">
+        <table class="w-full text-sm">
+          <tbody>
+            <tr><td class="p-2 text-muted" style="width:50%;border-bottom:1px solid var(--border)">Cabang Sumber</td><td class="p-2" style="border-bottom:1px solid var(--border)"><strong>${escHtml(p.source_branch.name)}</strong></td></tr>
+            <tr><td class="p-2 text-muted" style="border-bottom:1px solid var(--border)">Cabang Tujuan</td><td class="p-2" style="border-bottom:1px solid var(--border)"><strong>${escHtml(p.target_branch.name)}</strong></td></tr>
+            <tr><td class="p-2 text-muted" style="border-bottom:1px solid var(--border)">Mode</td><td class="p-2" style="border-bottom:1px solid var(--border)"><span class="badge">${escHtml(mode)}</span></td></tr>
+            <tr><td class="p-2 text-muted" style="border-bottom:1px solid var(--border)">Produk aktif sumber</td><td class="p-2" style="border-bottom:1px solid var(--border)">${p.source_active_products} produk</td></tr>
+            <tr><td class="p-2 text-muted" style="border-bottom:1px solid var(--border)">Varian sumber</td><td class="p-2" style="border-bottom:1px solid var(--border)">${p.source_variants} varian</td></tr>
+            <tr><td class="p-2 text-muted" style="border-bottom:1px solid var(--border)">Override harga sumber</td><td class="p-2" style="border-bottom:1px solid var(--border)">${p.source_overrides} override</td></tr>
+            <tr><td class="p-2 text-muted" style="border-bottom:1px solid var(--border)">Produk aktif tujuan saat ini</td><td class="p-2" style="border-bottom:1px solid var(--border)">${p.target_active_products} produk</td></tr>
+            <tr><td class="p-2 text-muted">Override harga tujuan saat ini</td><td class="p-2">${p.target_overrides} override</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ${warnHtml}
+      ${replaceWarning}
+    `;
+  },
+
+  async confirmCopyMenu() {
+    if (this._copyMenuSubmitting) return;
+    const sourceId = Number(document.getElementById('copy-menu-source-branch').value);
+    const targetId = Number(document.getElementById('copy-menu-target-branch').value);
+    const mode     = document.querySelector('input[name="copy-menu-mode"]:checked')?.value || 'replace';
+
+    if (!sourceId) { showToast('Cabang sumber wajib dipilih.', 'error'); return; }
+    if (!targetId) { showToast('Cabang tujuan wajib dipilih.', 'error'); return; }
+    if (sourceId === targetId) { showToast('Cabang sumber dan tujuan tidak boleh sama.', 'error'); return; }
+
+    if (!this._copyMenuPreview) {
+      showToast('Tekan Preview terlebih dahulu sebelum menyalin.', 'warning');
+      return;
+    }
+
+    if (mode === 'replace' && this._copyMenuPreview.target_active_products > 0) {
+      const targetName = this._copyMenuPreview.target_branch.name;
+      const ok = await showConfirm({
+        title:       `Ganti menu "${escHtml(targetName)}"?`,
+        message:     `Menu aktif cabang tujuan (${this._copyMenuPreview.target_active_products} produk) akan diganti. Transaksi lama tidak berubah. Lanjutkan?`,
+        confirmText: 'Ya, Ganti Menu',
+        danger:      true,
+      });
+      if (!ok) return;
+    }
+
+    this._copyMenuSubmitting = true;
+    const confirmBtn = document.getElementById('copy-menu-confirm-btn');
+    const previewBtn = document.getElementById('copy-menu-preview-btn');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Menyalin...'; }
+    if (previewBtn) previewBtn.disabled = true;
+
+    try {
+      const { data, error } = await db.rpc('admin_copy_branch_menu', {
+        p_source_branch_id: sourceId,
+        p_target_branch_id: targetId,
+        p_mode:    mode,
+        p_admin_id: this.user.id,
+      });
+      if (error) throw error;
+
+      const targetName = this._copyMenuPreview?.target_branch?.name || targetId;
+      showToast(`Menu berhasil dicopy ke ${targetName}`, 'success');
+
+      // Show summary
+      const area = document.getElementById('copy-menu-preview-area');
+      if (area && data) {
+        area.innerHTML = `
+          <div style="border:1px solid var(--success-soft,#d1fae5);border-radius:var(--r-md);overflow:hidden;background:var(--success-soft,#d1fae5);padding:12px 16px;">
+            <div class="text-sm" style="font-weight:600;margin-bottom:8px;color:var(--success,#059669)">✓ Copy berhasil</div>
+            <div class="text-sm text-muted">Produk diaktifkan: <strong>${data.products_activated}</strong></div>
+            <div class="text-sm text-muted">Produk dinonaktifkan: <strong>${data.products_deactivated}</strong></div>
+            <div class="text-sm text-muted">Override harga dihapus: <strong>${data.target_overrides_deleted}</strong></div>
+            <div class="text-sm text-muted">Override harga disalin: <strong>${data.target_overrides_inserted}</strong></div>
+            ${data.products_without_variants ? `<div class="text-sm text-warning">Produk tanpa varian: ${data.products_without_variants}</div>` : ''}
+          </div>`;
+      }
+
+      this._copyMenuSubmitting = false;
+      if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<i data-lucide="check" class="icon-sm"></i> Selesai'; }
+      await this.refreshAfterCopyMenu(targetId);
+    } catch (e) {
+      showToast('Copy menu gagal: ' + (e.message || 'Error tidak diketahui'), 'error');
+      this._copyMenuSubmitting = false;
+      if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i data-lucide="copy" class="icon-sm"></i> Salin Menu'; }
+      if (previewBtn) previewBtn.disabled = false;
+    }
+  },
+
+  async refreshAfterCopyMenu(targetBranchId) {
+    await this.loadMasterData();
+    if (this.currentSection === 'branches') this.loadBranches();
+    if (this.currentSection === 'branch-pricing') {
+      this.loadBranchPricing();
+      // Sync the branch-pricing-filter select to targetBranchId if possible
+      const filter = document.getElementById('branch-pricing-filter');
+      if (filter && targetBranchId) {
+        filter.value = String(targetBranchId);
+        this.loadBranchPricing();
+      }
+    }
+    if (window.lucide) lucide.createIcons();
+  },
+
   // ── Branch Pricing ──────────────────────────────────────────────
   // ── Branch Pricing ──────────────────────────────────────────────
   async loadBranchPricing() {
@@ -467,6 +689,12 @@ const ADMIN = {
     const tbody    = document.getElementById('branch-pricing-body');
     const hintEl   = document.getElementById('branch-pricing-hint');
     if (!tbody) return;
+
+    const copyBtn = document.getElementById('branch-pricing-copy-btn');
+    if (copyBtn) {
+      copyBtn.style.display = branchId ? '' : 'none';
+      if (branchId) copyBtn.dataset.targetId = branchId;
+    }
 
     if (!branchId) {
       tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Pilih cabang untuk melihat daftar harga</td></tr>';
