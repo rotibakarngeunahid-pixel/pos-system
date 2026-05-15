@@ -4283,3 +4283,318 @@ tbody tr:hover td { background: var(--surface-2); }
 .radio-group { display: flex; flex-direction: column; gap: 8px; }
 .radio-option { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
 .radio-option input[type="radio"] { accent-color: var(--warning, #F97316); width: 16px; height: 16px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   ONBOARDING TUTORIAL — Staff New User Guide
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Entry Panel (bottom sheet) ────────────────────────────── */
+#ob-entry-panel {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 8000;
+  background: var(--surface);
+  border-top: 2px solid var(--warning);
+  border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+  padding: var(--s4) var(--s5) max(var(--s5), env(safe-area-inset-bottom, 20px));
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.16);
+  transform: translateY(110%);
+  transition: transform 0.34s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 560px;
+  margin: 0 auto;
+}
+#ob-entry-panel.visible {
+  transform: translateY(0);
+}
+.ob-entry-header {
+  display: flex; align-items: flex-start; gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+.ob-entry-icon {
+  width: 44px; height: 44px; border-radius: var(--r-lg);
+  background: var(--warning-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+}
+.ob-entry-text { flex: 1; min-width: 0; }
+.ob-entry-title {
+  font-size: 15px; font-weight: 800; color: var(--text);
+  margin-bottom: 2px;
+}
+.ob-entry-desc {
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
+}
+.ob-entry-progress {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 700;
+  color: var(--warning); background: var(--warning-bg);
+  border-radius: var(--r-full);
+  padding: 3px 10px; margin-top: var(--s2);
+}
+.ob-entry-actions {
+  display: flex; gap: var(--s2); margin-top: var(--s3);
+}
+.ob-entry-actions .btn-ob-start {
+  flex: 1;
+  background: var(--warning); color: #fff;
+  border: none; border-radius: var(--r-lg);
+  padding: 12px 16px; font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: var(--t);
+}
+.ob-entry-actions .btn-ob-start:hover {
+  background: var(--orange-dark);
+}
+.ob-entry-actions .btn-ob-later {
+  background: var(--bg-alt); color: var(--text-sub);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 12px 14px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: var(--t); white-space: nowrap;
+}
+.ob-entry-actions .btn-ob-later:hover {
+  background: var(--border);
+}
+
+/* ── Tour Overlay ──────────────────────────────────────────── */
+#ob-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+}
+#ob-overlay.visible {
+  display: block;
+}
+/* Semi-transparent scrim for non-highlighted areas */
+.ob-scrim {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.42);
+  pointer-events: auto;
+}
+
+/* ── Highlight Box ─────────────────────────────────────────── */
+#ob-highlight-box {
+  display: none;
+  position: absolute;
+  border-radius: var(--r-lg);
+  border: 2.5px solid var(--warning);
+  box-shadow:
+    0 0 0 4px rgba(249,115,22,0.18),
+    0 0 0 9999px rgba(0,0,0,0.42);
+  pointer-events: none;
+  z-index: 9100;
+  transition: all 0.25s ease;
+  animation: ob-pulse 2s ease infinite;
+}
+@keyframes ob-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(249,115,22,0.18), 0 0 0 9999px rgba(0,0,0,0.42); }
+  50%       { box-shadow: 0 0 0 8px rgba(249,115,22,0.28), 0 0 0 9999px rgba(0,0,0,0.42); }
+}
+
+/* ── Tooltip Card ──────────────────────────────────────────── */
+#ob-tooltip {
+  position: absolute;
+  z-index: 9200;
+  width: 340px; max-width: calc(100vw - 24px);
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-xl);
+  border: 1.5px solid var(--border);
+  overflow: hidden;
+  pointer-events: auto;
+  animation: ob-tooltip-in 0.22s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes ob-tooltip-in {
+  from { opacity: 0; transform: scale(0.88) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.ob-tooltip-header {
+  background: linear-gradient(135deg, var(--warning) 0%, var(--orange-dark) 100%);
+  padding: var(--s3) var(--s4);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ob-step-module {
+  font-size: 10px; font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.btn-ob-close-tour {
+  background: rgba(255,255,255,0.2);
+  border: none; color: #fff;
+  width: 26px; height: 26px; border-radius: var(--r-full);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; transition: var(--t);
+}
+.btn-ob-close-tour:hover { background: rgba(255,255,255,0.35); }
+.ob-tooltip-body {
+  padding: var(--s4);
+}
+.ob-step-title {
+  font-size: 15px; font-weight: 800; color: var(--text);
+  margin-bottom: var(--s2); line-height: 1.3;
+}
+.ob-step-body {
+  font-size: 13px; color: var(--text-sub);
+  line-height: 1.65; margin-bottom: var(--s3);
+}
+.ob-progress-wrap {
+  margin-bottom: var(--s3);
+}
+.ob-progress-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--s1);
+}
+.ob-progress-text {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+}
+.ob-progress-bar {
+  height: 4px; background: var(--border); border-radius: var(--r-full); overflow: hidden;
+}
+.ob-progress-bar-fill {
+  height: 100%; background: var(--warning);
+  border-radius: var(--r-full);
+  transition: width 0.4s ease;
+}
+.ob-dots {
+  display: flex; gap: 5px; align-items: center;
+  justify-content: center; margin-top: var(--s2);
+}
+.ob-dot {
+  width: 7px; height: 7px;
+  border-radius: var(--r-full);
+  background: var(--border); transition: var(--t);
+}
+.ob-dot-active {
+  background: var(--warning); width: 18px;
+}
+.ob-dot-done { background: var(--success); }
+
+.ob-tooltip-footer {
+  padding: var(--s3) var(--s4) var(--s4);
+  display: flex; gap: var(--s2);
+  border-top: 1px solid var(--border);
+}
+.btn-ob-back, .btn-ob-next, .btn-ob-done {
+  border-radius: var(--r-lg);
+  padding: 10px 16px; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: var(--t);
+  display: flex; align-items: center; gap: 4px;
+}
+.btn-ob-back {
+  background: var(--bg-alt); color: var(--text-sub);
+  border: 1px solid var(--border);
+}
+.btn-ob-back:hover:not(:disabled) { background: var(--border); }
+.btn-ob-back:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-ob-next, .btn-ob-done {
+  flex: 1;
+  background: var(--warning); color: #fff; border: none;
+  justify-content: center;
+}
+.btn-ob-next:hover:not(:disabled), .btn-ob-done:hover:not(:disabled) {
+  background: var(--orange-dark);
+}
+.btn-ob-next:disabled, .btn-ob-done:disabled {
+  opacity: 0.55; cursor: not-allowed;
+}
+.btn-ob-done {
+  background: var(--success);
+}
+.btn-ob-done:hover:not(:disabled) { background: var(--success-dark); }
+
+/* Checklist fallback mode */
+#ob-overlay.ob-checklist-mode .ob-scrim { display: none; }
+#ob-overlay.ob-checklist-mode #ob-highlight-box { display: none !important; }
+#ob-overlay.ob-checklist-mode #ob-tooltip {
+  position: fixed !important;
+  top: 50% !important; left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  bottom: auto !important; right: auto !important;
+}
+
+/* ── Target element highlight ring ────────────────────────── */
+.ob-target-highlight {
+  outline: 2.5px solid var(--warning) !important;
+  outline-offset: 3px !important;
+  border-radius: var(--r) !important;
+  position: relative !important;
+  z-index: 9050 !important;
+}
+
+/* ── Completion Banner ─────────────────────────────────────── */
+#ob-complete-banner {
+  position: fixed;
+  top: var(--s4); left: 50%;
+  transform: translateX(-50%) translateY(-120%);
+  z-index: 9900;
+  background: linear-gradient(135deg, var(--success) 0%, #15803d 100%);
+  color: #fff;
+  border-radius: var(--r-xl);
+  padding: var(--s3) var(--s5);
+  box-shadow: var(--sh-lg);
+  display: flex; align-items: center; gap: var(--s3);
+  font-weight: 700; font-size: 14px;
+  transition: transform 0.36s cubic-bezier(0.34,1.56,0.64,1);
+  white-space: nowrap;
+  max-width: calc(100vw - 32px);
+}
+#ob-complete-banner.visible {
+  transform: translateX(-50%) translateY(0);
+}
+.ob-complete-icon { font-size: 22px; }
+
+/* ── Admin Staff List: Training Badge ──────────────────────── */
+.badge-training {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 8px; border-radius: var(--r-full);
+  white-space: nowrap;
+}
+.badge-training-not_started {
+  background: var(--warning-bg); color: var(--warning);
+}
+.badge-training-in_progress {
+  background: var(--info-bg); color: var(--info);
+}
+.badge-training-completed {
+  background: var(--success-bg); color: var(--success);
+}
+.badge-training-none {
+  background: var(--bg-alt); color: var(--text-muted);
+}
+
+/* ── Reopen Button (floating, after dismiss) ───────────────── */
+#ob-reopen-btn {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--s4));
+  right: var(--s4);
+  z-index: 7900;
+  background: var(--warning); color: #fff;
+  border: none; border-radius: var(--r-full);
+  width: 48px; height: 48px;
+  box-shadow: var(--sh-orange);
+  cursor: pointer;
+  display: none;
+  align-items: center; justify-content: center;
+  font-size: 20px;
+  transition: var(--t);
+  animation: ob-fab-in 0.3s cubic-bezier(0.34,1.56,0.64,1);
+}
+#ob-reopen-btn.visible {
+  display: flex;
+}
+#ob-reopen-btn:hover { background: var(--orange-dark); transform: scale(1.08); }
+@keyframes ob-fab-in {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Mobile Responsive ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  #ob-entry-panel { border-radius: var(--r-xl) var(--r-xl) 0 0; }
+  #ob-tooltip { width: calc(100vw - 16px); }
+  .ob-tooltip-header { padding: var(--s2) var(--s3); }
+  .ob-tooltip-body { padding: var(--s3); }
+  .ob-tooltip-footer { padding: var(--s2) var(--s3) var(--s3); gap: var(--s2); }
+  .btn-ob-back { padding: 9px 12px; font-size: 12px; }
+  .btn-ob-next, .btn-ob-done { padding: 9px 14px; font-size: 12px; }
+}

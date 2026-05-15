@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="RBN POS" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <link rel="stylesheet" href="css/styles.css?v=20260514-deposit-polish-1" />
+  <link rel="stylesheet" href="css/styles.css?v=20260516-onboarding-1" />
   <script>
     /* Fix: Viewport height correction for Android nav bar
        dvh/vh pada Android Chrome sering TIDAK mengecualikan navigation bar,
@@ -1000,6 +1000,80 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════
+       ONBOARDING: Entry Panel (bottom sheet)
+  ══════════════════════════════════════════ -->
+  <div id="ob-entry-panel" aria-live="polite" role="region" aria-label="Pelatihan Staff Baru">
+    <div class="ob-entry-header">
+      <div class="ob-entry-icon">🎓</div>
+      <div class="ob-entry-text">
+        <div class="ob-entry-title">Pelatihan Staff Baru</div>
+        <div class="ob-entry-desc">Panduan penggunaan aplikasi kasir Roti Bakar Ngeunah.</div>
+      </div>
+    </div>
+    <div class="ob-entry-progress">0 dari 0 langkah selesai</div>
+    <div class="ob-entry-actions">
+      <button class="btn-ob-start" data-ob-action="start">Mulai Pelatihan</button>
+      <button class="btn-ob-later" data-ob-action="dismiss">Nanti</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       ONBOARDING: Tour Overlay
+  ══════════════════════════════════════════ -->
+  <div id="ob-overlay" role="dialog" aria-modal="true" aria-label="Panduan Pelatihan">
+    <div class="ob-scrim"></div>
+    <!-- Highlight box drawn dynamically by JS -->
+    <div id="ob-highlight-box"></div>
+    <!-- Tooltip card -->
+    <div id="ob-tooltip">
+      <div class="ob-tooltip-header">
+        <span class="ob-step-module">Modul</span>
+        <button class="btn-ob-close-tour" data-ob-action="dismiss" aria-label="Tutup sementara">✕</button>
+      </div>
+      <div class="ob-tooltip-body">
+        <div class="ob-step-title">—</div>
+        <div class="ob-step-body"></div>
+        <div class="ob-progress-wrap">
+          <div class="ob-progress-meta">
+            <span class="ob-progress-text">Langkah 1 dari 1</span>
+          </div>
+          <div class="ob-progress-bar">
+            <div class="ob-progress-bar-fill" style="width:0%"></div>
+          </div>
+          <div id="ob-dots" class="ob-dots"></div>
+        </div>
+      </div>
+      <div class="ob-tooltip-footer">
+        <button class="btn-ob-back" data-ob-action="back" aria-label="Langkah sebelumnya">
+          ← Kembali
+        </button>
+        <button class="btn-ob-next" data-ob-action="next" aria-label="Langkah berikutnya">
+          Lanjut →
+        </button>
+        <button class="btn-ob-done" data-ob-action="done" style="display:none" aria-label="Selesai pelatihan">
+          ✓ Selesai!
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       ONBOARDING: Completion Banner
+  ══════════════════════════════════════════ -->
+  <div id="ob-complete-banner" role="status">
+    <span class="ob-complete-icon">🎉</span>
+    <span>Selamat! Pelatihan selesai. Semangat bertugas!</span>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       ONBOARDING: Reopen FAB (after dismiss)
+  ══════════════════════════════════════════ -->
+  <button id="ob-reopen-btn" data-ob-action="reopen" aria-label="Buka kembali panduan pelatihan" title="Buka Panduan">
+    🎓
+  </button>
+
+  <script src="js/onboarding.js?v=20260516-onboarding-1"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>

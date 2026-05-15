@@ -174,6 +174,11 @@ const POS = {
       depositUi.refreshWhenReady();
     }
 
+    // Onboarding tutorial for new staff — non-blocking, never affects POS flow
+    if (window.Onboarding && this.user) {
+      Onboarding.init(this.user).catch(() => {});
+    }
+
     // Subscribe to cross-page data change events from Admin
     if (window.RBNDataEvents) {
       RBNDataEvents.subscribe('products:changed', () => { this._productsDirty = true; });

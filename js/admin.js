@@ -1999,6 +1999,19 @@ const ADMIN = {
     const container = document.getElementById('staff-list');
     if (!container) return;
     const activeUsers = this._activeUsers(data);
+
+    // Load onboarding status for all staff users (non-fatal)
+    const staffIds = activeUsers.filter(u => u.role === 'staff').map(u => u.id);
+    const obStatusMap = {};
+    if (staffIds.length) {
+      try {
+        const { data: obRows } = await db.rpc('get_staff_onboarding_statuses', {
+          p_user_ids: staffIds,
+        });
+        (obRows || []).forEach(r => { obStatusMap[r.user_id] = r.ob_status; });
+      } catch { /* non-fatal: badges just won't show */ }
+    }
+
     container.innerHTML = activeUsers.length
       ? `<div class="admin-list">${activeUsers.map(u => {
           const branch = this.branches.find(b => b.id === u.branch_id);
@@ -2008,11 +2021,27 @@ const ADMIN = {
               ? '<i data-lucide="bar-chart-3" class="icon"></i>'
               : '<i data-lucide="user" class="icon"></i>';
           const roleBadgeClass = u.role === 'admin' ? 'badge-red' : u.role === 'investor' ? 'badge-blue' : 'badge-orange';
+
+          let trainingBadge = '';
+          if (u.role === 'staff') {
+            const obStatus = obStatusMap[u.id];
+            if (obStatus === 'not_started') {
+              trainingBadge = '<span class="badge badge-training badge-training-not_started">Training: Belum mulai</span>';
+            } else if (obStatus === 'in_progress') {
+              trainingBadge = '<span class="badge badge-training badge-training-in_progress">Training: Sedang belajar</span>';
+            } else if (obStatus === 'completed') {
+              trainingBadge = '<span class="badge badge-training badge-training-completed">Training: Selesai ✓</span>';
+            } else {
+              trainingBadge = '<span class="badge badge-training badge-training-none">Training: Tidak ada</span>';
+            }
+          }
+
           return `<div class="admin-list-card">
             <div class="list-card-icon">${roleIconSvg}</div>
             <div class="list-card-info">
               <div class="list-card-title">${escHtml(u.name)}</div>
               <div class="list-card-sub">${escHtml(branch?.name||'Tidak ada cabang')}</div>
+              ${trainingBadge ? `<div style="margin-top:4px;">${trainingBadge}</div>` : ''}
             </div>
             <div class="list-card-meta"><span class="badge ${roleBadgeClass}">${u.role}</span></div>
             <div class="list-card-actions">
