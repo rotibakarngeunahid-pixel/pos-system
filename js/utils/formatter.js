@@ -69,8 +69,10 @@ const fmt = {
     d.setDate(d.getDate() + 1);
     const nextDate = d.toISOString().slice(0, 10);
 
-    const endHour = String(cutoff - 1).padStart(2, '0');
-    const to      = `${nextDate}T${endHour}:59:59`;
+    // Guard: if cutoff is 0 treat end-of-range as same calendar-day 23:59:59
+    const endH  = cutoff > 0 ? cutoff - 1 : 23;
+    const endHour = String(endH).padStart(2, '0');
+    const to      = cutoff > 0 ? `${nextDate}T${endHour}:59:59` : `${businessDate}T23:59:59`;
 
     return { from, to };
   }

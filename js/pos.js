@@ -488,9 +488,10 @@ const POS = {
   },
 
   filterCategory(cat) {
-    document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-    const activeBtn = document.querySelector(`.cat-btn[data-cat="${cat}"]`);
-    if (activeBtn) activeBtn.classList.add('active');
+    document.querySelectorAll('.cat-btn').forEach(b => {
+      b.classList.remove('active');
+      if (b.dataset.cat === cat) b.classList.add('active');
+    });
     const q = (document.getElementById('product-search')?.value || '').toLowerCase().trim();
     this.filtered = this.allProducts.filter(p =>
       (cat === 'Semua' || p.category === cat) &&
@@ -1278,8 +1279,10 @@ const POS = {
         .select('qty, type, notes, created_at, ingredients(name, unit), users(name)')
         .eq('branch_id', this.branch.id)
         .eq('reference_type', 'manual')
+        .gte('created_at', from)
+        .lte('created_at', to)
         .order('created_at', { ascending: false })
-        .limit(15)
+        .limit(30)
     ]);
 
     const stockData   = stockRes.data || [];
@@ -1444,10 +1447,14 @@ const POS = {
           userId: this.user.id
         });
 
-        // Notify the other branch so they see the stock movement
+        // Notify the RECEIVING branch so they see "Stok Masuk dari Transfer".
+        // transfer_out: current sends to other  → notify other (from=current, to=other)
+        // transfer_in:  current receives from other → notify current (from=other, to=current)
+        const notifFrom = type === 'transfer_in' ? otherBranchId : this.branch.id;
+        const notifTo   = type === 'transfer_in' ? this.branch.id : otherBranchId;
         await db.from('stock_transfer_notifications').insert({
-          from_branch_id: this.branch.id,
-          to_branch_id:   otherBranchId,
+          from_branch_id: notifFrom,
+          to_branch_id:   notifTo,
           ingredient_id:  ingredientId,
           qty,
           notes:          notes || null,
@@ -1845,7 +1852,7 @@ const POS = {
 
       let methods = defaultMethods;
       try {
-        const { data, error } = await db.from('payment_methods').select('code, label, fee_label, fee_percent, is_active').eq('is_active', true).order('id');
+        const { data, error } = await db.from('payment_methods').select('code, label, fee_label, fee_percent, is_fee_enabled, is_active').eq('is_active', true).order('id');
         if (!error && Array.isArray(data) && data.length) methods = data;
       } catch (dbErr) {
         const settings = JSON.parse(localStorage.getItem('pos_settings') || '{}');
