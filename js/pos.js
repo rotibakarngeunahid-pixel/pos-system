@@ -1369,20 +1369,25 @@ const POS = {
   // ── Stock Adjust (Staff & Admin) ──────────────────────────────
   async openStockAdjustModal() {
     if (!this.branch) return;
-    const [ingRes, branchRes] = await Promise.all([
-      db.from('ingredients').select('id, name, unit').order('name'),
+    const [invRes, branchRes] = await Promise.all([
+      db.from('branch_inventory').select('ingredient_id, ingredients(id, name, unit)').eq('branch_id', this.branch.id),
       db.from('branches').select('id, name').order('name')
     ]);
 
     const sel = document.getElementById('stock-adj-ingredient');
     if (!sel) return;
 
-    if (ingRes.error || !ingRes.data?.length) {
-      showToast('Belum ada bahan baku terdaftar. Tambahkan di menu Admin → Bahan Baku.', 'warning');
+    const ingredients = (invRes.data || [])
+      .map(r => r.ingredients)
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (invRes.error || !ingredients.length) {
+      showToast('Belum ada bahan baku yang dipetakan ke outlet ini.', 'warning');
       return;
     }
 
-    sel.innerHTML = ingRes.data
+    sel.innerHTML = ingredients
       .map(i => `<option value="${i.id}">${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`)
       .join('');
 
