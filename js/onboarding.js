@@ -677,7 +677,11 @@ const Onboarding = (() => {
   }
 
   // ── Event Binding ──────────────────────────────────────────────
+  let _eventsBound = false;
+
   function bindEvents() {
+    if (_eventsBound) return;
+    _eventsBound = true;
     document.addEventListener('click', async e => {
       const btn = e.target.closest('[data-ob-action]');
       if (!btn) return;
@@ -747,3 +751,5 @@ const Onboarding = (() => {
   return { init };
 
 })();
+
+window.Onboarding = Onboarding;

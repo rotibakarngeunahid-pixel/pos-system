@@ -176,7 +176,9 @@ const POS = {
 
     // Onboarding tutorial for new staff — non-blocking, never affects POS flow
     if (window.Onboarding && this.user) {
-      Onboarding.init(this.user).catch(() => {});
+      window.Onboarding.init(this.user).catch(err => {
+        console.warn('[Onboarding] init failed', err);
+      });
     }
 
     // Subscribe to cross-page data change events from Admin
