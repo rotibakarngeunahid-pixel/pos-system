@@ -4,10 +4,17 @@ const INVESTOR = {
   user:             null,
   branches:         [],
   features:         [],   // active feature keys from permission config
+  paymentMethods:   [],
   selectedBranchId: null,
   currentTab:       'overview',
   cache:            null, // { salesData, productData, inventoryData, usageData }
   _swipeObserver:   null,
+
+  _DEFAULT_PAYMENT_METHODS: [
+    { code: 'cash', label: 'Tunai' },
+    { code: 'qris', label: 'QRIS' },
+    { code: 'transfer', label: 'Transfer' },
+  ],
 
   // Tab config: key, label, feature (null = always show)
   _TAB_CONFIG: [
@@ -62,6 +69,7 @@ const INVESTOR = {
 
     this._hideGlobalState();
     this._populateBranches();
+    await this._loadPaymentMethods();
     this._renderTabs();
     this._setupSwipe();
     this._bindEvents();
@@ -74,8 +82,67 @@ const INVESTOR = {
   _populateBranches() {
     const select = document.getElementById('inv-branch-filter');
     select.innerHTML = this.branches.map(b =>
-      `<option value="${b.branch_id}">${b.branch_name}</option>`
+      `<option value="${b.branch_id}">${escHtml(b.branch_name)}</option>`
     ).join('');
+  },
+
+  async _loadPaymentMethods() {
+    let methods = [];
+    try {
+      methods = await investorService.getPaymentMethods();
+    } catch (e) {
+      console.warn('Investor payment methods fallback:', e.message || e);
+      methods = this._getLocalPaymentMethods();
+    }
+    if (!methods.length) methods = this._getLocalPaymentMethods();
+
+    this.paymentMethods = this._normalizePaymentMethods(methods);
+    this._populatePaymentMethods();
+  },
+
+  _getLocalPaymentMethods() {
+    try {
+      const settings = JSON.parse(localStorage.getItem('pos_settings') || '{}');
+      if (Array.isArray(settings.paymentMethods) && settings.paymentMethods.length) {
+        return settings.paymentMethods;
+      }
+    } catch (e) {}
+    return this._DEFAULT_PAYMENT_METHODS;
+  },
+
+  _normalizePaymentMethods(methods) {
+    const source = Array.isArray(methods) && methods.length ? methods : this._DEFAULT_PAYMENT_METHODS;
+    const seen = new Set();
+    return source
+      .filter(m => m && m.code && m.label && m.is_active !== false)
+      .map(m => ({ code: String(m.code), label: String(m.label) }))
+      .filter(m => {
+        if (seen.has(m.code)) return false;
+        seen.add(m.code);
+        return true;
+      });
+  },
+
+  _populatePaymentMethods() {
+    const select = document.getElementById('inv-payment-method');
+    if (!select) return;
+
+    const current = select.value;
+    select.innerHTML = '<option value="">Semua</option>' + this.paymentMethods.map(m =>
+      `<option value="${escHtml(m.code)}">${escHtml(m.label)}</option>`
+    ).join('');
+
+    if ([...select.options].some(o => o.value === current)) {
+      select.value = current;
+    }
+  },
+
+  _getPaymentMethodLabel(code) {
+    if (!code) return 'N/A';
+    const method = this.paymentMethods.find(m => m.code === code);
+    if (method) return method.label;
+    const fallback = this._DEFAULT_PAYMENT_METHODS.find(m => m.code === code);
+    return fallback?.label || fmt.titleCase(String(code).replace(/_/g, ' '));
   },
 
   _visibleTabs() {
@@ -165,9 +232,11 @@ const INVESTOR = {
     const branch = this.branches.find(b => b.branch_id === this.selectedBranchId);
     const from   = document.getElementById('inv-date-from').value || '';
     const to     = document.getElementById('inv-date-to').value   || '';
+    const paymentCode = document.getElementById('inv-payment-method')?.value || '';
+    const paymentText = paymentCode ? this._getPaymentMethodLabel(paymentCode) : 'Semua metode';
     const el     = document.getElementById('inv-filter-summary-text');
     if (el && branch) {
-      el.textContent = `${branch.branch_name}  |  ${from} s/d ${to}`;
+      el.textContent = `${branch.branch_name}  |  ${from} s/d ${to}  |  ${paymentText}`;
     }
   },
 
@@ -308,6 +377,7 @@ const INVESTOR = {
 
     el.innerHTML = all.map(t => {
       const isVoid = t.status === 'void' || t.status === 'voided';
+      const methodLabel = this._getPaymentMethodLabel(t.payment_method);
       return `
         <div class="inv-trx-card${isVoid ? ' inv-trx-void' : ''}">
           <div class="inv-trx-row">
@@ -315,7 +385,7 @@ const INVESTOR = {
             <span class="inv-trx-badge ${isVoid ? 'badge-void' : 'badge-completed'}">${isVoid ? 'VOID' : 'Selesai'}</span>
           </div>
           <div class="inv-trx-row">
-            <span class="inv-trx-meta">${t.payment_method || 'N/A'} &middot; ${t.staff_name || 'N/A'}</span>
+            <span class="inv-trx-meta">${escHtml(methodLabel)} &middot; ${escHtml(t.staff_name || 'N/A')}</span>
             <span class="inv-trx-total">${fmt.rupiah(t.total)}</span>
           </div>
         </div>

@@ -1,6 +1,31 @@
 'use strict';
 
 const investorService = {
+  async getPaymentMethods() {
+    const normalize = rows => (rows || [])
+      .filter(m => m && m.code && m.label)
+      .map(m => ({
+        code: String(m.code),
+        label: String(m.label),
+        is_active: m.is_active !== false
+      }))
+      .filter(m => m.is_active);
+
+    let { data, error } = await db.from('payment_methods')
+      .select('code, label, is_active')
+      .eq('is_active', true)
+      .order('id');
+
+    const errMsg = (error?.message || '').toLowerCase();
+    if (error && (error.code === '42703' || errMsg.includes('is_active'))) {
+      ({ data, error } = await db.from('payment_methods')
+        .select('code, label')
+        .order('id'));
+    }
+
+    if (error) throw error;
+    return normalize(data);
+  },
 
   async getAccessConfig(userId) {
     const { data, error } = await db.rpc('investor_get_access_config', { p_user_id: userId });
