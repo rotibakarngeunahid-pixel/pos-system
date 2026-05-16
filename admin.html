@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#f97316" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="RBN Admin" />
-  <link rel="stylesheet" href="css/styles.css?v=20260516-onboarding-1" />
+  <link rel="stylesheet" href="css/styles.css?v=20260517-manual-deposit-1" />
   <style>
     /* Page-specific overrides */
     .bg-alt { background: var(--bg-alt); }
@@ -872,6 +872,11 @@
       <section class="admin-section" id="section-cash-deposits">
         <div class="section-header">
           <h2 class="section-title">Setoran Tunai</h2>
+          <div class="section-actions">
+            <button class="btn btn-primary" id="btn-add-manual-deposit">
+              <i data-lucide="plus" class="icon-sm"></i> Input Manual
+            </button>
+          </div>
         </div>
 
         <!-- Filter card -->
@@ -1060,6 +1065,57 @@
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-branch">Batal</button>
         <button class="btn btn-primary" data-admin-action="save-branch">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Cash Deposit Modal -->
+  <div class="modal-overlay" id="modal-manual-deposit">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Input Manual Setoran Tunai</span>
+        <button class="modal-close" data-admin-action="close-generic-modal" data-modal-id="modal-manual-deposit">&times;</button>
+      </div>
+      <div class="modal-body flex flex-col gap-3">
+        <div class="grid-2-col-s3">
+          <div class="form-group">
+            <label class="form-label">Cabang *</label>
+            <select class="form-control" id="manual-deposit-branch"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Staff *</label>
+            <select class="form-control" id="manual-deposit-staff"></select>
+            <span class="form-hint" id="manual-deposit-staff-hint"></span>
+          </div>
+        </div>
+        <div class="grid-2-col-s3">
+          <div class="form-group">
+            <label class="form-label">Metode Cash *</label>
+            <select class="form-control" id="manual-deposit-account"></select>
+            <span class="form-hint" id="manual-deposit-account-hint"></span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Jumlah Setoran *</label>
+            <div class="input-prefix-wrap">
+              <span class="input-prefix">Rp</span>
+              <input type="text" class="form-control" id="manual-deposit-amount" inputmode="numeric" autocomplete="off" placeholder="0" />
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Catatan</label>
+          <textarea class="form-control" id="manual-deposit-notes" rows="3" placeholder="Opsional"></textarea>
+        </div>
+        <div class="deposit-manual-status">
+          <span>Status</span>
+          <strong>Dikonfirmasi</strong>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-admin-action="close-generic-modal" data-modal-id="modal-manual-deposit">Batal</button>
+        <button class="btn btn-primary" id="btn-save-manual-deposit">
+          <i data-lucide="save" class="icon-sm"></i> Simpan Setoran
+        </button>
       </div>
     </div>
   </div>
@@ -1924,8 +1980,8 @@
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js"></script>
   <script src="js/services/rbnDataEvents.js"></script>
-  <script src="js/depositService.js?v=20260514-deposit-adminid-1"></script>
-  <script src="js/adminDepositUi.js?v=20260516-crud-friendly-1"></script>
+  <script src="js/depositService.js?v=20260517-manual-deposit-1"></script>
+  <script src="js/adminDepositUi.js?v=20260517-manual-deposit-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260516-crud-friendly-1"></script>

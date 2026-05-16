@@ -5,6 +5,7 @@ const adminDepositUi = {
   branches: [],
   accounts: [],
   staffMap: {},
+  staffRows: [],
   selectedQrisFile: null,
 
   init() {
@@ -32,7 +33,17 @@ const adminDepositUi = {
     this.el.btnFilter = document.getElementById('deposits-filter-btn');
     this.el.tableBody = document.getElementById('deposits-table-body');
     this.el.accountsList = document.getElementById('deposit-accounts-list');
+    this.el.addManualBtn = document.getElementById('btn-add-manual-deposit');
     this.el.addAccountBtn = document.getElementById('btn-add-deposit-account');
+
+    this.el.manualBranch = document.getElementById('manual-deposit-branch');
+    this.el.manualStaff = document.getElementById('manual-deposit-staff');
+    this.el.manualStaffHint = document.getElementById('manual-deposit-staff-hint');
+    this.el.manualAccount = document.getElementById('manual-deposit-account');
+    this.el.manualAccountHint = document.getElementById('manual-deposit-account-hint');
+    this.el.manualAmount = document.getElementById('manual-deposit-amount');
+    this.el.manualNotes = document.getElementById('manual-deposit-notes');
+    this.el.saveManualBtn = document.getElementById('btn-save-manual-deposit');
 
     this.el.accountModalTitle = document.getElementById('deposit-account-modal-title');
     this.el.accountId = document.getElementById('deposit-account-id');
@@ -50,6 +61,10 @@ const adminDepositUi = {
     this.el.saveAccountBtn = document.getElementById('btn-save-deposit-account');
 
     if (this.el.btnFilter) this.el.btnFilter.addEventListener('click', () => this.loadDeposits());
+    if (this.el.addManualBtn) this.el.addManualBtn.addEventListener('click', () => this.openManualDepositModal());
+    if (this.el.manualBranch) this.el.manualBranch.addEventListener('change', () => this.onManualBranchChange());
+    if (this.el.manualAmount) this.el.manualAmount.addEventListener('input', () => this.formatManualAmountInput());
+    if (this.el.saveManualBtn) this.el.saveManualBtn.addEventListener('click', () => this.saveManualDeposit());
     if (this.el.addAccountBtn) this.el.addAccountBtn.addEventListener('click', () => this.openAccountModal());
     if (this.el.accountType) this.el.accountType.addEventListener('change', () => this.toggleAccountTypeFields());
     if (this.el.qrisFile) this.el.qrisFile.addEventListener('change', e => this.handleQrisFile(e.target.files));
@@ -66,9 +81,16 @@ const adminDepositUi = {
   },
 
   async loadStaff() {
-    const { data } = await db.from('users').select('id, name');
+    let { data, error } = await db.from('users').select('id, name, role, branch_id, is_active').order('name');
+    const errMsg = String(error?.message || '').toLowerCase();
+    if (error && (error.code === '42703' || errMsg.includes('is_active'))) {
+      ({ data, error } = await db.from('users').select('id, name, role, branch_id').order('name'));
+    }
+    if (error) throw error;
+    const rows = data || [];
+    this.staffRows = rows.filter(u => u.is_active !== false);
     this.staffMap = {};
-    (data || []).forEach(u => { this.staffMap[u.id] = u.name; });
+    rows.forEach(u => { this.staffMap[u.id] = u.name; });
   },
 
   statusLabel(status) {
@@ -139,13 +161,17 @@ const adminDepositUi = {
              </div>`
           : '';
 
+        const cashBalance = r.cash_balance_at_deposit == null
+          ? '<span class="text-muted">Manual</span>'
+          : fRp(r.cash_balance_at_deposit);
+
         return `<tr class="deposit-admin-row ${r.status}">
           <td class="deposit-admin-id" title="${escHtml(depositId)}">${shortId}</td>
           <td class="deposit-admin-date">${date}</td>
           <td>${staff}</td>
           <td>${br}</td>
           <td class="deposit-admin-amount">${fRp(r.amount)}</td>
-          <td class="deposit-admin-kas text-muted">${fRp(r.cash_balance_at_deposit)}</td>
+          <td class="deposit-admin-kas text-muted">${cashBalance}</td>
           <td>
             <span class="deposit-admin-method">
               <i data-lucide="${typeIcon}" style="width:12px;height:12px;flex-shrink:0"></i>
@@ -198,6 +224,147 @@ const adminDepositUi = {
           <span class="badge badge-danger">${fRp(rejected)}</span>
         </td>
       </tr>`;
+  },
+
+  openManualDepositModal() {
+    if (!this.branches.length) {
+      showToast('Belum ada cabang aktif', 'warning');
+      return;
+    }
+
+    const branchOptions = '<option value="">Pilih Cabang</option>'
+      + this.branches.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
+    if (this.el.manualBranch) {
+      this.el.manualBranch.innerHTML = branchOptions;
+      this.el.manualBranch.value = this.el.branch?.value || '';
+    }
+    if (this.el.manualAmount) this.el.manualAmount.value = '';
+    if (this.el.manualNotes) this.el.manualNotes.value = '';
+    this.onManualBranchChange();
+    openModal('modal-manual-deposit');
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  onManualBranchChange() {
+    this.renderManualStaffOptions();
+    this.renderManualAccountOptions();
+  },
+
+  renderManualStaffOptions() {
+    if (!this.el.manualStaff) return;
+    const branchId = Number(this.el.manualBranch?.value || 0);
+    const rows = this.staffRows
+      .filter(u => u.role === 'staff' && Number(u.branch_id) === branchId)
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'id'));
+
+    if (!branchId) {
+      this.el.manualStaff.innerHTML = '<option value="">Pilih cabang dulu</option>';
+      this.el.manualStaff.disabled = true;
+      if (this.el.manualStaffHint) this.el.manualStaffHint.textContent = '';
+      return;
+    }
+
+    this.el.manualStaff.disabled = !rows.length;
+    this.el.manualStaff.innerHTML = rows.length
+      ? '<option value="">Pilih Staff</option>' + rows.map(u => `<option value="${u.id}">${escHtml(u.name)}</option>`).join('')
+      : '<option value="">Tidak ada staff di cabang ini</option>';
+    if (this.el.manualStaffHint) {
+      this.el.manualStaffHint.textContent = rows.length
+        ? `${rows.length} staff aktif tersedia`
+        : 'Tambahkan atau edit staff agar cabangnya sesuai.';
+    }
+  },
+
+  renderManualAccountOptions() {
+    if (!this.el.manualAccount) return;
+    const branchId = Number(this.el.manualBranch?.value || 0);
+    const rows = this.accounts
+      .filter(a => a.is_active !== false && a.type === 'cash')
+      .filter(a => !a.branch_id || Number(a.branch_id) === branchId)
+      .sort((a, b) => String(a.label || '').localeCompare(String(b.label || ''), 'id'));
+
+    if (!branchId) {
+      this.el.manualAccount.innerHTML = '<option value="">Pilih cabang dulu</option>';
+      this.el.manualAccount.disabled = true;
+      if (this.el.manualAccountHint) this.el.manualAccountHint.textContent = '';
+      return;
+    }
+
+    this.el.manualAccount.disabled = !rows.length;
+    this.el.manualAccount.innerHTML = rows.length
+      ? '<option value="">Pilih Metode Cash</option>' + rows.map(a => `<option value="${a.id}">${escHtml(a.label)}</option>`).join('')
+      : '<option value="">Tidak ada metode Cash aktif</option>';
+    if (this.el.manualAccountHint) {
+      this.el.manualAccountHint.textContent = rows.length
+        ? ''
+        : 'Tambahkan metode setoran tipe Cash terlebih dahulu.';
+    }
+  },
+
+  parseManualAmount() {
+    const digits = String(this.el.manualAmount?.value || '').replace(/\D/g, '');
+    return digits ? Number(digits) : 0;
+  },
+
+  formatManualAmountInput() {
+    if (!this.el.manualAmount) return;
+    const amount = this.parseManualAmount();
+    this.el.manualAmount.value = amount > 0 ? amount.toLocaleString('id-ID') : '';
+  },
+
+  async saveManualDeposit() {
+    const branchId = Number(this.el.manualBranch?.value || 0);
+    const staffId = Number(this.el.manualStaff?.value || 0);
+    const accountId = this.el.manualAccount?.value || '';
+    const amount = this.parseManualAmount();
+    const notes = this.el.manualNotes?.value?.trim() || null;
+
+    if (!branchId) { showToast('Cabang wajib dipilih', 'error'); return; }
+    if (!staffId) { showToast('Staff wajib dipilih', 'error'); return; }
+    if (!accountId) { showToast('Metode cash wajib dipilih', 'error'); return; }
+    if (amount <= 0) { showToast('Jumlah setoran harus lebih dari 0', 'error'); return; }
+    if (amount % 50000 !== 0) { showToast('Nominal harus kelipatan Rp 50.000', 'error'); return; }
+
+    const staff = this.staffRows.find(u => Number(u.id) === staffId);
+    const branch = this.branches.find(b => Number(b.id) === branchId);
+    const ok = await showConfirm({
+      title: 'Simpan Setoran Manual',
+      message: `Simpan ${fRp(amount)} untuk ${staff?.name || 'staff'} di ${branch?.name || 'cabang'}?`,
+      confirmText: 'Ya, Simpan'
+    });
+    if (!ok) return;
+
+    if (this.el.saveManualBtn) {
+      this.el.saveManualBtn.disabled = true;
+      this.el.saveManualBtn.innerHTML = '<span class="btn-spinner"></span><span>Menyimpan...</span>';
+    }
+
+    try {
+      const adminId = auth.getSession()?.id || null;
+      const depositId = await depositService.createManualDeposit({
+        adminId,
+        branchId,
+        staffId,
+        accountId,
+        amount,
+        notes
+      });
+      closeModal('modal-manual-deposit');
+      if (this.el.branch) this.el.branch.value = String(branchId);
+      if (this.el.status) this.el.status.value = '';
+      showToast(`Setoran manual tersimpan. Ref: ${String(depositId || '').slice(0, 8).toUpperCase()}`, 'success');
+      await this.loadDeposits();
+    } catch (e) {
+      console.error('saveManualDeposit', e);
+      if (window.showDbError) showDbError(e, { action: 'menyimpan setoran manual', entity: 'Setoran manual' });
+      else showToast(e.message || 'Gagal menyimpan setoran manual', 'error');
+    } finally {
+      if (this.el.saveManualBtn) {
+        this.el.saveManualBtn.disabled = false;
+        this.el.saveManualBtn.innerHTML = '<i data-lucide="save" class="icon-sm"></i> Simpan Setoran';
+        if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+      }
+    }
   },
 
   async doConfirm(depositId) {

@@ -1434,6 +1434,27 @@ body, .body { font-size: 14px; font-weight: 400; }
 }
 .deposit-totals-row td { border-top: 2px solid var(--border); }
 
+.deposit-manual-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg-alt);
+  font-size: 13px;
+}
+.deposit-manual-status span {
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.deposit-manual-status strong {
+  color: var(--success);
+}
+
 @media (max-width: 900px) {
   .dep-filter-group { min-width: 110px; }
 }
