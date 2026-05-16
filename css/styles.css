@@ -4293,7 +4293,7 @@ tbody tr:hover td { background: var(--surface-2); }
 #ob-entry-panel {
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  z-index: 8000;
+  z-index: 7500;
   background: var(--surface);
   border-top: 3px solid var(--warning);
   border-radius: var(--r-2xl) var(--r-2xl) 0 0;
@@ -4342,7 +4342,7 @@ tbody tr:hover td { background: var(--surface-2); }
 #ob-overlay {
   display: none;
   position: fixed; inset: 0;
-  z-index: 9000;
+  z-index: 7000;
   pointer-events: none;
 }
 #ob-overlay.visible { display: block; }
@@ -4367,7 +4367,7 @@ tbody tr:hover td { background: var(--surface-2); }
   border: 2.5px solid var(--warning);
   border-radius: var(--r-lg);
   pointer-events: none;
-  z-index: 9100;
+  z-index: 7100;
   transition: top 0.3s ease, left 0.3s ease, width 0.3s ease, height 0.3s ease;
   animation: ob-spotlight-pulse 2.2s ease-in-out infinite;
 }
@@ -4380,7 +4380,7 @@ tbody tr:hover td { background: var(--surface-2); }
 #ob-pointer {
   display: none;
   position: absolute;
-  z-index: 9250;
+  z-index: 7200;
   font-size: 28px;
   pointer-events: none;
   filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
@@ -4395,18 +4395,34 @@ tbody tr:hover td { background: var(--surface-2); }
 
 /* ── Tooltip Card ──────────────────────────────────────────── */
 #ob-tooltip {
-  position: absolute;
-  z-index: 9300;
+  position: fixed;
+  z-index: 7300;
   width: 340px; max-width: calc(100vw - 24px);
+  box-sizing: border-box;
   background: var(--surface);
   border-radius: var(--r-xl);
   box-shadow: 0 24px 60px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.1);
   border: 1.5px solid var(--border);
   overflow: hidden;
   pointer-events: auto;
-  /* transitions controlled by JS adding/removing classes */
   transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.34,1.56,0.64,1);
 }
+/* Bottom-sheet placement on mobile */
+#ob-tooltip.ob-tooltip-bottom-sheet {
+  border-radius: 18px;
+  max-height: min(52dvh, 420px);
+  display: flex;
+  flex-direction: column;
+}
+#ob-tooltip.ob-tooltip-bottom-sheet .ob-tooltip-body {
+  overflow-y: auto;
+  flex: 1;
+}
+#ob-tooltip.ob-tooltip-bottom-sheet .ob-tooltip-footer {
+  flex-shrink: 0;
+}
+#ob-tooltip.ob-tooltip-bottom-sheet.ob-tooltip-in  { transform: translateY(0); }
+#ob-tooltip.ob-tooltip-bottom-sheet.ob-tooltip-out { transform: translateY(24px); }
 /* JS adds/removes these for step-change animation */
 #ob-tooltip.ob-tooltip-in  { opacity: 1; transform: scale(1); }
 #ob-tooltip.ob-tooltip-out { opacity: 0; transform: scale(0.94) translateY(6px); }
@@ -4420,6 +4436,8 @@ tbody tr:hover td { background: var(--surface-2); }
   font-size: 10px; font-weight: 800;
   color: rgba(255,255,255,0.88);
   text-transform: uppercase; letter-spacing: 0.7px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: calc(100% - 36px);
 }
 .btn-ob-close-tour {
   background: rgba(255,255,255,0.22); border: none; color: #fff;
@@ -4466,20 +4484,24 @@ tbody tr:hover td { background: var(--surface-2); }
   padding: var(--s2) var(--s4) var(--s4);
   display: flex; gap: var(--s2);
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .btn-ob-back, .btn-ob-next, .btn-ob-done {
   border-radius: var(--r-lg);
   padding: 11px 16px; font-size: 13px; font-weight: 700;
   cursor: pointer; transition: var(--t);
-  display: flex; align-items: center; gap: 4px; white-space: nowrap;
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .btn-ob-back {
+  min-width: 104px; flex-shrink: 0;
   background: var(--bg-alt); color: var(--text-sub); border: 1px solid var(--border);
 }
 .btn-ob-back:hover:not(:disabled) { background: var(--border); }
 .btn-ob-back:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-ob-next, .btn-ob-done {
-  flex: 1; background: var(--warning); color: #fff; border: none; justify-content: center;
+  flex: 1; background: var(--warning); color: #fff; border: none;
 }
 .btn-ob-next:hover:not(:disabled) { background: var(--orange-dark); }
 .btn-ob-next:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -4487,10 +4509,10 @@ tbody tr:hover td { background: var(--surface-2); }
 .btn-ob-done:hover:not(:disabled) { background: var(--success-dark); }
 .btn-ob-done:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ── Target element: lift above overlay ────────────────────── */
+/* ── Target element: lift above overlay spotlight ───────────── */
 .ob-target-active {
   position: relative !important;
-  z-index: 9150 !important;
+  z-index: 7150 !important;
 }
 
 /* ── Completion Banner ─────────────────────────────────────── */
@@ -4498,7 +4520,7 @@ tbody tr:hover td { background: var(--surface-2); }
   position: fixed;
   top: var(--s4); left: 50%;
   transform: translateX(-50%) translateY(-140%);
-  z-index: 9900;
+  z-index: 7600;
   background: linear-gradient(135deg, var(--success) 0%, #15803d 100%);
   color: #fff;
   border-radius: var(--r-xl);
@@ -4528,7 +4550,7 @@ tbody tr:hover td { background: var(--surface-2); }
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
   right: var(--s4);
-  z-index: 7900;
+  z-index: 7400;
   background: var(--warning); color: #fff;
   border: none; border-radius: var(--r-full);
   width: 50px; height: 50px;
@@ -4547,10 +4569,24 @@ tbody tr:hover td { background: var(--surface-2); }
 /* ── Mobile Responsive ─────────────────────────────────────── */
 @media (max-width: 480px) {
   #ob-entry-panel    { border-radius: var(--r-xl) var(--r-xl) 0 0; }
-  #ob-tooltip        { width: calc(100vw - 16px); }
+  /* Tooltip width handled by JS (visualViewport); override only padding */
   .ob-tooltip-header { padding: var(--s2) var(--s3); }
-  .ob-tooltip-body   { padding: var(--s3); }
+  .ob-tooltip-body   { padding: var(--s3); line-height: 1.6; }
   .ob-tooltip-footer { padding: var(--s2) var(--s3) var(--s3); }
-  .btn-ob-back, .btn-ob-next, .btn-ob-done { padding: 10px 12px; font-size: 12px; }
+  .btn-ob-back       { min-width: 88px; padding: 10px 10px; font-size: 12px; }
+  .btn-ob-next,
+  .btn-ob-done       { padding: 10px 12px; font-size: 12px; }
   #ob-pointer        { font-size: 22px; }
+}
+
+/* ── Reduced Motion ────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  #ob-highlight-box,
+  #ob-pointer,
+  #ob-tooltip,
+  #ob-entry-panel,
+  #ob-complete-banner {
+    animation: none !important;
+    transition: none !important;
+  }
 }

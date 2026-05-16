@@ -3,17 +3,20 @@
 const Onboarding = (() => {
 
   // ── State ─────────────────────────────────────────────────────
-  let _user          = null;
-  let _assignment    = null;
-  let _steps         = [];
-  let _currentIdx    = 0;
-  let _saving        = false;
-  let _dismissed     = false;
-  let _highlightEl   = null;
-  let _transitioning = false;
-  let _resizeTimer   = null;
-  let _localMode     = false;
-  let _autoAdvanceTimer = null; // clearable timer for auto-advance on modal close
+  let _user             = null;
+  let _assignment       = null;
+  let _steps            = [];
+  let _currentIdx       = 0;
+  let _saving           = false;
+  let _dismissed        = false;
+  let _highlightEl      = null;
+  let _transitioning    = false;
+  let _resizeTimer      = null;
+  let _localMode        = false;
+  let _autoAdvanceTimer = null;
+  let _paused           = false;
+  let _modalObserver    = null;
+  let _clickShieldActive = false;
 
   // ── Storage keys ──────────────────────────────────────────────
   const DONE = uid => `ob_done_${uid}`;
@@ -26,10 +29,40 @@ const Onboarding = (() => {
     return el && el.classList.contains('active');
   };
 
-  // ── Hardcoded steps ───────────────────────────────────────────
-  // modal_step: true   → no scrim / no spotlight; pointer floats above modal
-  //                       (modal-shift is at z-index 1000; pointer/tooltip are 9250/9300)
-  // auto_advance: id   → hide Next button; auto-advance when that modal closes
+  // ── Per-step UI overrides (supplements DB / fallback data) ────
+  // These add fields that the DB schema doesn't store yet.
+  const STEP_UI = {
+    // Shift modal steps — skip if shift is already open
+    m0_welcome:        { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'center_info' },
+    m0_kas_awal:       { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'guided_action' },
+    m0_open_shift:     { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'guided_action', auto_advance: 'modal-shift' },
+    m1_welcome:        { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'center_info' },
+    m1_open_shift:     { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'guided_action', auto_advance: 'modal-shift' },
+    m1_shift_required: { showWhen: 'shift_open', interaction_mode: 'passive' },
+    // Passive steps — block target click to prevent modal collisions
+    m2_select_product: { interaction_mode: 'passive', prevent_target_click: true, target_override: '.pcard' },
+    m4_stock_adjust:   { interaction_mode: 'passive', prevent_target_click: true },
+    m4_stock_transfer: { interaction_mode: 'passive', prevent_target_click: true },
+    m6_close_shift:    { interaction_mode: 'passive', prevent_target_click: true },
+  };
+
+  // ── Modals that must pause the tour ──────────────────────────
+  const BLOCKING_MODALS = [
+    'modal-variant-select',
+    'modal-topping-select',
+    'modal-payment',
+    'modal-stock-adjust',
+    'modal-close-shift',
+    'modal-receipt',
+    'modal-pos-trx-detail',
+    'modal-confirm',
+    'modal-success-trx',
+    'modal-transfer-notif',
+  ];
+
+  // ── Hardcoded fallback steps ───────────────────────────────────
+  // modal_step: true  → overlay transparent; pointer/tooltip float above modal
+  // auto_advance: id  → hide Next; auto-advance when that modal closes
   const FALLBACK_STEPS = [
 
     // ── Modul 1: Buka Shift & Kas Awal ────────────────────────
@@ -197,13 +230,20 @@ const Onboarding = (() => {
 
   // ── Tab routing ────────────────────────────────────────────────
   const MODULE_TAB = {
-    modul_1_shift_awal:   'kasir',
-    modul_2_tampilan:     'kasir',
-    modul_3_penjualan:    'kasir',
-    modul_4_stok_otomatis:'stock',
-    modul_5_stok:         'stock',
-    modul_6_riwayat:      'transactions',
-    modul_7_kas:          'cash',
+    modul_1_shift:          'kasir',
+    modul_1_shift_awal:     'kasir',
+    modul_2_tampilan:       'kasir',
+    modul_2_penjualan:      'kasir',
+    modul_3_penjualan:      'kasir',
+    modul_3_stok_otomatis:  'stock',
+    modul_4_stok_otomatis:  'stock',
+    modul_4_manajemen_stok: 'stock',
+    modul_5_stok:           'stock',
+    modul_5_riwayat:        'transactions',
+    modul_6_riwayat:        'transactions',
+    modul_6_kas:            'cash',
+    modul_6_kas_shift:      'cash',
+    modul_7_kas:            'cash',
   };
   const STEP_TAB = { m6_deposit: 'deposits' };
 
@@ -212,7 +252,7 @@ const Onboarding = (() => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function getRequiredTab(step) {
-    if (step.modal_step) return null; // don't switch tabs during modal steps
+    if (step.modal_step) return null;
     return STEP_TAB[step.step_key] || MODULE_TAB[step.module_key] || 'kasir';
   }
 
@@ -226,6 +266,130 @@ const Onboarding = (() => {
   function safeQuerySelector(sel) {
     try { return document.querySelector(sel) || null; }
     catch { return null; }
+  }
+
+  // ── Merge step with STEP_UI overrides ─────────────────────────
+  function getEffectiveStep(step) {
+    return Object.assign({}, step, STEP_UI[step.step_key] || {});
+  }
+
+  // ── Visual Viewport Engine ─────────────────────────────────────
+  function getCssSafeAreaBottom() {
+    try {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom,0px);visibility:hidden;pointer-events:none';
+      document.body.appendChild(el);
+      const h = el.offsetHeight;
+      document.body.removeChild(el);
+      return h || 0;
+    } catch { return 0; }
+  }
+
+  function getVisualViewportBox() {
+    const vv = window.visualViewport;
+    return {
+      width:      vv ? vv.width      : window.innerWidth,
+      height:     vv ? vv.height     : window.innerHeight,
+      offsetLeft: vv ? vv.offsetLeft : 0,
+      offsetTop:  vv ? vv.offsetTop  : 0,
+      safeTop:    12,
+      safeRight:  12,
+      safeBottom: Math.max(20, getCssSafeAreaBottom() + 16),
+      safeLeft:   12,
+    };
+  }
+
+  // ── Target validation & resolution ────────────────────────────
+  function isTargetValid(el) {
+    if (!el) return false;
+    try {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 24 || rect.height < 24) return false;
+      const vv = getVisualViewportBox();
+      if (rect.right < 0 || rect.left > vv.width || rect.bottom < 0 || rect.top > vv.height) return false;
+      const visW = Math.min(rect.right, vv.width)  - Math.max(rect.left, 0);
+      const visH = Math.min(rect.bottom, vv.height) - Math.max(rect.top, 0);
+      return (visW * visH) / (rect.width * rect.height) >= 0.35;
+    } catch { return false; }
+  }
+
+  function isTargetTooLarge(el) {
+    try {
+      const rect = el.getBoundingClientRect();
+      const vv = getVisualViewportBox();
+      return rect.height > vv.height * 0.45;
+    } catch { return false; }
+  }
+
+  function resolveTarget(step) {
+    const ui = STEP_UI[step.step_key] || {};
+    // Try target_override first, then original selector
+    for (const sel of [ui.target_override, step.target_selector].filter(Boolean)) {
+      const el = safeQuerySelector(sel);
+      if (!el) continue;
+      // For overly large containers, prefer first meaningful child
+      if (isTargetTooLarge(el)) {
+        const child = el.querySelector('.pcard, .product-card, .list-card');
+        if (child && isTargetValid(child)) return child;
+      }
+      if (isTargetValid(el)) return el;
+    }
+    return null;
+  }
+
+  // ── Modal conflict detector ────────────────────────────────────
+  function isBlockingModalOpen() {
+    return BLOCKING_MODALS.some(id => {
+      const el = document.getElementById(id);
+      return el && el.classList.contains('active');
+    });
+  }
+
+  function setupModalConflictDetector() {
+    if (_modalObserver) return;
+    _modalObserver = new MutationObserver(() => {
+      const overlay = $('ob-overlay');
+      if (!overlay || !overlay.classList.contains('visible')) return;
+      const blocking = isBlockingModalOpen();
+      if (blocking && !_paused) {
+        _paused = true;
+        const tt = $('ob-tooltip');
+        if (tt) { tt.classList.remove('ob-tooltip-in'); tt.classList.add('ob-tooltip-out'); }
+        clearPointer();
+        clearHighlight();
+      } else if (!blocking && _paused) {
+        _paused = false;
+        renderStep(_currentIdx);
+      }
+    });
+    _modalObserver.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+  }
+
+  // ── Click shield for passive steps ────────────────────────────
+  function _clickShieldHandler(e) {
+    if (!_highlightEl) return;
+    if (e.target === _highlightEl || _highlightEl.contains(e.target)) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }
+  }
+
+  function activateClickShield() {
+    if (_clickShieldActive) return;
+    _clickShieldActive = true;
+    document.addEventListener('click',      _clickShieldHandler, { capture: true });
+    document.addEventListener('touchstart', _clickShieldHandler, { capture: true, passive: false });
+  }
+
+  function deactivateClickShield() {
+    if (!_clickShieldActive) return;
+    _clickShieldActive = false;
+    document.removeEventListener('click',      _clickShieldHandler, true);
+    document.removeEventListener('touchstart', _clickShieldHandler, true);
   }
 
   // ── Wait for a modal to close ──────────────────────────────────
@@ -242,7 +406,7 @@ const Onboarding = (() => {
     });
   }
 
-  // ── Wait for blocking modals to close (fallback path) ─────────
+  // ── Wait for blocking modals to close ─────────────────────────
   async function waitForReady() {
     const BLOCKING = ['modal-shift', 'modal-branch'];
     const deadline = Date.now() + 90_000;
@@ -292,6 +456,7 @@ const Onboarding = (() => {
     clearAutoAdvance();
     clearHighlight();
     clearPointer();
+    deactivateClickShield();
     $('ob-overlay')?.classList.remove('visible', 'ob-no-target');
   }
 
@@ -300,20 +465,31 @@ const Onboarding = (() => {
     if (_transitioning) return;
     _transitioning = true;
     clearAutoAdvance();
+    deactivateClickShield();
 
     const overlay = $('ob-overlay');
     const tooltip  = $('ob-tooltip');
     const step     = _steps[idx];
     if (!step || !tooltip || !overlay) { _transitioning = false; return; }
 
-    tooltip.classList.remove('ob-tooltip-in');
+    const es = getEffectiveStep(step);
+
+    // Skip step when its showWhen condition is not met
+    if (es.showWhen === 'shift_closed' && !shiftModalOpen()) {
+      _transitioning = false;
+      _currentIdx++;
+      if (_currentIdx < _steps.length) await renderStep(_currentIdx);
+      return;
+    }
+
+    tooltip.classList.remove('ob-tooltip-in', 'ob-tooltip-bottom-sheet');
     tooltip.classList.add('ob-tooltip-out');
     clearHighlight();
     clearPointer();
     await sleep(160);
 
-    // Tab switch (skip for modal steps — we stay on whatever tab is active)
-    const requiredTab = getRequiredTab(step);
+    // Tab switch (skip for modal steps)
+    const requiredTab = getRequiredTab(es);
     if (requiredTab) {
       const switched = switchToTab(requiredTab);
       if (switched) await sleep(300);
@@ -321,10 +497,14 @@ const Onboarding = (() => {
 
     fillTooltipContent(step, idx);
 
-    let target = step.target_selector ? safeQuerySelector(step.target_selector) : null;
+    const isModalStep    = !!es.modal_step;
+    const autoAdvance    = es.auto_advance || null;
+    const preventClick   = !!es.prevent_target_click;
 
-    if (target && !step.modal_step) {
-      // ── Normal spotlight: dark overlay with cutout ─────────
+    const target = resolveTarget(es);
+
+    if (target && !isModalStep) {
+      // ── Normal spotlight ──────────────────────────────────────
       overlay.classList.remove('ob-no-target');
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       await sleep(360);
@@ -333,17 +513,19 @@ const Onboarding = (() => {
       positionSpotlight(target);
       showPointer(target);
       positionTooltipNearTarget(target, tooltip);
+      if (preventClick) activateClickShield();
 
-    } else if (target && step.modal_step) {
-      // ── Modal step: no scrim, just pointer + tooltip above modal ──
-      // ob-overlay is transparent (pointer-events: none) so user can
-      // still interact with the shift modal inputs and buttons.
+    } else if (target && isModalStep) {
+      // ── Modal step: transparent overlay, pointer above modal ──
       overlay.classList.remove('ob-no-target');
       showPointer(target);
       positionTooltipNearTarget(target, tooltip);
 
     } else {
-      // ── No target: scrim + centered tooltip ────────────────
+      // ── No valid target: scrim + center/bottom-sheet ──────────
+      if (step.target_selector) {
+        console.warn(`[Onboarding] selector not found or off-screen: "${step.target_selector}" (step: ${step.step_key})`);
+      }
       overlay.classList.add('ob-no-target');
       positionTooltipCenter(tooltip);
     }
@@ -353,11 +535,15 @@ const Onboarding = (() => {
     _transitioning = false;
 
     window.removeEventListener('resize', _onResize);
-    if (target) window.addEventListener('resize', _onResize, { passive: true });
+    if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onVVResize);
+    if (target) {
+      window.addEventListener('resize', _onResize, { passive: true });
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', _onVVResize, { passive: true });
+    }
 
-    // Auto-advance when a modal closes (e.g., after user clicks "Buka Shift")
-    if (step.auto_advance) {
-      _autoAdvanceTimer = waitForModalClose(step.auto_advance).then(async () => {
+    // Auto-advance when modal closes (e.g., after "Buka Shift" click)
+    if (autoAdvance) {
+      _autoAdvanceTimer = waitForModalClose(autoAdvance).then(async () => {
         await sleep(500);
         if (_currentIdx === idx) await nextStep();
       });
@@ -367,32 +553,51 @@ const Onboarding = (() => {
   function _onResize() {
     clearTimeout(_resizeTimer);
     _resizeTimer = setTimeout(() => {
-      if (!_highlightEl) return;
-      positionSpotlight(_highlightEl);
-      showPointer(_highlightEl);
       const tt = $('ob-tooltip');
-      if (tt) positionTooltipNearTarget(_highlightEl, tt);
+      if (!tt) return;
+      if (_highlightEl) {
+        positionSpotlight(_highlightEl);
+        showPointer(_highlightEl);
+        positionTooltipNearTarget(_highlightEl, tt);
+      }
     }, 200);
   }
 
+  function _onVVResize() {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+      const tt = $('ob-tooltip');
+      if (!tt) return;
+      if (_highlightEl) {
+        positionSpotlight(_highlightEl);
+        showPointer(_highlightEl);
+        positionTooltipNearTarget(_highlightEl, tt);
+      } else {
+        positionTooltipCenter(tt);
+      }
+    }, 150);
+  }
+
   function clearAutoAdvance() {
-    // _autoAdvanceTimer is a Promise, can't cancel — just guard with _currentIdx check
     _autoAdvanceTimer = null;
   }
 
   // ── Spotlight ──────────────────────────────────────────────────
-  // #ob-highlight-box is inside #ob-overlay (position:fixed; inset:0).
-  // viewport-relative coords from getBoundingClientRect() are correct
-  // directly — no scrollX/scrollY needed.
   function positionSpotlight(target) {
     const box = $('ob-highlight-box');
     if (!box) return;
     const rect = target.getBoundingClientRect();
+    const vv   = getVisualViewportBox();
     const pad  = 10;
-    box.style.top          = `${rect.top    - pad}px`;
-    box.style.left         = `${rect.left   - pad}px`;
-    box.style.width        = `${rect.width  + pad * 2}px`;
-    box.style.height       = `${rect.height + pad * 2}px`;
+    // Clamp highlight to viewport so it never draws a line off-screen
+    const top    = Math.max(0, rect.top    - pad);
+    const left   = Math.max(0, rect.left   - pad);
+    const width  = Math.min(rect.width  + pad * 2, vv.width  - left);
+    const height = Math.min(rect.height + pad * 2, vv.height - top);
+    box.style.top    = `${top}px`;
+    box.style.left   = `${left}px`;
+    box.style.width  = `${width}px`;
+    box.style.height = `${height}px`;
     const r = parseInt(getComputedStyle(target).borderRadius) || 4;
     box.style.borderRadius = `${Math.max(8, r + 4)}px`;
     box.style.display      = 'block';
@@ -405,16 +610,24 @@ const Onboarding = (() => {
       _highlightEl.classList.remove('ob-target-active');
       _highlightEl = null;
     }
+    deactivateClickShield();
   }
 
   // ── Pointer ────────────────────────────────────────────────────
-  // Pointer is z-index 9250 — floats above modals (z-index 1000) too.
   function showPointer(target) {
     const ptr = $('ob-pointer');
     if (!ptr) return;
+    const vv   = getVisualViewportBox();
     const rect = target.getBoundingClientRect();
-    ptr.style.left = `${rect.left + rect.width * 0.65}px`;
-    ptr.style.top  = `${rect.top  - 32}px`;
+    const ptrLeft = Math.min(rect.left + rect.width * 0.65, vv.width - 40);
+    const ptrTop  = rect.top - 32;
+    // Hide pointer if it would fall outside visible area
+    if (ptrTop < vv.safeTop || ptrTop > vv.height - 60) {
+      ptr.classList.remove('visible');
+      return;
+    }
+    ptr.style.left = `${Math.max(vv.safeLeft, ptrLeft)}px`;
+    ptr.style.top  = `${ptrTop}px`;
     ptr.classList.add('visible');
   }
 
@@ -428,7 +641,8 @@ const Onboarding = (() => {
     if (!tooltip) return;
     const total  = _steps.length;
     const isLast = idx === total - 1;
-    const isAutoAdvance = !!step.auto_advance;
+    const es = getEffectiveStep(step);
+    const isAutoAdvance = !!(es.auto_advance || step.auto_advance);
 
     tooltip.querySelector('.ob-step-module').textContent   = moduleLabel(step.module_key);
     tooltip.querySelector('.ob-step-title').textContent    = step.title;
@@ -445,7 +659,6 @@ const Onboarding = (() => {
     const btnDone = tooltip.querySelector('[data-ob-action="done"]');
 
     if (btnBack) btnBack.disabled = idx === 0;
-    // Hide Next/Done while waiting for auto-advance (e.g., user must click shift button)
     if (btnNext) { btnNext.style.display = (isLast || isAutoAdvance) ? 'none' : ''; btnNext.disabled = _saving; }
     if (btnDone) { btnDone.style.display = (isLast && !isAutoAdvance) ? '' : 'none'; btnDone.disabled = _saving; }
   }
@@ -466,49 +679,103 @@ const Onboarding = (() => {
   }
 
   function moduleLabel(key) {
-    return ({
-      modul_1_shift_awal:    'Modul 1 — Shift & Kas Awal',
-      modul_2_tampilan:      'Modul 2 — Tampilan Awal',
-      modul_3_penjualan:     'Modul 3 — Penjualan',
-      modul_4_stok_otomatis: 'Modul 4 — Stok Otomatis',
-      modul_5_stok:          'Modul 5 — Manajemen Stok',
-      modul_6_riwayat:       'Modul 6 — Riwayat & Void',
-      modul_7_kas:           'Modul 7 — Kas & Setoran',
-    })[key] || key;
+    const MAP = {
+      modul_1_shift:          'Modul 1 - Shift',
+      modul_1_shift_awal:     'Modul 1 - Shift & Kas Awal',
+      modul_2_tampilan:       'Modul 2 - Tampilan Awal',
+      modul_2_penjualan:      'Modul 2 - Penjualan',
+      modul_3_penjualan:      'Modul 3 - Penjualan',
+      modul_3_stok_otomatis:  'Modul 3 - Stok Otomatis',
+      modul_4_stok_otomatis:  'Modul 4 - Stok Otomatis',
+      modul_4_manajemen_stok: 'Modul 4 - Manajemen Stok',
+      modul_5_stok:           'Modul 5 - Manajemen Stok',
+      modul_5_riwayat:        'Modul 5 - Riwayat',
+      modul_6_riwayat:        'Modul 6 - Riwayat & Void',
+      modul_6_kas:            'Modul 6 - Kas & Setoran',
+      modul_6_kas_shift:      'Modul 6 - Kas & Shift',
+      modul_7_kas:            'Modul 7 - Kas & Setoran',
+    };
+    // Fallback: convert raw key to readable title
+    return MAP[key] || (key || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   }
 
   // ── Tooltip Positioning ────────────────────────────────────────
+  function shouldUseBottomSheet(target, tooltip, viewport) {
+    if (viewport.width > 480) return false;
+    if (!target) return true;
+    try {
+      const rect = target.getBoundingClientRect();
+      const th   = tooltip.offsetHeight || 240;
+      const targetLow   = rect.top > viewport.height * 0.55;
+      const noRoomBelow = rect.bottom + th + 18 > viewport.height - viewport.safeBottom;
+      const noRoomAbove = rect.top   - th - 18  < viewport.safeTop;
+      return targetLow || (noRoomBelow && noRoomAbove);
+    } catch { return true; }
+  }
+
+  function positionTooltipBottomSheet(tooltip) {
+    tooltip.classList.add('ob-tooltip-bottom-sheet');
+    tooltip.style.position  = 'fixed';
+    tooltip.style.left      = '12px';
+    tooltip.style.right     = '12px';
+    tooltip.style.bottom    = 'max(16px, env(safe-area-inset-bottom, 16px))';
+    tooltip.style.top       = 'auto';
+    tooltip.style.width     = 'auto';
+  }
+
   function positionTooltipNearTarget(target, tooltip) {
+    tooltip.classList.remove('ob-tooltip-bottom-sheet');
+    const viewport = getVisualViewportBox();
+
+    if (shouldUseBottomSheet(target, tooltip, viewport)) {
+      positionTooltipBottomSheet(tooltip);
+      return;
+    }
+
     const rect = target.getBoundingClientRect();
-    const tw   = Math.min(tooltip.offsetWidth  || 340, 340);
+    const tw   = Math.min(tooltip.offsetWidth || 340, 340, viewport.width - viewport.safeLeft - viewport.safeRight);
     const th   = tooltip.offsetHeight || 240;
-    const vw   = window.innerWidth;
-    const vh   = window.innerHeight;
     const gap  = 18;
 
     let top;
-    if (rect.bottom + th + gap < vh)   top = rect.bottom + gap;
-    else if (rect.top - th - gap > 0)  top = rect.top - th - gap;
-    else                               top = vh - th - 12;
+    if (rect.bottom + th + gap <= viewport.height - viewport.safeBottom) {
+      top = rect.bottom + gap;
+    } else if (rect.top - th - gap >= viewport.safeTop) {
+      top = rect.top - th - gap;
+    } else {
+      top = Math.max(viewport.safeTop, viewport.height - viewport.safeBottom - th);
+    }
 
     let left = rect.left + rect.width / 2 - tw / 2;
-    left = Math.max(12, Math.min(left, vw - tw - 12));
+    left = Math.max(viewport.safeLeft, Math.min(left, viewport.width - tw - viewport.safeRight));
+    top  = Math.max(viewport.safeTop,  Math.min(top,  viewport.height - viewport.safeBottom - th));
 
-    tooltip.style.position  = 'absolute';
-    tooltip.style.top       = `${top}px`;
+    tooltip.style.position  = 'fixed';
     tooltip.style.left      = `${left}px`;
+    tooltip.style.top       = `${top}px`;
     tooltip.style.bottom    = 'auto';
     tooltip.style.right     = 'auto';
-    tooltip.style.transform = '';
+    tooltip.style.width     = `${tw}px`;
   }
 
   function positionTooltipCenter(tooltip) {
+    const viewport = getVisualViewportBox();
+    if (viewport.width <= 480) {
+      positionTooltipBottomSheet(tooltip);
+      return;
+    }
+    tooltip.classList.remove('ob-tooltip-bottom-sheet');
+    // Calculate center without relying on CSS transform (avoids conflict with in/out classes)
+    const tw   = tooltip.offsetWidth  || 340;
+    const th   = tooltip.offsetHeight || 240;
+    const left = Math.max(viewport.safeLeft, (viewport.width  - tw) / 2);
+    const top  = Math.max(viewport.safeTop,  (viewport.height - th) / 2);
     tooltip.style.position  = 'fixed';
-    tooltip.style.top       = '50%';
-    tooltip.style.left      = '50%';
+    tooltip.style.left      = `${left}px`;
+    tooltip.style.top       = `${top}px`;
     tooltip.style.bottom    = 'auto';
     tooltip.style.right     = 'auto';
-    tooltip.style.transform = 'translate(-50%, -50%)';
+    tooltip.style.width     = '';
   }
 
   // ── Navigation ─────────────────────────────────────────────────
@@ -525,9 +792,9 @@ const Onboarding = (() => {
   async function prevStep() {
     if (_transitioning) return;
     if (_currentIdx > 0) {
-      // Don't go back to modal steps if the shift modal is now closed
       const prev = _steps[_currentIdx - 1];
-      if (prev?.modal_step && !shiftModalOpen()) return;
+      const eprev = getEffectiveStep(prev);
+      if (eprev.modal_step && !shiftModalOpen()) return;
       _currentIdx--;
       await renderStep(_currentIdx);
     }
@@ -645,7 +912,7 @@ const Onboarding = (() => {
     return FALLBACK_STEPS.map(s => ({ ...s, status: done.includes(s.step_key) ? 'completed' : 'pending' }));
   }
 
-  // ── Start Tour (entry panel button — shift already open) ───────
+  // ── Start Tour (entry panel — shift already open) ──────────────
   async function startTour() {
     hideEntryPanel();
     _assignment.status = 'in_progress';
@@ -654,15 +921,18 @@ const Onboarding = (() => {
         await db.rpc('start_my_onboarding', { p_assignment_id: _assignment.id, p_user_id: _user.id });
       } catch { /* non-fatal */ }
     }
-    // Shift is already open — skip the modal steps, start from first non-modal incomplete step
-    _currentIdx = _steps.findIndex(s => s.status !== 'completed' && !s.modal_step);
-    if (_currentIdx < 0) _currentIdx = _steps.findIndex(s => !s.modal_step) || 0;
+    // Skip modal steps (shift is already open)
+    _currentIdx = _steps.findIndex(s => {
+      const es = getEffectiveStep(s);
+      return s.status !== 'completed' && !es.modal_step;
+    });
+    if (_currentIdx < 0) _currentIdx = _steps.findIndex(s => !getEffectiveStep(s).modal_step);
     if (_currentIdx < 0) _currentIdx = 0;
     $('ob-overlay')?.classList.add('visible');
     await renderStep(_currentIdx);
   }
 
-  // ── Auto-Start Tour (shift modal open — run modal steps first) ─
+  // ── Auto-Start Tour (shift modal open — start from step 1) ────
   async function autoStartTour() {
     _assignment.status = 'in_progress';
     if (!_localMode && _assignment.id) {
@@ -694,6 +964,7 @@ const Onboarding = (() => {
         case 'reopen':  showEntryPanel(); break;
       }
     });
+    setupModalConflictDetector();
   }
 
   // ── Public API ─────────────────────────────────────────────────
@@ -702,10 +973,8 @@ const Onboarding = (() => {
     _user = user;
     bindEvents();
 
-    // Skip if already completed in a previous session
     try { if (localStorage.getItem(DONE(user.id)) === '1') return; } catch { /* ignore */ }
 
-    // Try DB — fall back to localStorage-only mode if unavailable
     let dbOk = false;
     try {
       const { data: d, error } = await db.rpc('get_my_onboarding', { p_user_id: user.id });
@@ -731,17 +1000,11 @@ const Onboarding = (() => {
       }
     }
 
-    // Wait briefly for page to fully render before checking modal state
     await sleep(900);
 
     if (shiftModalOpen()) {
-      // ── Shift modal is open: auto-start tour from step 1 (kas awal) ──
-      // No entry panel needed; the modal steps guide through shift opening.
-      // ob-overlay is transparent (pointer-events: none) so the user can
-      // still type in the kas awal input and click the shift button.
       await autoStartTour();
     } else {
-      // ── Shift already open: show entry panel, skip modal steps ────────
       await waitForReady();
       await sleep(400);
       showEntryPanel();
