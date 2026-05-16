@@ -111,12 +111,18 @@ window.fTimeOnly = (iso) => fmt.timeOnly(iso);
 // Modal & loader helpers (single source of truth)
 window.openModal = function(id) {
   const el = document.getElementById(id);
-  if (el) el.classList.add('active');
+  if (el) {
+    el.classList.add('active');
+    window.dispatchEvent(new CustomEvent('rbn:modal:opened', { detail: { id } }));
+  }
 };
 
 window.closeModal = function(id) {
   const el = document.getElementById(id);
-  if (el) el.classList.remove('active');
+  if (el) {
+    el.classList.remove('active');
+    window.dispatchEvent(new CustomEvent('rbn:modal:closed', { detail: { id } }));
+  }
 };
 
 window.showLoader = function() {

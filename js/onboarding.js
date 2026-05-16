@@ -16,7 +16,8 @@ const Onboarding = (() => {
   let _autoAdvanceTimer = null;
   let _paused           = false;
   let _modalObserver    = null;
-  let _clickShieldActive = false;
+  let _clickShieldActive      = false;
+  let _guidedActionCleanup    = null;
 
   // ── Storage keys ──────────────────────────────────────────────
   const DONE = uid => `ob_done_${uid}`;
@@ -39,8 +40,10 @@ const Onboarding = (() => {
     m1_welcome:        { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'center_info' },
     m1_open_shift:     { modal_step: true, showWhen: 'shift_closed', interaction_mode: 'guided_action', auto_advance: 'modal-shift' },
     m1_shift_required: { showWhen: 'shift_open', interaction_mode: 'passive' },
-    // Passive steps — block target click to prevent modal collisions
-    m2_select_product: { interaction_mode: 'passive', prevent_target_click: true, target_override: '.pcard' },
+    // Guided click — user must interact; click shield OFF so target is reachable
+    m2_select_product: { interaction_mode: 'guided_click', target_override: '.pcard:not(.out-of-stock)' },
+    m2_open_cart:      { interaction_mode: 'guided_click' },
+    // Passive steps — block target click to prevent unintended modal collisions
     m4_stock_adjust:   { interaction_mode: 'passive', prevent_target_click: true },
     m4_stock_transfer: { interaction_mode: 'passive', prevent_target_click: true },
     m6_close_shift:    { interaction_mode: 'passive', prevent_target_click: true },
@@ -122,16 +125,14 @@ const Onboarding = (() => {
     { step_key:'m2_select_product', module_key:'modul_3_penjualan', sequence:8,
       target_selector: '#products-grid',
       title: '🛒 Pilih Produk',
-      body:  'Klik kartu produk untuk menambahkannya ke keranjang. ' +
-             'Jika produk punya varian (ukuran/rasa), sistem akan meminta Anda memilih varian terlebih dahulu.',
+      body:  'Klik kartu produk yang disorot untuk memilih produk. ' +
+             'Jika produk punya varian, pilih salah satunya di layar yang muncul.',
       is_required: true },
 
     { step_key:'m2_open_cart', module_key:'modul_3_penjualan', sequence:9,
       target_selector: '#fab-cart-btn',
       title: '🛍️ Buka Keranjang',
-      body:  'Tombol ini menampilkan keranjang belanja. ' +
-             'Angka di atasnya menunjukkan jumlah item. ' +
-             'Klik untuk melihat detail pesanan, mengubah qty, atau menghapus item.',
+      body:  'Keranjang muncul setelah ada item. Tap tombol keranjang untuk melihat pesanan, mengubah qty, atau menghapus item.',
       is_required: true },
 
     { step_key:'m2_discount', module_key:'modul_3_penjualan', sequence:10,
@@ -247,9 +248,33 @@ const Onboarding = (() => {
   };
   const STEP_TAB = { m6_deposit: 'deposits' };
 
+  // ── Step precondition engine ───────────────────────────────────
+  // Returns true if the step's required state is currently met.
+  const STEP_PRECONDITIONS = {
+    m2_select_product: () => document.querySelectorAll('.pcard:not(.out-of-stock)').length > 0,
+    m2_open_cart:      () => getCartCount() > 0 && isFabVisible(),
+    m2_discount:       () => getCartCount() > 0,
+    m2_payment:        () => getCartCount() > 0,
+    m2_checkout:       () => getCartCount() > 0,
+  };
+
   // ── Helpers ────────────────────────────────────────────────────
   const $ = id => document.getElementById(id);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function getCartCount() {
+    return (window.POS?.cart || []).reduce((s, i) => s + i.quantity, 0);
+  }
+
+  function isFabVisible() {
+    const el = document.getElementById('fab-cart-btn');
+    return !!(el && el.classList.contains('show') && el.offsetParent !== null);
+  }
+
+  function goToStepKey(stepKey) {
+    const idx = _steps.findIndex(s => s.step_key === stepKey);
+    if (idx >= 0 && idx !== _currentIdx) { _currentIdx = idx; renderStep(idx); }
+  }
 
   function getRequiredTab(step) {
     if (step.modal_step) return null;
@@ -338,8 +363,14 @@ const Onboarding = (() => {
   }
 
   // ── Modal conflict detector ────────────────────────────────────
+  const GUIDED_SAFE_MODALS = new Set(['modal-variant-select', 'modal-topping-select']);
+
   function isBlockingModalOpen() {
+    const currentStep = _steps[_currentIdx];
+    const es = currentStep ? getEffectiveStep(currentStep) : {};
+    const isGuided = es.interaction_mode === 'guided_click' || es.interaction_mode === 'guided_modal';
     return BLOCKING_MODALS.some(id => {
+      if (isGuided && GUIDED_SAFE_MODALS.has(id)) return false;
       const el = document.getElementById(id);
       return el && el.classList.contains('active');
     });
@@ -423,6 +454,96 @@ const Onboarding = (() => {
     await sleep(600);
   }
 
+  // ── Guided click action handler ────────────────────────────────
+  function cancelGuidedAction() {
+    if (_guidedActionCleanup) { _guidedActionCleanup(); _guidedActionCleanup = null; }
+  }
+
+  function setupGuidedClickAction(stepKey, idx) {
+    cancelGuidedAction();
+
+    if (stepKey === 'm2_select_product') {
+      let done = false;
+
+      const onCartChanged = async (e) => {
+        if (done || _currentIdx !== idx) return;
+        const count = (typeof e.detail?.count === 'number') ? e.detail.count : getCartCount();
+        if (count > 0) {
+          done = true;
+          cleanup();
+          await sleep(200);
+          const cartIdx = _steps.findIndex(s => s.step_key === 'm2_open_cart');
+          const saveKey = _steps[idx]?.step_key;
+          if (saveKey) await saveStepProgress(saveKey);
+          if (cartIdx > idx) {
+            _currentIdx = cartIdx;
+            await renderStep(_currentIdx);
+          } else {
+            if (_currentIdx < _steps.length - 1) { _currentIdx++; await renderStep(_currentIdx); }
+          }
+        }
+      };
+
+      const onModalOpened = (e) => {
+        if (done || _currentIdx !== idx) return;
+        if (e.detail?.id !== 'modal-variant-select') return;
+        // Redirect spotlight to variant modal's first button
+        setTimeout(() => {
+          const varBtn = document.querySelector('#modal-variant-select .variant-select-btn');
+          if (!varBtn || !isTargetValid(varBtn)) return;
+          if (_highlightEl) _highlightEl.classList.remove('ob-target-active');
+          _highlightEl = varBtn;
+          varBtn.classList.add('ob-target-active');
+          positionSpotlight(varBtn);
+          showPointer(varBtn);
+          const tt = $('ob-tooltip');
+          if (tt) {
+            const bodyEl = tt.querySelector('.ob-step-body');
+            if (bodyEl) bodyEl.textContent = 'Pilih varian produk yang ingin dipesan.';
+            positionTooltipNearTarget(varBtn, tt);
+          }
+        }, 200);
+      };
+
+      function cleanup() {
+        window.removeEventListener('rbn:cart:changed', onCartChanged);
+        window.removeEventListener('rbn:modal:opened', onModalOpened);
+        _guidedActionCleanup = null;
+      }
+
+      _guidedActionCleanup = cleanup;
+      window.addEventListener('rbn:cart:changed', onCartChanged);
+      window.addEventListener('rbn:modal:opened', onModalOpened);
+
+    } else if (stepKey === 'm2_open_cart') {
+      let done = false;
+
+      const onCartOpen = () => {
+        if (done || _currentIdx !== idx) return;
+        const viewCart = document.getElementById('view-cart');
+        if (viewCart && !viewCart.hidden) {
+          done = true;
+          cleanup();
+          // auto-advance when cart view opens
+          (async () => {
+            await sleep(400);
+            if (_currentIdx === idx) await nextStep();
+          })();
+        }
+      };
+
+      // Poll for cart view opening (FAB click opens it outside onboarding control)
+      const _pollTimer = setInterval(onCartOpen, 300);
+
+      function cleanup() {
+        clearInterval(_pollTimer);
+        _guidedActionCleanup = null;
+      }
+
+      _guidedActionCleanup = cleanup;
+    }
+  }
+
   // ── Entry Panel ────────────────────────────────────────────────
   function showEntryPanel() {
     const panel = $('ob-entry-panel');
@@ -454,6 +575,7 @@ const Onboarding = (() => {
   // ── Tour Overlay ───────────────────────────────────────────────
   function hideTour() {
     clearAutoAdvance();
+    cancelGuidedAction();
     clearHighlight();
     clearPointer();
     deactivateClickShield();
@@ -465,6 +587,7 @@ const Onboarding = (() => {
     if (_transitioning) return;
     _transitioning = true;
     clearAutoAdvance();
+    cancelGuidedAction();
     deactivateClickShield();
 
     const overlay = $('ob-overlay');
@@ -476,6 +599,16 @@ const Onboarding = (() => {
 
     // Skip step when its showWhen condition is not met
     if (es.showWhen === 'shift_closed' && !shiftModalOpen()) {
+      _transitioning = false;
+      _currentIdx++;
+      if (_currentIdx < _steps.length) await renderStep(_currentIdx);
+      return;
+    }
+
+    // Skip cart-dependent steps if precondition fails (cart empty / FAB hidden)
+    const precondFn = STEP_PRECONDITIONS[step.step_key];
+    const CART_STEPS = new Set(['m2_discount', 'm2_payment', 'm2_checkout']);
+    if (precondFn && !precondFn() && CART_STEPS.has(step.step_key)) {
       _transitioning = false;
       _currentIdx++;
       if (_currentIdx < _steps.length) await renderStep(_currentIdx);
@@ -497,9 +630,32 @@ const Onboarding = (() => {
 
     fillTooltipContent(step, idx);
 
-    const isModalStep    = !!es.modal_step;
-    const autoAdvance    = es.auto_advance || null;
-    const preventClick   = !!es.prevent_target_click;
+    const isModalStep     = !!es.modal_step;
+    const autoAdvance     = es.auto_advance || null;
+    const preventClick    = !!es.prevent_target_click;
+    const interactionMode = es.interaction_mode || 'info';
+    const isGuidedClick   = interactionMode === 'guided_click';
+
+    // For m2_open_cart: if precondition still not met, show state-info tooltip
+    if (step.step_key === 'm2_open_cart' && precondFn && !precondFn()) {
+      overlay.classList.add('ob-no-target');
+      const bodyEl = tooltip.querySelector('.ob-step-body');
+      if (bodyEl) bodyEl.textContent = 'Keranjang akan muncul setelah produk ditambahkan. Kembali ke halaman kasir dan tap kartu produk terlebih dahulu.';
+      positionTooltipCenter(tooltip);
+      tooltip.classList.remove('ob-tooltip-out');
+      tooltip.classList.add('ob-tooltip-in');
+      _transitioning = false;
+      // Wait for cart to fill, then re-render
+      const _waitCartFill = (e) => {
+        const count = (typeof e.detail?.count === 'number') ? e.detail.count : getCartCount();
+        if (count > 0) {
+          window.removeEventListener('rbn:cart:changed', _waitCartFill);
+          sleep(200).then(() => { if (_currentIdx === idx) renderStep(idx); });
+        }
+      };
+      window.addEventListener('rbn:cart:changed', _waitCartFill);
+      return;
+    }
 
     const target = resolveTarget(es);
 
@@ -513,7 +669,7 @@ const Onboarding = (() => {
       positionSpotlight(target);
       showPointer(target);
       positionTooltipNearTarget(target, tooltip);
-      if (preventClick) activateClickShield();
+      if (preventClick && !isGuidedClick) activateClickShield();
 
     } else if (target && isModalStep) {
       // ── Modal step: transparent overlay, pointer above modal ──
@@ -547,6 +703,11 @@ const Onboarding = (() => {
         await sleep(500);
         if (_currentIdx === idx) await nextStep();
       });
+    }
+
+    // Guided click: wait for the user action that proves the step is done
+    if (isGuidedClick && !autoAdvance) {
+      setupGuidedClickAction(step.step_key, idx);
     }
   }
 
@@ -658,8 +819,15 @@ const Onboarding = (() => {
     const btnNext = tooltip.querySelector('[data-ob-action="next"]');
     const btnDone = tooltip.querySelector('[data-ob-action="done"]');
 
+    const interactionMode = es.interaction_mode || 'info';
+    const isGuidedAction  = (interactionMode === 'guided_click' || interactionMode === 'guided_modal') && !isLast;
+
     if (btnBack) btnBack.disabled = idx === 0;
-    if (btnNext) { btnNext.style.display = (isLast || isAutoAdvance) ? 'none' : ''; btnNext.disabled = _saving; }
+    if (btnNext) {
+      const hideNext = isLast || isAutoAdvance || isGuidedAction;
+      btnNext.style.display = hideNext ? 'none' : '';
+      btnNext.disabled = _saving;
+    }
     if (btnDone) { btnDone.style.display = (isLast && !isAutoAdvance) ? '' : 'none'; btnDone.disabled = _saving; }
   }
 

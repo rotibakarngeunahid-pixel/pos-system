@@ -726,7 +726,7 @@ const POS = {
   selectProduct(productId) {
     const product = this.allProducts.find(p => p.productId === productId);
     if (!product) return;
-
+    window.dispatchEvent(new CustomEvent('rbn:product:selected', { detail: { productId } }));
     if (product.variants.length === 1) {
       this.checkAndShowToppings(product.variants[0].id, product);
     } else {
@@ -759,6 +759,7 @@ const POS = {
     closeModal('modal-variant-select');
     const product = this.allProducts.find(p => p.productId === productId);
     if (!product) return;
+    window.dispatchEvent(new CustomEvent('rbn:variant:selected', { detail: { variantId, productId } }));
     this.checkAndShowToppings(variantId, product);
   },
 
@@ -986,6 +987,7 @@ const POS = {
         fabCartBtn.classList.remove('show');
       }
     }
+    window.dispatchEvent(new CustomEvent('rbn:cart:changed', { detail: { count, total } }));
 
     if (!this.cart.length) {
       if (itemsEl)  itemsEl.innerHTML = '';
