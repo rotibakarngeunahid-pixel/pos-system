@@ -129,6 +129,8 @@ svg { display: block; }
 .text-danger  { color: var(--danger); }
 .text-warning { color: var(--warning); }
 .text-center  { text-align: center; }
+.text-right   { text-align: right; }
+.text-left    { text-align: left; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Enforced semantic typography (SaaS scale) */
@@ -1872,6 +1874,107 @@ tbody tr:hover td { background: var(--surface-2); }
   margin-top: var(--s3);
 }
 
+#modal-scp-detail .modal {
+  max-height: min(92vh, 920px);
+}
+#modal-scp-detail .modal-body {
+  gap: var(--s4);
+}
+#modal-scp-detail .modal-footer {
+  flex-wrap: wrap;
+}
+.scp-detail-section {
+  min-width: 0;
+}
+.scp-detail-section-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  margin-bottom: var(--s2);
+}
+.scp-breakdown-panel,
+.scp-balance-strip,
+.scp-history-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--sh-xs);
+}
+.scp-breakdown-panel {
+  padding: var(--s3) var(--s4);
+}
+.scp-breakdown-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.scp-breakdown-table td {
+  padding: 8px 0 !important;
+  border-bottom: 1px solid var(--border);
+}
+.scp-breakdown-table tr:last-child td {
+  border-bottom: none;
+}
+.scp-breakdown-total td {
+  padding-top: var(--s3) !important;
+  color: var(--text);
+  font-weight: 800;
+}
+.scp-breakdown-pending td {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.scp-balance-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+}
+.scp-balance-item {
+  min-width: 0;
+  padding: var(--s4);
+}
+.scp-balance-item + .scp-balance-item {
+  border-left: 1px solid var(--border);
+}
+.scp-balance-value {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 1.25;
+  margin-top: var(--s1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.scp-history-table-wrap {
+  max-height: 220px;
+  overflow: auto;
+}
+.scp-history-table-wrap-sm {
+  max-height: 180px;
+}
+.scp-history-table {
+  min-width: 760px;
+  font-size: 12px;
+}
+.scp-history-table th,
+.scp-history-table td {
+  padding: 10px var(--s3);
+}
+.scp-history-table .empty-td {
+  height: 92px;
+  padding: var(--s5);
+  vertical-align: middle;
+}
+.scp-row-active td {
+  background: rgba(22,163,74,.04);
+}
+.scp-voided-row td {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
 @media (max-width: 720px) {
   .scp-action-head,
   .scp-action-buttons {
@@ -1885,6 +1988,13 @@ tbody tr:hover td { background: var(--surface-2); }
   .scp-action-summary,
   .scp-action-form-grid {
     grid-template-columns: 1fr;
+  }
+  .scp-balance-strip {
+    grid-template-columns: 1fr;
+  }
+  .scp-balance-item + .scp-balance-item {
+    border-left: none;
+    border-top: 1px solid var(--border);
   }
 }
 /* Collapse 2-col product modal grid on mobile */

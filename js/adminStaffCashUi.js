@@ -410,7 +410,13 @@ const adminStaffCashUi = {
     this._setText('scp-detail-pending', fRp(session.deposit_pending || 0));
 
     const diffEl = document.getElementById('scp-detail-adjustment-diff');
-    if (diffEl) diffEl.className = diff === 0 ? 'text-right text-muted' : diff > 0 ? 'text-right text-green fw-700' : 'text-right text-danger fw-700';
+    if (diffEl) {
+      diffEl.className = diff === 0
+        ? 'scp-balance-value text-muted'
+        : diff > 0
+          ? 'scp-balance-value text-green'
+          : 'scp-balance-value text-danger';
+    }
 
     this._renderActionButtons(detail);
   },
