@@ -91,6 +91,27 @@ const depositService = {
       || message.includes('permission denied');
   },
 
+  isCashDepositMethod(method) {
+    if (!method) return false;
+    if (method.is_cash === true) return true;
+
+    const structuredValue = String(method.type || method.category || method.code || '').trim().toLowerCase();
+    if (structuredValue) {
+      return ['cash', 'tunai', 'serah_tunai', 'serah tunai'].includes(structuredValue);
+    }
+
+    const labelValue = [method.label, method.name]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .toLowerCase();
+    if (!labelValue) return false;
+
+    return labelValue.includes('serah tunai')
+      || /\bcash\b/.test(labelValue)
+      || /\btunai\b/.test(labelValue);
+  },
+
   validateProofFile(file) {
     if (!file) throw new Error('Upload bukti setoran terlebih dahulu');
 
@@ -246,11 +267,12 @@ const depositService = {
     return true;
   },
 
-  async createManualDeposit({ adminId, branchId, staffId, accountId, amount, proofFile = null, notes = null }) {
+  async createManualDeposit({ adminId, branchId, staffId, accountId, amount, proofFile = null, method = null, notes = null }) {
     const normalizedAdminId = Number(adminId);
     const normalizedBranchId = Number(branchId);
     const normalizedStaffId = Number(staffId);
     const normalizedAccountId = String(accountId || '').trim();
+    const proofRequired = method ? !this.isCashDepositMethod(method) : false;
 
     amount = safeNum(amount, 'Jumlah setoran');
     if (!Number.isInteger(normalizedAdminId) || normalizedAdminId <= 0) {
@@ -263,11 +285,13 @@ const depositService = {
       throw new Error('Staff wajib dipilih');
     }
     if (!normalizedAccountId) throw new Error('Pilih metode setoran terlebih dahulu');
-    if (!proofFile) throw new Error('Upload bukti setoran terlebih dahulu');
+    if (proofRequired && !proofFile) throw new Error('Upload bukti setoran terlebih dahulu.');
     if (amount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
     if (amount % 50000 !== 0) throw new Error('Nominal harus kelipatan Rp 50.000');
 
-    const proof = await this.uploadDepositProof({ branchId: normalizedBranchId, file: proofFile });
+    const proof = proofFile
+      ? await this.uploadDepositProof({ branchId: normalizedBranchId, file: proofFile })
+      : null;
 
     const { data, error } = await db.rpc('admin_create_manual_deposit', {
       p_admin_id: normalizedAdminId,
@@ -277,16 +301,16 @@ const depositService = {
       p_amount: amount,
       p_notes: notes || null,
       p_status: 'confirmed',
-      p_proof_url: proof.url,
-      p_proof_file_name: proof.fileName,
-      p_proof_file_type: proof.fileType,
-      p_proof_file_size: proof.fileSize,
-      p_proof_uploaded_at: proof.uploadedAt
+      p_proof_url: proof?.url || null,
+      p_proof_file_name: proof?.fileName || null,
+      p_proof_file_type: proof?.fileType || null,
+      p_proof_file_size: proof?.fileSize || null,
+      p_proof_uploaded_at: proof?.uploadedAt || null
     });
     if (error) {
       const msg = String(error.message || '').toLowerCase();
       if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
-        throw new Error('Fitur input manual setoran perlu migrasi terbaru. Jalankan migrasi 026 lalu coba lagi.');
+        throw new Error('Fitur input manual setoran perlu migrasi terbaru. Jalankan migrasi 027 lalu coba lagi.');
       }
       throw error;
     }
