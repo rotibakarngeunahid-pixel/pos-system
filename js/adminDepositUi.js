@@ -4,9 +4,14 @@ const adminDepositUi = {
   el: {},
   branches: [],
   accounts: [],
+  accountsLoading: false,
+  accountsLoadError: null,
   staffMap: {},
   staffRows: [],
   selectedQrisFile: null,
+  selectedManualProofFile: null,
+  selectedManualProofUrl: null,
+  isSavingManual: false,
 
   init() {
     document.addEventListener('DOMContentLoaded', async () => {
@@ -42,6 +47,11 @@ const adminDepositUi = {
     this.el.manualAccount = document.getElementById('manual-deposit-account');
     this.el.manualAccountHint = document.getElementById('manual-deposit-account-hint');
     this.el.manualAmount = document.getElementById('manual-deposit-amount');
+    this.el.manualProofFile = document.getElementById('manual-deposit-proof-file');
+    this.el.manualProofZone = document.getElementById('manual-deposit-proof-zone');
+    this.el.manualProofEmpty = document.getElementById('manual-deposit-proof-empty');
+    this.el.manualProofPreview = document.getElementById('manual-deposit-proof-preview');
+    this.el.manualProofHint = document.getElementById('manual-deposit-proof-hint');
     this.el.manualNotes = document.getElementById('manual-deposit-notes');
     this.el.saveManualBtn = document.getElementById('btn-save-manual-deposit');
 
@@ -63,13 +73,53 @@ const adminDepositUi = {
     if (this.el.btnFilter) this.el.btnFilter.addEventListener('click', () => this.loadDeposits());
     if (this.el.addManualBtn) this.el.addManualBtn.addEventListener('click', () => this.openManualDepositModal());
     if (this.el.manualBranch) this.el.manualBranch.addEventListener('change', () => this.onManualBranchChange());
+    if (this.el.manualStaff) this.el.manualStaff.addEventListener('change', () => this.updateManualSubmitState());
+    if (this.el.manualAccount) this.el.manualAccount.addEventListener('change', () => this.updateManualSubmitState());
     if (this.el.manualAmount) this.el.manualAmount.addEventListener('input', () => this.formatManualAmountInput());
+    if (this.el.manualProofFile) this.el.manualProofFile.addEventListener('change', e => this.handleManualProofFiles(e.target.files));
+    this.bindManualProofZone();
     if (this.el.saveManualBtn) this.el.saveManualBtn.addEventListener('click', () => this.saveManualDeposit());
     if (this.el.addAccountBtn) this.el.addAccountBtn.addEventListener('click', () => this.openAccountModal());
     if (this.el.accountType) this.el.accountType.addEventListener('change', () => this.toggleAccountTypeFields());
     if (this.el.qrisFile) this.el.qrisFile.addEventListener('change', e => this.handleQrisFile(e.target.files));
     if (this.el.qrisImageUrl) this.el.qrisImageUrl.addEventListener('input', () => this.renderQrisPreview(this.el.qrisImageUrl.value));
     if (this.el.saveAccountBtn) this.el.saveAccountBtn.addEventListener('click', () => this.saveAccount());
+  },
+
+  bindManualProofZone() {
+    const zone = this.el.manualProofZone;
+    if (!zone) return;
+
+    zone.addEventListener('click', e => {
+      if (e.target.closest('.deposit-proof-remove')) {
+        this.removeManualProofFile();
+        return;
+      }
+      if (e.target.closest('a')) return;
+      this.el.manualProofFile?.click();
+    });
+
+    zone.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target.closest('.deposit-proof-remove')) return;
+      e.preventDefault();
+      this.el.manualProofFile?.click();
+    });
+
+    zone.addEventListener('dragover', e => {
+      e.preventDefault();
+      zone.classList.add('dragover');
+    });
+
+    zone.addEventListener('dragleave', e => {
+      if (e.currentTarget === zone) zone.classList.remove('dragover');
+    });
+
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      this.handleManualProofFiles(e.dataTransfer?.files);
+    });
   },
 
   async loadBranches() {
@@ -126,15 +176,9 @@ const adminDepositUi = {
         const staff     = escHtml(this.staffMap[r.staff_id] || '-');
         const br        = escHtml(this.branches.find(b => b.id === r.branch_id)?.name || '-');
         const acc       = this.accounts.find(a => a.id === r.deposit_account_id);
-        const method    = escHtml(acc?.label || '-');
-        const typeIcon  = acc?.type === 'qris' ? 'qr-code'
-                        : acc?.type === 'cash' ? 'hand-coins'
-                        : 'landmark';
-        const proof     = r.proof_url
-          ? `<a class="deposit-admin-proof-link" href="${escHtml(r.proof_url)}" target="_blank" rel="noopener">
-               <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle"></i> Lihat
-             </a>`
-          : '<span class="text-muted">—</span>';
+        const method    = escHtml(this.getDepositMethodLabel(r, acc));
+        const typeIcon  = this.getAccountIcon(acc);
+        const proof     = this.renderProofLink(r);
         const notes     = r.notes ? `<span title="${escHtml(r.notes)}" class="deposit-admin-notes">${escHtml(r.notes)}</span>` : '<span class="text-muted">—</span>';
 
         const sl       = this.statusLabel(r.status);
@@ -207,6 +251,39 @@ const adminDepositUi = {
     }
   },
 
+  getDepositMethodLabel(row, account = null) {
+    return row?.deposit_account_name_snapshot
+      || account?.label
+      || row?.legacy_method
+      || 'Metode lama/tidak tersedia';
+  },
+
+  getAccountIcon(account) {
+    if (account?.type === 'cash') return 'hand-coins';
+    if (account?.type === 'qris') return 'qr-code';
+    return 'landmark';
+  },
+
+  getAccountDetail(account) {
+    if (!account) return '';
+    if (account.type === 'cash') return 'Serah tunai';
+    if (account.type === 'qris') return 'QRIS';
+    const parts = [account.bank_name, account.account_number].filter(Boolean);
+    return parts.length ? parts.join(' - ') : 'Transfer bank';
+  },
+
+  renderProofLink(row) {
+    if (!row?.proof_url) {
+      return '<span class="text-muted">Bukti belum tersedia</span>';
+    }
+
+    const label = row.proof_file_name ? 'Lihat Bukti' : 'Lihat';
+    const title = row.proof_file_name ? ` title="${escHtml(row.proof_file_name)}"` : '';
+    return `<a class="deposit-admin-proof-link" href="${escHtml(row.proof_url)}" target="_blank" rel="noopener"${title}>
+      <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle"></i> ${escHtml(label)}
+    </a>`;
+  },
+
   renderDepositTotals(rows) {
     const tfoot = document.getElementById('deposits-table-foot');
     if (!tfoot) return;
@@ -240,7 +317,9 @@ const adminDepositUi = {
     }
     if (this.el.manualAmount) this.el.manualAmount.value = '';
     if (this.el.manualNotes) this.el.manualNotes.value = '';
+    this.removeManualProofFile();
     this.onManualBranchChange();
+    this.updateManualSubmitState();
     openModal('modal-manual-deposit');
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
@@ -248,6 +327,7 @@ const adminDepositUi = {
   onManualBranchChange() {
     this.renderManualStaffOptions();
     this.renderManualAccountOptions();
+    this.updateManualSubmitState();
   },
 
   renderManualStaffOptions() {
@@ -261,6 +341,7 @@ const adminDepositUi = {
       this.el.manualStaff.innerHTML = '<option value="">Pilih cabang dulu</option>';
       this.el.manualStaff.disabled = true;
       if (this.el.manualStaffHint) this.el.manualStaffHint.textContent = '';
+      this.updateManualSubmitState();
       return;
     }
 
@@ -273,13 +354,31 @@ const adminDepositUi = {
         ? `${rows.length} staff aktif tersedia`
         : 'Tambahkan atau edit staff agar cabangnya sesuai.';
     }
+    this.updateManualSubmitState();
   },
 
   renderManualAccountOptions() {
     if (!this.el.manualAccount) return;
     const branchId = Number(this.el.manualBranch?.value || 0);
+
+    if (this.accountsLoading) {
+      this.el.manualAccount.innerHTML = '<option value="">Memuat metode setoran...</option>';
+      this.el.manualAccount.disabled = true;
+      if (this.el.manualAccountHint) this.el.manualAccountHint.textContent = 'Memuat daftar metode setoran aktif.';
+      this.updateManualSubmitState();
+      return;
+    }
+
+    if (this.accountsLoadError) {
+      this.el.manualAccount.innerHTML = '<option value="">Gagal memuat metode setoran</option>';
+      this.el.manualAccount.disabled = true;
+      if (this.el.manualAccountHint) this.el.manualAccountHint.textContent = this.accountsLoadError;
+      this.updateManualSubmitState();
+      return;
+    }
+
     const rows = this.accounts
-      .filter(a => a.is_active !== false && a.type === 'cash')
+      .filter(a => a.is_active !== false)
       .filter(a => !a.branch_id || Number(a.branch_id) === branchId)
       .sort((a, b) => String(a.label || '').localeCompare(String(b.label || ''), 'id'));
 
@@ -287,18 +386,24 @@ const adminDepositUi = {
       this.el.manualAccount.innerHTML = '<option value="">Pilih cabang dulu</option>';
       this.el.manualAccount.disabled = true;
       if (this.el.manualAccountHint) this.el.manualAccountHint.textContent = '';
+      this.updateManualSubmitState();
       return;
     }
 
     this.el.manualAccount.disabled = !rows.length;
     this.el.manualAccount.innerHTML = rows.length
-      ? '<option value="">Pilih Metode Cash</option>' + rows.map(a => `<option value="${a.id}">${escHtml(a.label)}</option>`).join('')
-      : '<option value="">Tidak ada metode Cash aktif</option>';
+      ? '<option value="">Pilih metode setoran</option>' + rows.map(a => {
+        const detail = this.getAccountDetail(a);
+        const suffix = detail ? ` - ${detail}` : '';
+        return `<option value="${a.id}">${escHtml(a.label)}${escHtml(suffix)}</option>`;
+      }).join('')
+      : '<option value="">Tidak ada metode setoran aktif</option>';
     if (this.el.manualAccountHint) {
       this.el.manualAccountHint.textContent = rows.length
-        ? ''
-        : 'Tambahkan metode setoran tipe Cash terlebih dahulu.';
+        ? `${rows.length} metode aktif tersedia`
+        : 'Tidak ada metode setoran aktif. Aktifkan atau tambahkan metode setoran terlebih dahulu.';
     }
+    this.updateManualSubmitState();
   },
 
   parseManualAmount() {
@@ -310,9 +415,113 @@ const adminDepositUi = {
     if (!this.el.manualAmount) return;
     const amount = this.parseManualAmount();
     this.el.manualAmount.value = amount > 0 ? amount.toLocaleString('id-ID') : '';
+    this.updateManualSubmitState();
+  },
+
+  handleManualProofFiles(files) {
+    const file = files && files[0];
+    if (!file) {
+      this.removeManualProofFile({ clearInput: false });
+      return;
+    }
+
+    try {
+      depositService.validateProofFile(file);
+    } catch (e) {
+      showToast(e.message || 'Bukti setoran tidak valid', 'error');
+      this.removeManualProofFile();
+      return;
+    }
+
+    this.removeManualProofObjectUrl();
+    this.selectedManualProofFile = file;
+    this.renderManualProofPreview(file);
+    if (this.el.manualProofHint) this.el.manualProofHint.textContent = 'Bukti siap diupload saat setoran disimpan.';
+    this.updateManualSubmitState();
+  },
+
+  renderManualProofPreview(file) {
+    if (!this.el.manualProofPreview) return;
+    if (this.el.manualProofEmpty) this.el.manualProofEmpty.style.display = 'none';
+    this.el.manualProofPreview.style.display = '';
+
+    const safeName = escHtml(file.name || 'Bukti setoran');
+    const fileSize = this.formatFileSize(file.size);
+    if (file.type === 'application/pdf' || safeName.toLowerCase().endsWith('.pdf')) {
+      this.el.manualProofPreview.innerHTML = `
+        <div class="deposit-preview-file">
+          <i data-lucide="file-text" class="icon-lg"></i>
+          <div>
+            <strong>${safeName}</strong>
+            <span>${fileSize}</span>
+          </div>
+          <button type="button" class="deposit-proof-remove" aria-label="Hapus bukti">
+            <i data-lucide="x" class="icon-sm"></i>
+          </button>
+        </div>`;
+    } else {
+      this.selectedManualProofUrl = URL.createObjectURL(file);
+      this.el.manualProofPreview.innerHTML = `
+        <div class="deposit-preview-image">
+          <img src="${this.selectedManualProofUrl}" alt="Preview bukti setoran" />
+          <div class="deposit-preview-meta">
+            <strong>${safeName}</strong>
+            <span>${fileSize}</span>
+          </div>
+          <button type="button" class="deposit-proof-remove" aria-label="Hapus bukti">
+            <i data-lucide="x" class="icon-sm"></i>
+          </button>
+        </div>`;
+    }
+
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  removeManualProofFile({ clearInput = true } = {}) {
+    this.removeManualProofObjectUrl();
+    this.selectedManualProofFile = null;
+    if (clearInput && this.el.manualProofFile) this.el.manualProofFile.value = '';
+    if (this.el.manualProofPreview) {
+      this.el.manualProofPreview.innerHTML = '';
+      this.el.manualProofPreview.style.display = 'none';
+    }
+    if (this.el.manualProofEmpty) this.el.manualProofEmpty.style.display = '';
+    if (this.el.manualProofHint) this.el.manualProofHint.textContent = 'JPG, PNG, atau PDF. Maksimal 5 MB.';
+    this.updateManualSubmitState();
+  },
+
+  removeManualProofObjectUrl() {
+    if (this.selectedManualProofUrl) {
+      URL.revokeObjectURL(this.selectedManualProofUrl);
+      this.selectedManualProofUrl = null;
+    }
+  },
+
+  formatFileSize(size) {
+    if (!size) return '0 KB';
+    if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+    return `${Math.ceil(size / 1024)} KB`;
+  },
+
+  updateManualSubmitState() {
+    if (!this.el.saveManualBtn) return;
+    const branchId = Number(this.el.manualBranch?.value || 0);
+    const staffId = Number(this.el.manualStaff?.value || 0);
+    const accountId = this.el.manualAccount?.value || '';
+    const amount = this.parseManualAmount();
+    const disabled = this.isSavingManual
+      || !branchId
+      || !staffId
+      || !accountId
+      || amount <= 0
+      || !this.selectedManualProofFile;
+
+    this.el.saveManualBtn.disabled = disabled;
   },
 
   async saveManualDeposit() {
+    if (this.isSavingManual) return;
+
     const branchId = Number(this.el.manualBranch?.value || 0);
     const staffId = Number(this.el.manualStaff?.value || 0);
     const accountId = this.el.manualAccount?.value || '';
@@ -321,22 +530,25 @@ const adminDepositUi = {
 
     if (!branchId) { showToast('Cabang wajib dipilih', 'error'); return; }
     if (!staffId) { showToast('Staff wajib dipilih', 'error'); return; }
-    if (!accountId) { showToast('Metode cash wajib dipilih', 'error'); return; }
+    if (!accountId) { showToast('Pilih metode setoran terlebih dahulu', 'error'); return; }
+    if (!this.selectedManualProofFile) { showToast('Upload bukti setoran terlebih dahulu', 'error'); return; }
     if (amount <= 0) { showToast('Jumlah setoran harus lebih dari 0', 'error'); return; }
     if (amount % 50000 !== 0) { showToast('Nominal harus kelipatan Rp 50.000', 'error'); return; }
 
     const staff = this.staffRows.find(u => Number(u.id) === staffId);
     const branch = this.branches.find(b => Number(b.id) === branchId);
+    const account = this.accounts.find(a => String(a.id) === String(accountId));
     const ok = await showConfirm({
       title: 'Simpan Setoran Manual',
-      message: `Simpan ${fRp(amount)} untuk ${staff?.name || 'staff'} di ${branch?.name || 'cabang'}?`,
+      message: `Simpan ${fRp(amount)} untuk ${staff?.name || 'staff'} di ${branch?.name || 'cabang'} melalui ${account?.label || 'metode setoran'}?`,
       confirmText: 'Ya, Simpan'
     });
     if (!ok) return;
 
+    this.isSavingManual = true;
     if (this.el.saveManualBtn) {
       this.el.saveManualBtn.disabled = true;
-      this.el.saveManualBtn.innerHTML = '<span class="btn-spinner"></span><span>Menyimpan...</span>';
+      this.el.saveManualBtn.innerHTML = '<span class="btn-spinner"></span><span>Mengupload bukti...</span>';
     }
 
     try {
@@ -347,11 +559,13 @@ const adminDepositUi = {
         staffId,
         accountId,
         amount,
+        proofFile: this.selectedManualProofFile,
         notes
       });
       closeModal('modal-manual-deposit');
       if (this.el.branch) this.el.branch.value = String(branchId);
       if (this.el.status) this.el.status.value = '';
+      this.removeManualProofFile();
       showToast(`Setoran manual tersimpan. Ref: ${String(depositId || '').slice(0, 8).toUpperCase()}`, 'success');
       await this.loadDeposits();
       if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
@@ -360,9 +574,10 @@ const adminDepositUi = {
       if (window.showDbError) showDbError(e, { action: 'menyimpan setoran manual', entity: 'Setoran manual' });
       else showToast(e.message || 'Gagal menyimpan setoran manual', 'error');
     } finally {
+      this.isSavingManual = false;
       if (this.el.saveManualBtn) {
-        this.el.saveManualBtn.disabled = false;
         this.el.saveManualBtn.innerHTML = '<i data-lucide="save" class="icon-sm"></i> Simpan Setoran';
+        this.updateManualSubmitState();
         if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
       }
     }
@@ -401,6 +616,10 @@ const adminDepositUi = {
   },
 
   async loadAccounts() {
+    this.accountsLoading = true;
+    this.accountsLoadError = null;
+    this.renderManualAccountOptions();
+
     try {
       const { data, error } = await db.from('deposit_accounts').select('*').order('created_at', { ascending: false });
       if (error) throw error;
@@ -426,7 +645,11 @@ const adminDepositUi = {
       this.el.accountsList.querySelectorAll('[data-action="toggle-account"]').forEach(btn => btn.addEventListener('click', ev => this.toggleAccount(ev)));
     } catch (e) {
       console.error('loadAccounts', e);
+      this.accountsLoadError = e.message || 'Gagal memuat metode setoran';
       if (this.el.accountsList) this.el.accountsList.innerHTML = `<div class="text-danger p-4">Gagal memuat metode setoran: ${escHtml(e.message || '')}</div>`;
+    } finally {
+      this.accountsLoading = false;
+      this.renderManualAccountOptions();
     }
   },
 

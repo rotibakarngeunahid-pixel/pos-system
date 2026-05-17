@@ -304,7 +304,7 @@ const adminStaffCashUi = {
     const logsBody     = document.getElementById('scp-detail-logs-body');
     const depositsBody = document.getElementById('scp-detail-deposits-body');
     if (logsBody)     logsBody.innerHTML     = '<tr><td colspan="5" class="empty-td">Memuat...</td></tr>';
-    if (depositsBody) depositsBody.innerHTML = '<tr><td colspan="4" class="empty-td">Memuat...</td></tr>';
+    if (depositsBody) depositsBody.innerHTML = '<tr><td colspan="6" class="empty-td">Memuat...</td></tr>';
   },
 
   _renderDetailHistory(logs, deposits) {
@@ -332,13 +332,20 @@ const adminStaffCashUi = {
     const depositsBody = document.getElementById('scp-detail-deposits-body');
     if (depositsBody) {
       if (!deposits.length) {
-        depositsBody.innerHTML = '<tr><td colspan="4" class="empty-td text-muted">Tidak ada riwayat setoran</td></tr>';
+        depositsBody.innerHTML = '<tr><td colspan="6" class="empty-td text-muted">Tidak ada riwayat setoran</td></tr>';
       } else {
         depositsBody.innerHTML = deposits.map(d => {
           const sl = { pending: { text:'Menunggu', cls:'badge-warning' }, confirmed: { text:'Dikonfirmasi', cls:'badge-success' }, rejected: { text:'Ditolak', cls:'badge-danger' } }[d.status] || { text: d.status, cls: '' };
+          const account = window.adminDepositUi?.accounts?.find(a => String(a.id) === String(d.deposit_account_id));
+          const method = escHtml(d.deposit_account_name_snapshot || account?.label || 'Metode lama/tidak tersedia');
+          const proof = d.proof_url
+            ? `<a class="deposit-admin-proof-link" href="${escHtml(d.proof_url)}" target="_blank" rel="noopener">${escHtml(d.proof_file_name || 'Lihat Bukti')}</a>`
+            : '<span class="text-muted">Bukti belum tersedia</span>';
           return `<tr>
             <td class="text-muted" style="font-size:11px">${fDate(d.created_at)}</td>
             <td class="fw-700">${fRp(d.amount)}</td>
+            <td class="text-muted" style="font-size:11px">${method}</td>
+            <td class="text-muted" style="font-size:11px">${proof}</td>
             <td><span class="badge ${sl.cls}">${sl.text}</span></td>
             <td class="text-muted" style="font-size:11px">${escHtml(d.notes || '—')}</td>
           </tr>`;

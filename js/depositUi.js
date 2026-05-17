@@ -734,10 +734,12 @@ const depositUi = {
 
     this.el.historyBody.innerHTML = rows.map(row => {
       const status = this.getStatusMeta(row.status);
-      const method = row.deposit_accounts?.label || '-';
+      const method = row.deposit_account_name_snapshot
+        || row.deposit_accounts?.label
+        || 'Metode lama/tidak tersedia';
       const proof = row.proof_url
-        ? `<a href="${this.esc(row.proof_url)}" target="_blank" rel="noopener">Lihat bukti</a>`
-        : '<span class="text-muted">Tidak ada bukti</span>';
+        ? `<a href="${this.esc(row.proof_url)}" target="_blank" rel="noopener">${this.esc(row.proof_file_name || 'Lihat bukti')}</a>`
+        : '<span class="text-muted">Bukti belum tersedia</span>';
       const rejectRow = row.status === 'rejected' && row.reject_reason
         ? `<div><span>Alasan Penolakan</span><strong class="text-danger">${this.esc(row.reject_reason)}</strong></div>`
         : '';

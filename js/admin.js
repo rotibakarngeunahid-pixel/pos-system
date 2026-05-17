@@ -369,7 +369,7 @@ const ADMIN = {
       reports:     'Laporan',           'inv-logs':   'Log Inventori',
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
-      'cash-deposits': 'Setoran Tunai', 'toppings':    'Manajemen Topping',
+      'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
       'staff-cash-position': 'Posisi Kas Staff',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access'
     };

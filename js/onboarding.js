@@ -223,9 +223,9 @@ const Onboarding = (() => {
 
     { step_key:'m6_deposit', module_key:'modul_7_kas', sequence:22,
       target_selector: '#pos-maintab-deposits',
-      title: '📤 Setoran Tunai',
-      body:  'Setelah shift ditutup, setor tunai ke rekening bisnis melalui tab Setoran. ' +
-             'Upload bukti transfer dan masukkan nominal yang disetor.',
+      title: '📤 Setoran',
+      body:  'Setelah shift ditutup, catat setoran melalui tab Setoran. ' +
+             'Pilih metode setoran, upload bukti, dan masukkan nominal yang disetor.',
       is_required: true },
   ];
 

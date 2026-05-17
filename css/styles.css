@@ -1455,6 +1455,15 @@ body, .body { font-size: 14px; font-weight: 400; }
   color: var(--success);
 }
 
+.manual-proof-group {
+  position: relative;
+}
+
+.manual-proof-group .deposit-upload-zone {
+  min-height: 112px;
+  border-radius: 8px;
+}
+
 @media (max-width: 900px) {
   .dep-filter-group { min-width: 110px; }
 }

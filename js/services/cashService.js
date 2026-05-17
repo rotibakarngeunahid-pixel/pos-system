@@ -333,7 +333,7 @@ const cashService = {
         ? this.getLogs({ branchId, sessionId, limit: 20 })
         : Promise.resolve([]),
       db.from('cash_deposits')
-        .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id')
+        .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id, deposit_account_id, deposit_account_name_snapshot, proof_url, proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at')
         .eq('staff_id', staffId)
         .order('created_at', { ascending: false })
         .limit(20)

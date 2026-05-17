@@ -1,5 +1,9 @@
 'use strict';
 
+const DEPOSIT_PROOF_ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'];
+const DEPOSIT_PROOF_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
+const DEPOSIT_PROOF_MAX_FILE_SIZE = 5 * 1024 * 1024;
+
 const depositService = {
 
   async withTimeout(promise, ms, message) {
@@ -87,6 +91,69 @@ const depositService = {
       || message.includes('permission denied');
   },
 
+  validateProofFile(file) {
+    if (!file) throw new Error('Upload bukti setoran terlebih dahulu');
+
+    const rawExt = (file.name || '').split('.').pop().toLowerCase();
+    const mimeExt = (file.type || '').split('/').pop().toLowerCase();
+    const ext = DEPOSIT_PROOF_ALLOWED_EXT.includes(rawExt) ? rawExt : mimeExt;
+
+    if (file.size <= 0) throw new Error('File tidak boleh kosong');
+    if (file.size > DEPOSIT_PROOF_MAX_FILE_SIZE) throw new Error('Ukuran file maksimal 5 MB');
+    if (!DEPOSIT_PROOF_ALLOWED_MIME.includes(file.type) && !DEPOSIT_PROOF_ALLOWED_EXT.includes(rawExt)) {
+      throw new Error('Hanya JPG, PNG, atau PDF yang diterima');
+    }
+
+    return ext || rawExt || 'jpg';
+  },
+
+  getProofContentType(file, ext) {
+    if (file?.type) return file.type;
+    if (ext === 'pdf') return 'application/pdf';
+    if (ext === 'png') return 'image/png';
+    return 'image/jpeg';
+  },
+
+  async uploadDepositProof({ branchId, file }) {
+    const ext = this.validateProofFile(file);
+    const scope = Number.isFinite(Number(branchId)) ? Number(branchId) : 'global';
+    const path = `${scope}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const contentType = this.getProofContentType(file, ext);
+    const uploadedAt = new Date().toISOString();
+
+    const { error: uploadErr } = await db.storage
+      .from('deposit-proofs')
+      .upload(path, file, { contentType, upsert: false });
+
+    if (uploadErr) {
+      if (this.isStoragePolicyError(uploadErr)) {
+        throw new Error('Upload bukti belum diizinkan oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
+      }
+      throw new Error('Upload bukti gagal: ' + (uploadErr.message || uploadErr));
+    }
+
+    const oneYear = 365 * 24 * 3600;
+    const { data: signed, error: signErr } = await db.storage.from('deposit-proofs').createSignedUrl(path, oneYear);
+    if (signErr) {
+      if (this.isStoragePolicyError(signErr)) {
+        throw new Error('Bukti berhasil diupload, tetapi belum bisa dibaca oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
+      }
+      throw new Error('Gagal membuat URL bukti setoran: ' + (signErr.message || signErr));
+    }
+
+    const proofUrl = signed?.signedUrl || null;
+    if (!proofUrl) throw new Error('Gagal membuat URL bukti setoran');
+
+    return {
+      url: proofUrl,
+      path,
+      fileName: file.name || path.split('/').pop(),
+      fileType: contentType,
+      fileSize: file.size || null,
+      uploadedAt
+    };
+  },
+
   async submitDeposit({ branchId, sessionId = null, staffId, accountId, amount, cashBalance = null, file = null, notes = null, requireProof = true }) {
     // Basic validation
     amount = safeNum(amount, 'Jumlah setoran');
@@ -95,33 +162,9 @@ const depositService = {
     if (cashBalance != null && amount > cashBalance) throw new Error('Jumlah setoran melebihi saldo kas');
     if (requireProof && !file) throw new Error('Bukti setoran wajib dilampirkan');
 
-    let proofUrl = null;
+    let proof = null;
     if (file) {
-      const allowed = ['image/jpeg','image/png','application/pdf'];
-      const ext = (file.name || '').split('.').pop().toLowerCase() || file.type.split('/').pop();
-      const allowedExt = ['jpg','jpeg','png','pdf'];
-      if (!allowed.includes(file.type) && !allowedExt.includes(ext)) throw new Error('Hanya JPG, PNG, atau PDF yang diterima');
-      if (file.size <= 0) throw new Error('File tidak boleh kosong');
-      if (file.size > 5 * 1024 * 1024) throw new Error('Ukuran file maksimal 5 MB');
-
-      const path = `${branchId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error: uploadErr } = await db.storage.from('deposit-proofs').upload(path, file, { contentType: file.type, upsert: false });
-      if (uploadErr) {
-        if (this.isStoragePolicyError(uploadErr)) {
-          throw new Error('Upload bukti belum diizinkan oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
-        }
-        throw new Error('Upload bukti gagal: ' + (uploadErr.message || uploadErr));
-      }
-      const oneYear = 365 * 24 * 3600;
-      const { data: signed, error: signErr } = await db.storage.from('deposit-proofs').createSignedUrl(path, oneYear);
-      if (signErr) {
-        if (this.isStoragePolicyError(signErr)) {
-          throw new Error('Bukti berhasil diupload, tetapi belum bisa dibaca oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
-        }
-        throw new Error('Gagal membuat URL bukti setoran: ' + (signErr.message || signErr));
-      }
-      proofUrl = signed?.signedUrl || null;
-      if (!proofUrl) throw new Error('Gagal membuat URL bukti setoran');
+      proof = await this.uploadDepositProof({ branchId, file });
     }
 
     const { data, error } = await db.rpc('create_deposit', {
@@ -131,7 +174,7 @@ const depositService = {
       p_deposit_account_id: accountId,
       p_amount: amount,
       p_cash_balance_at_deposit: cashBalance,
-      p_proof_url: proofUrl,
+      p_proof_url: proof?.url || null,
       p_notes: notes || null
     });
     if (error) throw error;
@@ -164,7 +207,10 @@ const depositService = {
     let q = db.from('cash_deposits')
       .select(`
         id, branch_id, staff_id, reviewed_by, deposit_account_id,
-        amount, cash_balance_at_deposit, proof_url, notes,
+        deposit_account_name_snapshot,
+        amount, cash_balance_at_deposit, proof_url,
+        proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at,
+        notes,
         status, reject_reason, created_at, reviewed_at
       `)
       .order('created_at', { ascending: false })
@@ -200,7 +246,7 @@ const depositService = {
     return true;
   },
 
-  async createManualDeposit({ adminId, branchId, staffId, accountId, amount, notes = null }) {
+  async createManualDeposit({ adminId, branchId, staffId, accountId, amount, proofFile = null, notes = null }) {
     const normalizedAdminId = Number(adminId);
     const normalizedBranchId = Number(branchId);
     const normalizedStaffId = Number(staffId);
@@ -216,9 +262,12 @@ const depositService = {
     if (!Number.isInteger(normalizedStaffId) || normalizedStaffId <= 0) {
       throw new Error('Staff wajib dipilih');
     }
-    if (!normalizedAccountId) throw new Error('Metode cash wajib dipilih');
+    if (!normalizedAccountId) throw new Error('Pilih metode setoran terlebih dahulu');
+    if (!proofFile) throw new Error('Upload bukti setoran terlebih dahulu');
     if (amount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
     if (amount % 50000 !== 0) throw new Error('Nominal harus kelipatan Rp 50.000');
+
+    const proof = await this.uploadDepositProof({ branchId: normalizedBranchId, file: proofFile });
 
     const { data, error } = await db.rpc('admin_create_manual_deposit', {
       p_admin_id: normalizedAdminId,
@@ -227,12 +276,17 @@ const depositService = {
       p_deposit_account_id: normalizedAccountId,
       p_amount: amount,
       p_notes: notes || null,
-      p_status: 'confirmed'
+      p_status: 'confirmed',
+      p_proof_url: proof.url,
+      p_proof_file_name: proof.fileName,
+      p_proof_file_type: proof.fileType,
+      p_proof_file_size: proof.fileSize,
+      p_proof_uploaded_at: proof.uploadedAt
     });
     if (error) {
       const msg = String(error.message || '').toLowerCase();
       if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
-        throw new Error('Fitur input manual belum aktif di database. Jalankan migrasi 024 lalu coba lagi.');
+        throw new Error('Fitur input manual setoran perlu migrasi terbaru. Jalankan migrasi 026 lalu coba lagi.');
       }
       throw error;
     }

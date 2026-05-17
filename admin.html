@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#f97316" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="RBN Admin" />
-  <link rel="stylesheet" href="css/styles.css?v=20260517-manual-deposit-1" />
+  <link rel="stylesheet" href="css/styles.css?v=20260517-manual-deposit-2" />
   <style>
     /* Page-specific overrides */
     .bg-alt { background: var(--bg-alt); }
@@ -131,8 +131,8 @@
       <button class="nav-item" data-admin-action="navigate" data-section="cash-report" title="Laporan Kas">
         <i data-lucide="wallet"></i><span class="nav-text">Laporan Kas</span>
       </button>
-      <button class="nav-item" data-admin-action="navigate" data-section="cash-deposits" title="Setoran Tunai">
-        <i data-lucide="dollar-sign"></i><span class="nav-text">Setoran Tunai</span>
+      <button class="nav-item" data-admin-action="navigate" data-section="cash-deposits" title="Setoran Manual">
+        <i data-lucide="dollar-sign"></i><span class="nav-text">Setoran Manual</span>
       </button>
       <button class="nav-item" data-admin-action="navigate" data-section="cash-categories" title="Kategori Kas">
         <i data-lucide="tag"></i><span class="nav-text">Kategori Kas</span>
@@ -874,7 +874,7 @@
       <!-- CASH DEPOSITS -->
       <section class="admin-section" id="section-cash-deposits">
         <div class="section-header">
-          <h2 class="section-title">Setoran Tunai</h2>
+          <h2 class="section-title">Setoran Manual</h2>
           <div class="section-actions">
             <button class="btn btn-primary" id="btn-add-manual-deposit">
               <i data-lucide="plus" class="icon-sm"></i> Input Manual
@@ -1189,9 +1189,9 @@
           <div class="card-title mb-2" style="font-size:13px;font-weight:700">Riwayat Setoran (maks. 20)</div>
           <div class="table-wrap" style="max-height:180px;overflow-y:auto">
             <table style="font-size:12px">
-              <thead><tr><th>Waktu</th><th>Jumlah</th><th>Status</th><th>Catatan</th></tr></thead>
+              <thead><tr><th>Waktu</th><th>Jumlah</th><th>Metode</th><th>Bukti</th><th>Status</th><th>Catatan</th></tr></thead>
               <tbody id="scp-detail-deposits-body">
-                <tr><td colspan="4" class="empty-td">Memuat...</td></tr>
+                <tr><td colspan="6" class="empty-td">Memuat...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1204,11 +1204,11 @@
     </div>
   </div>
 
-  <!-- Manual Cash Deposit Modal -->
+  <!-- Manual Deposit Modal -->
   <div class="modal-overlay" id="modal-manual-deposit">
     <div class="modal">
       <div class="modal-header">
-        <span class="modal-title">Input Manual Setoran Tunai</span>
+        <span class="modal-title">Input Manual Setoran</span>
         <button class="modal-close" data-admin-action="close-generic-modal" data-modal-id="modal-manual-deposit">&times;</button>
       </div>
       <div class="modal-body flex flex-col gap-3">
@@ -1225,7 +1225,7 @@
         </div>
         <div class="grid-2-col-s3">
           <div class="form-group">
-            <label class="form-label">Metode Cash *</label>
+            <label class="form-label">Metode Setoran *</label>
             <select class="form-control" id="manual-deposit-account"></select>
             <span class="form-hint" id="manual-deposit-account-hint"></span>
           </div>
@@ -1236,6 +1236,21 @@
               <input type="text" class="form-control" id="manual-deposit-amount" inputmode="numeric" autocomplete="off" placeholder="0" />
             </div>
           </div>
+        </div>
+        <div class="form-group manual-proof-group">
+          <label class="form-label" for="manual-deposit-proof-file">Bukti Setoran *</label>
+          <input class="deposit-file-input" type="file" id="manual-deposit-proof-file" accept="image/jpeg,image/png,application/pdf" />
+          <div id="manual-deposit-proof-zone" class="deposit-upload-zone" role="button" tabindex="0" aria-label="Pilih atau seret bukti setoran">
+            <div class="deposit-upload-empty" id="manual-deposit-proof-empty">
+              <i data-lucide="upload-cloud" class="icon-lg"></i>
+              <div class="deposit-upload-copy">
+                <strong>Upload bukti setoran</strong>
+                <span>Gunakan foto, gambar, atau PDF bukti transfer/serah terima.</span>
+              </div>
+            </div>
+            <div id="manual-deposit-proof-preview" class="deposit-proof-preview" style="display:none"></div>
+          </div>
+          <span class="form-hint" id="manual-deposit-proof-hint">JPG, PNG, atau PDF. Maksimal 5 MB.</span>
         </div>
         <div class="form-group">
           <label class="form-label">Catatan</label>
@@ -2111,16 +2126,16 @@
   <script src="js/utils/validator.js"></script>
   <script src="js/ui.js?v=20260516-crud-friendly-1"></script>
   <script src="js/services/inventoryService.js"></script>
-  <script src="js/services/cashService.js?v=20260514-pos-global-fix-1"></script>
+  <script src="js/services/cashService.js?v=20260517-manual-deposit-2"></script>
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js"></script>
   <script src="js/services/rbnDataEvents.js"></script>
-  <script src="js/depositService.js?v=20260517-manual-deposit-1"></script>
-  <script src="js/adminDepositUi.js?v=20260517-manual-deposit-1"></script>
-  <script src="js/adminStaffCashUi.js?v=20260517-staff-cash-1"></script>
+  <script src="js/depositService.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/adminDepositUi.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/adminStaffCashUi.js?v=20260517-manual-deposit-2"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="js/admin.js?v=20260516-crud-friendly-1"></script>
+  <script src="js/admin.js?v=20260517-manual-deposit-2"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>
