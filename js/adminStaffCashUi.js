@@ -174,10 +174,10 @@ const adminStaffCashUi = {
       const lastAt      = r.last_activity_at ? fDate(r.last_activity_at) : '<span class="text-muted">—</span>';
       const hasNoBranch = !r.branch_id;
 
-      const detailBtn = `<button type="button" class="btn btn-outline btn-sm scp-detail-btn" data-row="${i}">Detail</button>`;
+      const detailBtn = `<button type="button" class="btn btn-outline btn-sm scp-detail-btn" data-row="${i}" title="Lihat detail posisi kas"><i data-lucide="eye" style="width:13px;height:13px"></i></button>`;
       const depositBtn = hasNoBranch
-        ? `<button type="button" class="btn btn-outline btn-sm" disabled title="Staff tidak punya cabang">Input Setoran</button>`
-        : `<button type="button" class="btn btn-outline btn-sm scp-deposit-btn" data-row="${i}">Input Setoran</button>`;
+        ? `<button type="button" class="btn btn-outline btn-sm" disabled title="Staff tidak punya cabang"><i data-lucide="ban" style="width:13px;height:13px"></i></button>`
+        : `<button type="button" class="btn btn-outline btn-sm scp-deposit-btn" data-row="${i}" title="Input setoran manual"><i data-lucide="banknote" style="width:13px;height:13px"></i> Setor</button>`;
 
       return `<tr class="scp-row ${r.session_status === 'open' ? 'scp-row-active' : ''}">
         <td class="fw-700">${escHtml(r.staff_name || '—')}</td>
@@ -188,8 +188,8 @@ const adminStaffCashUi = {
         <td>${pendingBadge}</td>
         <td>${confirmedVal}</td>
         <td class="text-muted" style="font-size:12px">${lastAt}</td>
-        <td>
-          <div class="flex gap-2" style="flex-wrap:nowrap">
+        <td style="white-space:nowrap">
+          <div class="flex gap-1">
             ${detailBtn}
             ${depositBtn}
           </div>
