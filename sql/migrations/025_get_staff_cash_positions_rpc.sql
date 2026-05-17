@@ -38,7 +38,7 @@ AS $$
   -- Active staff members (role=staff, not soft-deleted)
   staff_list AS (
     SELECT
-      u.id          AS user_id,
+      u.id          AS staff_id,
       u.name,
       u.branch_id   AS default_branch_id
     FROM public.users u
@@ -48,27 +48,27 @@ AS $$
 
   -- Latest OPEN session per staff (a staff should only have one, but guard with DISTINCT ON)
   open_sessions AS (
-    SELECT DISTINCT ON (cs.user_id)
+    SELECT DISTINCT ON (cs.staff_id)
       cs.id           AS session_id,
-      cs.user_id,
+      cs.staff_id,
       cs.branch_id,
       cs.opening_cash,
       cs.opened_at
     FROM public.cashier_sessions cs
     WHERE cs.status = 'open'
-    ORDER BY cs.user_id, cs.opened_at DESC
+    ORDER BY cs.staff_id, cs.opened_at DESC
   ),
 
   -- Latest CLOSED session per staff (used for "Shift Ditutup Hari Ini" filter)
   last_closed AS (
-    SELECT DISTINCT ON (cs.user_id)
+    SELECT DISTINCT ON (cs.staff_id)
       cs.id         AS session_id,
-      cs.user_id,
+      cs.staff_id,
       cs.branch_id,
       cs.closed_at
     FROM public.cashier_sessions cs
     WHERE cs.status = 'closed'
-    ORDER BY cs.user_id, cs.closed_at DESC
+    ORDER BY cs.staff_id, cs.closed_at DESC
   ),
 
   -- Cash log components per session (non-voided entries only)
@@ -110,7 +110,7 @@ AS $$
   )
 
   SELECT
-    sl.user_id                                                AS staff_id,
+    sl.staff_id,
     sl.name                                                   AS staff_name,
     COALESCE(os.branch_id, sl.default_branch_id)            AS branch_id,
     COALESCE(b.name, '—')                                   AS branch_name,
@@ -173,13 +173,13 @@ AS $$
     END                                                       AS risk_level
 
   FROM staff_list sl
-  LEFT JOIN open_sessions os ON os.user_id   = sl.user_id
-  LEFT JOIN last_closed   lc ON lc.user_id   = sl.user_id
+  LEFT JOIN open_sessions os ON os.staff_id   = sl.staff_id
+  LEFT JOIN last_closed   lc ON lc.staff_id   = sl.staff_id
   LEFT JOIN public.branches b
          ON b.id = COALESCE(os.branch_id, sl.default_branch_id)
   LEFT JOIN log_sums      ls ON ls.session_id = os.session_id
   LEFT JOIN sale_sums     ss ON ss.session_id = os.session_id
-  LEFT JOIN pending_sums  ps ON ps.staff_id   = sl.user_id
+  LEFT JOIN pending_sums  ps ON ps.staff_id   = sl.staff_id
 
   WHERE
     (p_branch_id IS NULL
