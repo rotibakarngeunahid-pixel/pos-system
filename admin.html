@@ -137,6 +137,9 @@
       <button class="nav-item" data-admin-action="navigate" data-section="cash-categories" title="Kategori Kas">
         <i data-lucide="tag"></i><span class="nav-text">Kategori Kas</span>
       </button>
+      <button class="nav-item" data-admin-action="navigate" data-section="staff-cash-position" title="Posisi Kas Staff">
+        <i data-lucide="users"></i><span class="nav-text">Posisi Kas Staff</span>
+      </button>
     </nav>
 
     <div class="sidebar-footer">
@@ -948,6 +951,65 @@
         <div class="card"><div id="cash-categories-list"><div class="empty-state"><div class="empty-title">Memuat...</div></div></div></div>
       </section>
 
+      <!-- ══════════ STAFF CASH POSITION ══════════ -->
+      <section class="admin-section" id="section-staff-cash-position">
+        <div class="section-header">
+          <h2 class="section-title">Posisi Kas Staff</h2>
+          <div class="section-actions">
+            <span class="text-muted text-xs" id="scp-last-updated"></span>
+            <button class="btn btn-outline btn-sm" id="scp-refresh-btn">
+              <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filter-row flex gap-2 flex-wrap mb-4" style="align-items:center">
+          <select class="form-control w-auto" id="scp-filter-branch">
+            <option value="">Semua Cabang</option>
+          </select>
+          <select class="form-control w-auto" id="scp-filter-status">
+            <option value="all">Semua Status Shift</option>
+            <option value="open">Shift Aktif</option>
+            <option value="none">Tidak Ada Shift Aktif</option>
+            <option value="closed_today">Shift Ditutup Hari Ini</option>
+          </select>
+          <select class="form-control w-auto" id="scp-filter-risk">
+            <option value="all">Semua Nominal</option>
+            <option value="gt500">Kas &gt; Rp 500.000</option>
+            <option value="gt1m">Kas &gt; Rp 1.000.000</option>
+            <option value="pending">Ada Setoran Pending</option>
+          </select>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="stats-grid" id="scp-summary-cards"></div>
+
+        <!-- Table -->
+        <div class="card mt-4">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Staff</th>
+                  <th>Cabang</th>
+                  <th>Status Shift</th>
+                  <th>Dibuka</th>
+                  <th>Posisi Kas</th>
+                  <th>Setoran Pending</th>
+                  <th>Setoran Terkonfirmasi</th>
+                  <th>Aktivitas Terakhir</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="scp-table-body">
+                <tr><td colspan="9" class="empty-td">Pilih menu Posisi Kas Staff untuk memuat data</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ══════════ TOPPINGS ══════════ -->
       <section class="admin-section" id="section-toppings">
         <div class="section-header">
@@ -1065,6 +1127,79 @@
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-branch">Batal</button>
         <button class="btn btn-primary" data-admin-action="save-branch">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Staff Cash Position Detail Modal -->
+  <div class="modal-overlay" id="modal-scp-detail">
+    <div class="modal" style="max-width:680px;width:95vw">
+      <div class="modal-header">
+        <span class="modal-title">Detail Posisi Kas Staff</span>
+        <button class="modal-close" id="scp-detail-close-btn">&times;</button>
+      </div>
+      <div class="modal-body flex flex-col gap-4">
+
+        <!-- Staff Info -->
+        <div class="grid-2-col-s3" style="gap:12px">
+          <div><div class="form-label text-muted">Staff</div><div class="fw-700" id="scp-detail-staff-name">—</div></div>
+          <div><div class="form-label text-muted">Cabang</div><div id="scp-detail-branch">—</div></div>
+          <div><div class="form-label text-muted">Status Shift</div><div id="scp-detail-status">—</div></div>
+          <div><div class="form-label text-muted">Session ID</div><div class="text-muted text-xs" id="scp-detail-session-id">—</div></div>
+        </div>
+
+        <!-- Cash Breakdown -->
+        <div>
+          <div class="card-title mb-2" style="font-size:13px;font-weight:700">Rincian Kas</div>
+          <div class="card" style="padding:12px 16px">
+            <table style="width:100%;font-size:13px;border-collapse:collapse">
+              <tbody>
+                <tr><td class="text-muted" style="padding:4px 0">Kas Awal</td><td class="text-right fw-700" id="scp-detail-opening">—</td></tr>
+                <tr><td class="text-muted" style="padding:4px 0">+ Penjualan Tunai</td><td class="text-right text-green fw-700" id="scp-detail-sales">—</td></tr>
+                <tr><td class="text-muted" style="padding:4px 0">+ Kas Masuk Manual</td><td class="text-right text-green" id="scp-detail-manual-in">—</td></tr>
+                <tr><td class="text-muted" style="padding:4px 0">− Kas Keluar Manual</td><td class="text-right text-danger" id="scp-detail-manual-out">—</td></tr>
+                <tr><td class="text-muted" style="padding:4px 0">− Refund</td><td class="text-right text-danger" id="scp-detail-refund">—</td></tr>
+                <tr><td class="text-muted" style="padding:4px 0">− Void</td><td class="text-right text-danger" id="scp-detail-void">—</td></tr>
+                <tr><td class="text-muted" style="padding:4px 0">− Setoran Terkonfirmasi</td><td class="text-right text-danger" id="scp-detail-deposit">—</td></tr>
+                <tr style="border-top:1px solid var(--border)">
+                  <td style="padding:8px 0 4px;font-weight:700">= Posisi Kas</td>
+                  <td class="text-right fw-700" style="padding:8px 0 4px" id="scp-detail-expected">—</td>
+                </tr>
+                <tr><td class="text-muted" style="padding:4px 0;font-size:12px">Setoran Pending</td><td class="text-right text-warning" style="font-size:12px" id="scp-detail-pending">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Cash Log History -->
+        <div>
+          <div class="card-title mb-2" style="font-size:13px;font-weight:700">Riwayat Kas (maks. 20)</div>
+          <div class="table-wrap" style="max-height:220px;overflow-y:auto">
+            <table style="font-size:12px">
+              <thead><tr><th>Waktu</th><th>Kategori</th><th>Jumlah</th><th>Oleh</th><th>Catatan</th></tr></thead>
+              <tbody id="scp-detail-logs-body">
+                <tr><td colspan="5" class="empty-td">Memuat...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Deposit History -->
+        <div>
+          <div class="card-title mb-2" style="font-size:13px;font-weight:700">Riwayat Setoran (maks. 20)</div>
+          <div class="table-wrap" style="max-height:180px;overflow-y:auto">
+            <table style="font-size:12px">
+              <thead><tr><th>Waktu</th><th>Jumlah</th><th>Status</th><th>Catatan</th></tr></thead>
+              <tbody id="scp-detail-deposits-body">
+                <tr><td colspan="4" class="empty-td">Memuat...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="scp-detail-close-btn-footer">Tutup</button>
       </div>
     </div>
   </div>
@@ -1982,6 +2117,7 @@
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260517-manual-deposit-1"></script>
   <script src="js/adminDepositUi.js?v=20260517-manual-deposit-1"></script>
+  <script src="js/adminStaffCashUi.js?v=20260517-staff-cash-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260516-crud-friendly-1"></script>

@@ -306,5 +306,46 @@ const cashService = {
   async deleteCategory(id) {
     const { error } = await db.from('cash_categories').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  // ── Get cash positions for all active staff (admin dashboard) ─
+  // Calls the get_staff_cash_positions RPC which is a single aggregated query.
+  // Do NOT replace this with a loop of getSummary() calls — that would be N+1.
+  async getStaffCashPositions({ branchId = null, status = 'all' } = {}) {
+    const { data, error } = await db.rpc('get_staff_cash_positions', {
+      p_branch_id: branchId || null,
+      p_status:    status   || 'all'
+    });
+    if (error) throw error;
+    return data || [];
+  },
+
+  // ── Get detail breakdown for a single staff/session ──────────
+  // Returns { summary, logs, deposits } using existing methods.
+  async getStaffCashPositionDetail({ staffId, branchId, sessionId = null }) {
+    if (!branchId) throw new Error('branchId wajib diisi untuk detail posisi kas');
+
+    const [summary, logs, depositsResult] = await Promise.all([
+      sessionId
+        ? this.getSummary({ branchId, sessionId })
+        : Promise.resolve(null),
+      sessionId
+        ? this.getLogs({ branchId, sessionId, limit: 20 })
+        : Promise.resolve([]),
+      db.from('cash_deposits')
+        .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id')
+        .eq('staff_id', staffId)
+        .order('created_at', { ascending: false })
+        .limit(20)
+    ]);
+
+    const { data: depositsData, error: depErr } = depositsResult;
+    if (depErr) throw depErr;
+
+    return {
+      summary,
+      logs,
+      deposits: depositsData || []
+    };
   }
 };

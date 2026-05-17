@@ -354,6 +354,7 @@ const adminDepositUi = {
       if (this.el.status) this.el.status.value = '';
       showToast(`Setoran manual tersimpan. Ref: ${String(depositId || '').slice(0, 8).toUpperCase()}`, 'success');
       await this.loadDeposits();
+      if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
     } catch (e) {
       console.error('saveManualDeposit', e);
       if (window.showDbError) showDbError(e, { action: 'menyimpan setoran manual', entity: 'Setoran manual' });
@@ -379,6 +380,7 @@ const adminDepositUi = {
       await depositService.confirmDeposit({ depositId, adminId, action: 'confirmed' });
       showToast('Setoran berhasil dikonfirmasi', 'success');
       await this.loadDeposits();
+      if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
     } catch (err) {
       showToast(err.message || 'Gagal konfirmasi', 'error');
     }
@@ -392,6 +394,7 @@ const adminDepositUi = {
       await depositService.confirmDeposit({ depositId, adminId, action: 'rejected', rejectReason: reason || null });
       showToast('Setoran ditolak', 'success');
       await this.loadDeposits();
+      if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
     } catch (err) {
       showToast(err.message || 'Gagal menolak', 'error');
     }

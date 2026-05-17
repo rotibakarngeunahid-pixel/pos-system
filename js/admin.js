@@ -370,6 +370,7 @@ const ADMIN = {
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
       'cash-deposits': 'Setoran Tunai', 'toppings':    'Manajemen Topping',
+      'staff-cash-position': 'Posisi Kas Staff',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
@@ -394,9 +395,10 @@ const ADMIN = {
           adminDepositUi.loadAccounts();
         }
         break;
-      case 'toppings':          this.loadToppingSection();    break;
-      case 'api-keys':          this.loadApiKeysSection();    break;
-      case 'investor-access':   this.loadInvestorAccess();    break;
+      case 'toppings':              this.loadToppingSection();    break;
+      case 'api-keys':              this.loadApiKeysSection();    break;
+      case 'investor-access':       this.loadInvestorAccess();    break;
+      case 'staff-cash-position':   this.loadStaffCashPosition(); break;
     }
   },
 
@@ -3090,6 +3092,13 @@ const ADMIN = {
       await this.loadCashCategories();
       showToast('Kategori dihapus', 'success');
     } catch (e) { showDbError(e, { action: 'menghapus kategori kas', entity: 'Kategori kas' }); }
+  },
+
+  // ── Staff Cash Position ───────────────────────────────────────
+  loadStaffCashPosition() {
+    if (window.adminStaffCashUi) {
+      adminStaffCashUi.load();
+    }
   },
 
   // ── Cash Report ───────────────────────────────────────────────
