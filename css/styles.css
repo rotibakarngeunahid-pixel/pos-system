@@ -1799,6 +1799,94 @@ tbody tr:hover td { background: var(--surface-2); }
 .variant-form-title { font-size: 12px; font-weight: 700; color: var(--text-sub); margin-bottom: var(--s3); text-transform: uppercase; letter-spacing: 0.5px; }
 .grid-2-col-s5 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); align-items: start; }
 .grid-2-col-s3 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); align-items: start; }
+
+.scp-action-panel {
+  border: 1px solid rgba(234,88,12,.35);
+  border-radius: var(--r-lg);
+  background: #FFF7ED;
+  padding: var(--s4);
+  box-shadow: var(--sh-xs);
+}
+.scp-action-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid rgba(234,88,12,.18);
+}
+.scp-action-eyebrow {
+  color: var(--orange-dark);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.scp-action-title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+.scp-action-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+  max-width: 280px;
+}
+.scp-action-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s3);
+  padding: var(--s3) 0;
+}
+.scp-action-metric {
+  min-width: 0;
+  padding: var(--s3);
+  border: 1px solid rgba(234,88,12,.14);
+  border-radius: var(--r);
+  background: rgba(255,255,255,.72);
+}
+.scp-action-metric-strong {
+  background: rgba(255,255,255,.9);
+}
+.scp-action-form-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, .85fr) minmax(0, 1.15fr);
+  gap: var(--s3);
+  align-items: start;
+}
+.scp-currency-input .input-prefix {
+  color: var(--text);
+  font-weight: 800;
+}
+.scp-currency-input .form-control {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.scp-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+@media (max-width: 720px) {
+  .scp-action-head,
+  .scp-action-buttons {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .scp-action-note {
+    max-width: none;
+    text-align: left;
+  }
+  .scp-action-summary,
+  .scp-action-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
 /* Collapse 2-col product modal grid on mobile */
 @media (max-width: 600px) {
   .grid-2-col-s5 { grid-template-columns: 1fr; gap: var(--s4); }

@@ -11,6 +11,20 @@
 // WHERE c.conrelid = 'cash_logs'::regclass AND c.contype = 'f';
 // Then update the alias hints below to match the actual constraint names.
 
+function isMissingRpcError(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return error?.code === '42883' ||
+    error?.code === 'PGRST202' ||
+    msg.includes('could not find the function') ||
+    msg.includes('function public.') && msg.includes('does not exist');
+}
+
+function isRpcReturnTypeMismatch(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return error?.code === '42804' ||
+    msg.includes('structure of query does not match function result type');
+}
+
 const cashService = {
 
   // ── Log a cash movement ───────────────────────────────────────
@@ -304,8 +318,10 @@ const cashService = {
       p_date_to:    dateTo || null
     });
     if (error) {
-      const msg = String(error.message || '').toLowerCase();
-      if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
+      if (isRpcReturnTypeMismatch(error)) {
+        throw new Error('RPC kas admin perlu patch migrasi 029. Jalankan migrasi 029 lalu refresh halaman.');
+      }
+      if (isMissingRpcError(error)) {
         throw new Error('Fitur kas admin perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
       }
       throw error;
@@ -432,8 +448,7 @@ const cashService = {
       p_expected_updated_at: expectedUpdatedAt || null
     });
     if (error) {
-      const msg = String(error.message || '').toLowerCase();
-      if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
+      if (isMissingRpcError(error)) {
         throw new Error('Fitur tutup kas manual perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
       }
       throw error;
@@ -456,8 +471,7 @@ const cashService = {
       p_expected_updated_at: expectedUpdatedAt || null
     });
     if (error) {
-      const msg = String(error.message || '').toLowerCase();
-      if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
+      if (isMissingRpcError(error)) {
         throw new Error('Fitur edit posisi kas perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
       }
       throw error;

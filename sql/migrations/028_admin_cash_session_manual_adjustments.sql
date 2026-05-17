@@ -198,10 +198,10 @@ BEGIN
     SELECT
       cs.id AS session_id,
       cs.staff_id,
-      u.name AS staff_name,
+      u.name::text AS staff_name,
       cs.branch_id,
-      b.name AS branch_name,
-      cs.status AS session_status,
+      b.name::text AS branch_name,
+      cs.status::text AS session_status,
       cs.opened_at,
       cs.closed_at,
       COALESCE(cs.opening_cash, 0) AS opening_cash,
@@ -305,10 +305,10 @@ BEGIN
   SELECT
     e.session_id,
     e.staff_id,
-    e.staff_name,
+    e.staff_name::text,
     e.branch_id,
-    e.branch_name,
-    e.session_status,
+    e.branch_name::text,
+    e.session_status::text,
     e.opened_at,
     e.closed_at,
     e.opening_cash,
@@ -325,7 +325,7 @@ BEGIN
     e.closed_manually,
     e.has_manual_adjustment,
     e.manual_closed_at,
-    e.manual_close_reason,
+    e.manual_close_reason::text,
     e.updated_at,
     e.adjustment_count,
     e.last_activity_at,
@@ -335,7 +335,7 @@ BEGIN
       WHEN e.system_cash_amount > 1000000 THEN 'high'
       WHEN e.system_cash_amount > 500000 THEN 'warning'
       ELSE 'normal'
-    END AS risk_level
+    END::text AS risk_level
   FROM enriched e
   WHERE CASE v_status
     WHEN 'open' THEN e.session_status = 'open'

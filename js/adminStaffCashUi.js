@@ -325,7 +325,12 @@ const adminStaffCashUi = {
     if (saveBtn) saveBtn.addEventListener('click', () => this._submitAction());
 
     const amountInput = document.getElementById('scp-action-new-amount');
-    if (amountInput) amountInput.addEventListener('input', () => this._updateActionDiff());
+    if (amountInput) {
+      amountInput.addEventListener('input', () => {
+        this._formatActionAmountInput();
+        this._updateActionDiff();
+      });
+    }
   },
 
   async _openDetail(row) {
@@ -537,16 +542,26 @@ const adminStaffCashUi = {
 
     const amountInput = document.getElementById('scp-action-new-amount');
     if (amountInput) {
-      amountInput.value = String(previous);
-      amountInput.min = '0';
+      amountInput.value = this._formatPlainAmount(previous);
     }
     const reasonInput = document.getElementById('scp-action-reason');
     if (reasonInput) reasonInput.value = '';
     const saveBtn = document.getElementById('scp-action-save-btn');
-    if (saveBtn) saveBtn.innerHTML = type === 'manual_close' ? 'Tutup Kas Manual' : 'Simpan Posisi Kas';
+    if (saveBtn) {
+      saveBtn.className = type === 'manual_close' ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm';
+      saveBtn.innerHTML = type === 'manual_close'
+        ? '<i data-lucide="lock" class="icon-sm"></i> Konfirmasi Tutup Kas'
+        : '<i data-lucide="save" class="icon-sm"></i> Simpan Posisi Kas';
+    }
 
     const panel = document.getElementById('scp-cash-action-panel');
-    if (panel) panel.style.display = '';
+    if (panel) {
+      panel.style.display = 'block';
+      requestAnimationFrame(() => {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (window.lucide) lucide.createIcons();
+      });
+    }
     this._updateActionDiff();
     amountInput?.focus();
   },
@@ -642,7 +657,11 @@ const adminStaffCashUi = {
       this._savingAction = false;
       if (saveBtn) {
         saveBtn.disabled = false;
-        saveBtn.innerHTML = isClose ? 'Tutup Kas Manual' : 'Simpan Posisi Kas';
+        saveBtn.className = isClose ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm';
+        saveBtn.innerHTML = isClose
+          ? '<i data-lucide="lock" class="icon-sm"></i> Konfirmasi Tutup Kas'
+          : '<i data-lucide="save" class="icon-sm"></i> Simpan Posisi Kas';
+        if (window.lucide) lucide.createIcons();
       }
       this._renderActionButtons(this._activeDetail || {});
     }
@@ -697,7 +716,20 @@ const adminStaffCashUi = {
   _parseActionAmount() {
     const value = document.getElementById('scp-action-new-amount')?.value;
     if (value === '' || value == null) return NaN;
-    return Number(value);
+    const digits = String(value).replace(/[^\d]/g, '');
+    return digits ? Number(digits) : NaN;
+  },
+
+  _formatPlainAmount(value) {
+    const amount = Math.round(this._num(value));
+    return amount > 0 ? amount.toLocaleString('id-ID') : '0';
+  },
+
+  _formatActionAmountInput() {
+    const input = document.getElementById('scp-action-new-amount');
+    if (!input) return;
+    const digits = String(input.value || '').replace(/[^\d]/g, '');
+    input.value = digits ? Number(digits).toLocaleString('id-ID') : '';
   },
 
   _actionLabel(actionType) {
