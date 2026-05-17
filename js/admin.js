@@ -17,7 +17,7 @@ const ADMIN = {
 
   // ── Init ─────────────────────────────────────────────────────
   async init() {
-    this.user = auth.requireRole('admin');
+    this.user = auth.requireAnyRole(['admin', 'owner']);
     if (!this.user) return;
     this.user = await auth.validateCurrentUser();
     if (!this.user) return;
@@ -370,7 +370,7 @@ const ADMIN = {
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
-      'staff-cash-position': 'Posisi Kas Staff',
+      'staff-cash-position': 'Kas Aktif & Posisi Staff',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;

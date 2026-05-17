@@ -86,6 +86,7 @@ const auth = {
   // ── Guards ───────────────────────────────────────────────
   getDefaultPageByRole(role) {
     if (role === 'admin')    return 'admin.html';
+    if (role === 'owner')    return 'admin.html';
     if (role === 'staff')    return 'pos.html';
     if (role === 'investor') return 'investor.html';
     return 'index.html';

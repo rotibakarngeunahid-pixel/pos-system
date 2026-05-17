@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#f97316" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="RBN Admin" />
-  <link rel="stylesheet" href="css/styles.css?v=20260517-manual-deposit-2" />
+  <link rel="stylesheet" href="css/styles.css?v=20260517-admin-cash-1" />
   <style>
     /* Page-specific overrides */
     .bg-alt { background: var(--bg-alt); }
@@ -137,8 +137,8 @@
       <button class="nav-item" data-admin-action="navigate" data-section="cash-categories" title="Kategori Kas">
         <i data-lucide="tag"></i><span class="nav-text">Kategori Kas</span>
       </button>
-      <button class="nav-item" data-admin-action="navigate" data-section="staff-cash-position" title="Posisi Kas Staff">
-        <i data-lucide="users"></i><span class="nav-text">Posisi Kas Staff</span>
+      <button class="nav-item" data-admin-action="navigate" data-section="staff-cash-position" title="Kas Aktif & Posisi Staff">
+        <i data-lucide="users"></i><span class="nav-text">Kas Aktif</span>
       </button>
     </nav>
 
@@ -954,7 +954,7 @@
       <!-- ══════════ STAFF CASH POSITION ══════════ -->
       <section class="admin-section" id="section-staff-cash-position">
         <div class="section-header">
-          <h2 class="section-title">Posisi Kas Staff</h2>
+          <h2 class="section-title">Kas Aktif &amp; Posisi Staff</h2>
           <div class="section-actions">
             <span class="text-muted text-xs" id="scp-last-updated"></span>
             <button class="btn btn-outline btn-sm" id="scp-refresh-btn">
@@ -968,11 +968,15 @@
           <select class="form-control w-auto" id="scp-filter-branch">
             <option value="">Semua Cabang</option>
           </select>
+          <select class="form-control w-auto" id="scp-filter-staff">
+            <option value="">Semua Staff</option>
+          </select>
           <select class="form-control w-auto" id="scp-filter-status">
-            <option value="all">Semua Status Shift</option>
-            <option value="open">Shift Aktif</option>
-            <option value="none">Tidak Ada Shift Aktif</option>
-            <option value="closed_today">Shift Ditutup Hari Ini</option>
+            <option value="open" selected>Kas Terbuka</option>
+            <option value="all">Semua Status</option>
+            <option value="closed">Kas Tertutup</option>
+            <option value="manual_closed">Ditutup Manual Admin</option>
+            <option value="adjusted">Ada Penyesuaian Manual</option>
           </select>
           <select class="form-control w-auto" id="scp-filter-risk">
             <option value="all">Semua Nominal</option>
@@ -980,6 +984,8 @@
             <option value="gt1m">Kas &gt; Rp 1.000.000</option>
             <option value="pending">Ada Setoran Pending</option>
           </select>
+          <input type="date" class="form-control w-auto" id="scp-filter-date-from" title="Dari tanggal buka" />
+          <input type="date" class="form-control w-auto" id="scp-filter-date-to" title="Sampai tanggal buka" />
         </div>
 
         <!-- Summary Cards -->
@@ -991,19 +997,21 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sesi</th>
                   <th>Staff</th>
                   <th>Cabang</th>
                   <th>Status</th>
                   <th>Dibuka</th>
-                  <th>Posisi Kas</th>
+                  <th>Ditutup</th>
+                  <th>Nominal Sistem</th>
+                  <th>Posisi Aktual</th>
+                  <th>Manual</th>
                   <th>Pending</th>
-                  <th>Terkonfirmasi</th>
-                  <th>Aktivitas Terakhir</th>
                   <th>Aksi</th>
                 </tr>
               </thead>
               <tbody id="scp-table-body">
-                <tr><td colspan="9" class="empty-td">Pilih menu Posisi Kas Staff untuk memuat data</td></tr>
+                <tr><td colspan="11" class="empty-td">Pilih menu Kas Aktif untuk memuat data</td></tr>
               </tbody>
             </table>
           </div>
@@ -1133,9 +1141,9 @@
 
   <!-- Staff Cash Position Detail Modal -->
   <div class="modal-overlay" id="modal-scp-detail">
-    <div class="modal" style="max-width:680px;width:95vw">
+    <div class="modal" style="max-width:920px;width:96vw">
       <div class="modal-header">
-        <span class="modal-title">Detail Posisi Kas Staff</span>
+        <span class="modal-title">Detail Kas Staff</span>
         <button class="modal-close" id="scp-detail-close-btn">&times;</button>
       </div>
       <div class="modal-body flex flex-col gap-4">
@@ -1146,6 +1154,47 @@
           <div><div class="form-label text-muted">Cabang</div><div id="scp-detail-branch">—</div></div>
           <div><div class="form-label text-muted">Status Shift</div><div id="scp-detail-status">—</div></div>
           <div><div class="form-label text-muted">Session ID</div><div class="text-muted text-xs" id="scp-detail-session-id">—</div></div>
+        </div>
+
+        <div class="grid-2-col-s3" style="gap:12px">
+          <div><div class="form-label text-muted">Waktu Buka</div><div class="text-muted text-xs" id="scp-detail-opened-at">&mdash;</div></div>
+          <div><div class="form-label text-muted">Waktu Tutup</div><div class="text-muted text-xs" id="scp-detail-closed-at">&mdash;</div></div>
+          <div><div class="form-label text-muted">Status Manual</div><div id="scp-detail-manual-status">&mdash;</div></div>
+          <div><div class="form-label text-muted">Update Terakhir</div><div class="text-muted text-xs" id="scp-detail-updated-at">&mdash;</div></div>
+        </div>
+
+        <div id="scp-cash-action-panel" class="card" style="display:none;padding:14px 16px;border-color:rgba(234,88,12,.35);background:rgba(255,247,237,.55)">
+          <div class="flex justify-between gap-2 flex-wrap mb-3" style="align-items:center">
+            <div class="card-title" id="scp-action-title" style="font-size:13px;font-weight:800">Edit Posisi Kas</div>
+            <div class="text-xs text-muted">Alasan wajib diisi dan akan tersimpan di audit log.</div>
+          </div>
+          <div class="grid-2-col-s3" style="gap:12px">
+            <div>
+              <div class="form-label text-muted">Nominal Sebelumnya</div>
+              <div class="fw-700" id="scp-action-previous">&mdash;</div>
+            </div>
+            <div>
+              <div class="form-label text-muted">Nominal Sistem</div>
+              <div class="fw-700" id="scp-action-system">&mdash;</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nominal Baru / Aktual *</label>
+              <input type="number" min="0" step="1" class="form-control" id="scp-action-new-amount" placeholder="0" />
+            </div>
+            <div>
+              <div class="form-label text-muted">Selisih Adjustment</div>
+              <div class="fw-700" id="scp-action-diff">&mdash;</div>
+            </div>
+          </div>
+          <div class="form-group mt-3">
+            <label class="form-label">Alasan *</label>
+            <textarea class="form-control" id="scp-action-reason" rows="3" placeholder="Contoh: Staff lupa tutup shift / koreksi hasil hitung kas aktual"></textarea>
+          </div>
+          <div class="text-danger text-sm mt-2" id="scp-action-error"></div>
+          <div class="flex justify-end gap-2 mt-3">
+            <button class="btn btn-outline btn-sm" id="scp-action-cancel-btn">Batal</button>
+            <button class="btn btn-primary btn-sm" id="scp-action-save-btn">Simpan Posisi Kas</button>
+          </div>
         </div>
 
         <!-- Cash Breakdown -->
@@ -1166,6 +1215,31 @@
                   <td class="text-right fw-700" style="padding:8px 0 4px" id="scp-detail-expected">—</td>
                 </tr>
                 <tr><td class="text-muted" style="padding:4px 0;font-size:12px">Setoran Pending</td><td class="text-right text-warning" style="font-size:12px" id="scp-detail-pending">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="padding:12px 16px">
+          <div class="grid-2-col-s3" style="gap:12px">
+            <div>
+              <div class="form-label text-muted">Posisi Kas Aktual Terbaru</div>
+              <div class="fw-700" id="scp-detail-actual">&mdash;</div>
+            </div>
+            <div>
+              <div class="form-label text-muted">Selisih Aktual vs Sistem</div>
+              <div class="fw-700" id="scp-detail-adjustment-diff">&mdash;</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-title mb-2" style="font-size:13px;font-weight:700">Riwayat Audit Perubahan Kas</div>
+          <div class="table-wrap" style="max-height:220px;overflow-y:auto">
+            <table style="font-size:12px">
+              <thead><tr><th>Waktu</th><th>Aksi</th><th>Sebelum</th><th>Sesudah</th><th>Selisih</th><th>Admin</th><th>Alasan</th></tr></thead>
+              <tbody id="scp-detail-adjustments-body">
+                <tr><td colspan="7" class="empty-td">Memuat...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1200,6 +1274,12 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" id="scp-detail-close-btn-footer">Tutup</button>
+        <button class="btn btn-outline" id="scp-edit-actual-btn">
+          <i data-lucide="pencil" class="icon-sm"></i> Edit Posisi Kas
+        </button>
+        <button class="btn btn-danger" id="scp-manual-close-btn">
+          <i data-lucide="lock" class="icon-sm"></i> Tutup Kas Manual
+        </button>
       </div>
     </div>
   </div>
@@ -2127,16 +2207,16 @@
   <script src="js/utils/validator.js"></script>
   <script src="js/ui.js?v=20260516-crud-friendly-1"></script>
   <script src="js/services/inventoryService.js"></script>
-  <script src="js/services/cashService.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/services/cashService.js?v=20260517-admin-cash-1"></script>
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js"></script>
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260517-manual-deposit-3"></script>
   <script src="js/adminDepositUi.js?v=20260517-manual-deposit-3"></script>
-  <script src="js/adminStaffCashUi.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/adminStaffCashUi.js?v=20260517-admin-cash-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="js/admin.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/admin.js?v=20260517-admin-cash-1"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>

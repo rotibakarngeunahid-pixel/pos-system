@@ -292,6 +292,179 @@ const cashService = {
     return data || [];
   },
 
+  async getAdminCashSessions({ adminId, branchId = null, staffId = null, status = 'open', dateFrom = null, dateTo = null } = {}) {
+    if (!adminId) throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
+
+    const { data, error } = await db.rpc('get_admin_cash_sessions', {
+      p_admin_id:   adminId,
+      p_branch_id:  branchId || null,
+      p_staff_id:   staffId || null,
+      p_status:     status || 'open',
+      p_date_from:  dateFrom || null,
+      p_date_to:    dateTo || null
+    });
+    if (error) {
+      const msg = String(error.message || '').toLowerCase();
+      if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
+        throw new Error('Fitur kas admin perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
+      }
+      throw error;
+    }
+    return data || [];
+  },
+
+  async getAdminCashSessionDetail({ sessionId }) {
+    if (!sessionId) throw new Error('Session kas wajib dipilih');
+
+    const { data: session, error: sessErr } = await db.from('cashier_sessions')
+      .select(`
+        id, branch_id, staff_id, status, opened_at, closed_at,
+        opening_cash, closing_cash, expected_cash, total_sales,
+        closed_manually, manual_closed_by, manual_closed_at,
+        manual_close_reason, current_cash_amount, has_manual_adjustment,
+        updated_at
+      `)
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (sessErr) {
+      const msg = String(sessErr.message || '').toLowerCase();
+      if (sessErr.code === '42703' || msg.includes('closed_manually') || msg.includes('current_cash_amount')) {
+        throw new Error('Fitur kas admin perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
+      }
+      throw sessErr;
+    }
+    if (!session) throw new Error('Kas tidak ditemukan');
+
+    const branchId = session.branch_id;
+    const staffId = session.staff_id;
+    const depositsQuery = db.from('cash_deposits')
+      .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id, deposit_account_id, deposit_account_name_snapshot, proof_url, proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at')
+      .eq('staff_id', staffId)
+      .eq('branch_id', branchId)
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    const adjustmentsQuery = db.from('cash_session_adjustments')
+      .select('id, cash_session_id, branch_id, staff_id, action_type, previous_cash_amount, new_cash_amount, adjustment_amount, reason, created_by, created_by_name, created_at, metadata')
+      .eq('cash_session_id', sessionId)
+      .order('created_at', { ascending: false });
+
+    const [
+      branchRes,
+      staffRes,
+      summaryRes,
+      logsRes,
+      depositsRes,
+      adjustmentsRes
+    ] = await Promise.allSettled([
+      db.from('branches').select('id, name').eq('id', branchId).maybeSingle(),
+      db.from('users').select('id, name, role').eq('id', staffId).maybeSingle(),
+      this.getSummary({ branchId, sessionId }),
+      this.getLogs({ branchId, sessionId, limit: 30 }),
+      depositsQuery,
+      adjustmentsQuery
+    ]);
+
+    const unwrapDb = (res, fallback = null) => {
+      if (res.status !== 'fulfilled') throw res.reason;
+      if (res.value?.error) throw res.value.error;
+      return res.value?.data ?? fallback;
+    };
+    const unwrapValue = (res, fallback = null) => {
+      if (res.status !== 'fulfilled') throw res.reason;
+      return res.value ?? fallback;
+    };
+
+    const branch = unwrapDb(branchRes, null);
+    const staff = unwrapDb(staffRes, null);
+    const summary = unwrapValue(summaryRes, null);
+    const logs = unwrapValue(logsRes, []);
+    const deposits = unwrapDb(depositsRes, []);
+    let adjustments = [];
+    try {
+      adjustments = unwrapDb(adjustmentsRes, []);
+    } catch (e) {
+      const msg = String(e?.message || '').toLowerCase();
+      if (e?.code === '42P01' || msg.includes('cash_session_adjustments')) {
+        adjustments = [];
+      } else {
+        throw e;
+      }
+    }
+
+    const num = value => Number.parseFloat(value || 0);
+    const systemCashAmount = summary
+      ? num(summary.expectedCash)
+      : num(session.expected_cash);
+    const actualCashAmount = session.current_cash_amount != null
+      ? num(session.current_cash_amount)
+      : session.closing_cash != null
+        ? num(session.closing_cash)
+        : systemCashAmount;
+
+    return {
+      session: {
+        ...session,
+        branch_name: branch?.name || null,
+        staff_name: staff?.name || null
+      },
+      summary,
+      logs: logs || [],
+      deposits: deposits || [],
+      adjustments: adjustments || [],
+      systemCashAmount,
+      actualCashAmount
+    };
+  },
+
+  async manualCloseCashSession({ sessionId, adminId, actualCashAmount, reason, expectedUpdatedAt = null }) {
+    if (!adminId) throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
+    if (!sessionId) throw new Error('Session kas wajib dipilih');
+    if (!reason?.trim()) throw new Error('Alasan wajib diisi');
+    const amount = safeNum(actualCashAmount, 'Nominal kas aktual');
+    if (amount < 0) throw new Error('Nominal kas aktual tidak boleh negatif');
+
+    const { data, error } = await db.rpc('admin_manual_close_cash_session', {
+      p_admin_id: adminId,
+      p_session_id: sessionId,
+      p_actual_cash_amount: amount,
+      p_reason: reason.trim(),
+      p_expected_updated_at: expectedUpdatedAt || null
+    });
+    if (error) {
+      const msg = String(error.message || '').toLowerCase();
+      if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
+        throw new Error('Fitur tutup kas manual perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
+      }
+      throw error;
+    }
+    return data;
+  },
+
+  async adjustCashSessionActual({ sessionId, adminId, newCashAmount, reason, expectedUpdatedAt = null }) {
+    if (!adminId) throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
+    if (!sessionId) throw new Error('Session kas wajib dipilih');
+    if (!reason?.trim()) throw new Error('Alasan wajib diisi');
+    const amount = safeNum(newCashAmount, 'Nominal kas aktual');
+    if (amount < 0) throw new Error('Nominal kas aktual tidak boleh negatif');
+
+    const { data, error } = await db.rpc('admin_adjust_cash_session_actual', {
+      p_admin_id: adminId,
+      p_session_id: sessionId,
+      p_new_cash_amount: amount,
+      p_reason: reason.trim(),
+      p_expected_updated_at: expectedUpdatedAt || null
+    });
+    if (error) {
+      const msg = String(error.message || '').toLowerCase();
+      if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
+        throw new Error('Fitur edit posisi kas perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
+      }
+      throw error;
+    }
+    return data;
+  },
+
   // ── Save a cash category (create or update) ───────────────────
   async saveCategory({ id = null, name, type }) {
     if (!name?.trim() || !type) throw new Error('Nama dan tipe kategori wajib diisi');

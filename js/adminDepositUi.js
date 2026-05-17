@@ -16,7 +16,7 @@ const adminDepositUi = {
   init() {
     document.addEventListener('DOMContentLoaded', async () => {
       try {
-        const adm = auth.requireRole('admin');
+        const adm = auth.requireAnyRole(['admin', 'owner']);
         if (!adm) return;
         this.bindElements();
         await this.loadBranches();
