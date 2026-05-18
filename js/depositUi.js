@@ -29,6 +29,17 @@ const depositUi = {
     return this.selectedClosedSession !== null && this.selectedClosedSession.session_status === 'closed';
   },
 
+  isFormBlocked() {
+    const sess = this.selectedClosedSession;
+    return !this.hasEligibleClosedShift()
+      || Boolean(sess?.block_reason)
+      || this.depositableCash <= 0;
+  },
+
+  canInteractWithForm() {
+    return !this.isSubmitting && !this.isFormBlocked();
+  },
+
   init() {
     const start = () => {
       try {
@@ -65,13 +76,16 @@ const depositUi = {
     this.el.notesInput = document.getElementById('deposit-notes');
     this.el.submitBtn = document.getElementById('btn-submit-deposit');
     this.el.historyBody = document.getElementById('deposit-history-body');
-    this.el.infoNoCash = document.getElementById('deposit-no-cash');
+    this.el.blockingAlert = document.getElementById('deposit-blocking-alert');
+    this.el.infoNoCash = null; // element removed from HTML, kept for safety
     this.el.success = document.getElementById('deposit-success');
     this.el.summaryShift = document.getElementById('deposit-summary-shift');
     this.el.summaryStaff = document.getElementById('deposit-summary-staff');
     this.el.summaryTime = document.getElementById('deposit-summary-time');
+    this.el.shiftMetaLabel = document.getElementById('deposit-shift-meta-label');
     this.el.headerShift = document.getElementById('deposit-header-shift');
     this.el.cashCard = document.getElementById('deposit-cash-card');
+    this.el.cardLabel = document.getElementById('deposit-card-label');
 
     if (this.el.amountInput) this.el.amountInput.addEventListener('input', () => this.onAmountInput());
     this.el.quickButtons.forEach(btn => {
@@ -106,15 +120,18 @@ const depositUi = {
         return;
       }
       if (e.target.closest('a')) return;
+      if (!this.canInteractWithForm()) return;
       this.el.fileInput?.click();
     });
     zone.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       if (e.target.closest('.deposit-proof-remove')) return;
       e.preventDefault();
+      if (!this.canInteractWithForm()) return;
       this.el.fileInput?.click();
     });
     zone.addEventListener('dragover', e => {
+      if (!this.canInteractWithForm()) return;
       e.preventDefault();
       zone.classList.add('dragover');
     });
@@ -124,6 +141,7 @@ const depositUi = {
     zone.addEventListener('drop', e => {
       e.preventDefault();
       zone.classList.remove('dragover');
+      if (!this.canInteractWithForm()) return;
       this.onFileChange(e.dataTransfer?.files);
     });
   },
@@ -148,7 +166,6 @@ const depositUi = {
     this.accountLoadError = null;
     this.renderAccountLoading();
 
-    // Load eligible closed sessions dari RPC
     try {
       this.eligibleSessions = await depositService.getEligibleSessions({ branchId, staffId });
     } catch (e) {
@@ -156,7 +173,6 @@ const depositUi = {
       this.eligibleSessions = [];
     }
 
-    // Pilih session: preferSessionId (dari close shift) atau yang terbaru
     const preferred = preferSessionId
       ? this.eligibleSessions.find(s => s.session_id === preferSessionId)
       : null;
@@ -199,17 +215,11 @@ const depositUi = {
     const hasEligible = this.hasEligibleClosedShift();
 
     if (!hasEligible) {
-      // Update konten modal sesuai kondisi terkini
       if (window.POS && typeof POS.updateDepositBlocker === 'function') {
         POS.updateDepositBlocker();
       }
-      // Tampilkan hanya jika tab deposits sedang aktif
-      const panel = document.getElementById('panel-deposits');
-      if (panel && panel.classList.contains('active')) {
-        if (typeof openModal === 'function') openModal('modal-deposit-blocked');
-      }
+      // Modal hanya dibuka dari switchMainTab, bukan dari refresh
     } else {
-      // Ada closed session → tutup blocker jika terbuka
       if (typeof closeModal === 'function') closeModal('modal-deposit-blocked');
     }
   },
@@ -225,59 +235,180 @@ const depositUi = {
     if (this.el.summaryTime) this.el.summaryTime.textContent = text;
   },
 
+  getBlockedReasonMeta() {
+    const pos = this.getPOS();
+    const sess = this.selectedClosedSession;
+    const hasEligible = this.hasEligibleClosedShift();
+    const hasOpenShift = Boolean(pos?.session?.id);
+
+    if (!hasEligible && hasOpenShift) {
+      return {
+        type: 'shift-open',
+        title: 'Setoran belum bisa dilakukan',
+        body: 'Tutup shift terlebih dahulu agar kas akhir terkunci. Setelah itu form setoran akan aktif.',
+        ctaLabel: 'Tutup Shift Sekarang',
+        ctaAction: 'deposit-blocker-tutup-shift'
+      };
+    }
+    if (!hasEligible) {
+      return {
+        type: 'no-shift',
+        title: 'Belum ada shift tertutup',
+        body: 'Buka shift, selesaikan transaksi, lalu tutup shift sebelum melakukan setoran tunai.',
+        ctaLabel: 'Buka Shift',
+        ctaAction: 'deposit-blocker-buka-shift'
+      };
+    }
+    if (sess?.block_reason) {
+      const reason = String(sess.block_reason).toLowerCase();
+      // Match Indonesian block_reason strings from RPC get_deposit_eligible_sessions
+      const isPending = reason.includes('menunggu') || reason.includes('pending');
+      const isConfirmed = reason.includes('selesai') || reason.includes('terkonfirmasi') || reason.includes('confirm');
+      const isRejected = reason.includes('ditolak') || reason.includes('reject');
+
+      if (isPending) {
+        return {
+          type: 'pending',
+          title: 'Setoran sedang diproses',
+          body: 'Setoran shift ini sudah dikirim dan menunggu konfirmasi admin.',
+          ctaLabel: null,
+          ctaAction: null
+        };
+      }
+      if (isConfirmed) {
+        return {
+          type: 'confirmed',
+          title: 'Setoran shift ini selesai',
+          body: 'Shift ini sudah memiliki setoran terkonfirmasi.',
+          ctaLabel: null,
+          ctaAction: null
+        };
+      }
+      if (isRejected) {
+        return {
+          type: 'rejected',
+          title: 'Setoran sebelumnya ditolak',
+          body: this.esc(sess.block_reason),
+          ctaLabel: null,
+          ctaAction: null
+        };
+      }
+      return {
+        type: 'blocked',
+        title: 'Setoran belum bisa dilakukan',
+        body: this.esc(sess.block_reason),
+        ctaLabel: null,
+        ctaAction: null
+      };
+    }
+    if (hasEligible && this.depositableCash <= 0) {
+      return {
+        type: 'no-cash',
+        title: 'Tidak ada kas yang dapat disetor',
+        body: 'Shift ini sudah ditutup tetapi kas yang dapat disetor adalah Rp 0.',
+        ctaLabel: null,
+        ctaAction: null
+      };
+    }
+    return null;
+  },
+
+  renderBlockingAlert() {
+    const alert = this.el.blockingAlert;
+    if (!alert) return;
+
+    const meta = this.getBlockedReasonMeta();
+    if (!meta) {
+      alert.style.display = 'none';
+      alert.innerHTML = '';
+      return;
+    }
+
+    const ctaHtml = meta.ctaLabel && meta.ctaAction
+      ? `<button type="button" class="deposit-blocking-cta" data-action="${this.esc(meta.ctaAction)}">${this.esc(meta.ctaLabel)}</button>`
+      : '';
+
+    alert.innerHTML = `
+      <div class="deposit-blocking-alert-icon">
+        <i data-lucide="alert-circle"></i>
+      </div>
+      <div class="deposit-blocking-alert-body">
+        <strong class="deposit-blocking-alert-title">${this.esc(meta.title)}</strong>
+        <p class="deposit-blocking-alert-text">${meta.body}</p>
+        ${ctaHtml}
+      </div>`;
+    alert.style.display = '';
+    if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  applyFormAvailability() {
+    const blocked = this.isFormBlocked();
+    const disabled = blocked || this.isSubmitting;
+
+    if (this.el.amountInput) this.el.amountInput.disabled = disabled;
+    if (this.el.fileInput) this.el.fileInput.disabled = disabled;
+    if (this.el.notesInput) this.el.notesInput.disabled = disabled;
+
+    this.el.amountInput?.closest('.deposit-currency-field')?.classList.toggle('is-disabled', disabled);
+
+    if (this.el.proofZone) {
+      this.el.proofZone.classList.toggle('is-disabled', disabled);
+      this.el.proofZone.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      this.el.proofZone.setAttribute('tabindex', disabled ? '-1' : '0');
+      this.el.proofZone.setAttribute('role', disabled ? 'presentation' : 'button');
+    }
+
+    this.el.accountOptions?.querySelectorAll('[data-deposit-account-id]').forEach(card => {
+      card.classList.toggle('is-disabled', disabled);
+      card.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      card.setAttribute('tabindex', disabled ? '-1' : '0');
+      const input = card.querySelector('input[type="radio"]');
+      if (input) input.disabled = disabled;
+    });
+
+    this.el.quickButtons.forEach(btn => { btn.disabled = disabled; });
+
+    if (this.el.proofHint && blocked && !this.hasEligibleClosedShift()) {
+      this.el.proofHint.textContent = 'Upload bukti aktif setelah shift ditutup.';
+    }
+  },
+
   updateSummaryCard() {
     const pos = this.getPOS();
     const sess = this.selectedClosedSession;
     const hasEligible = this.hasEligibleClosedShift();
     const staffLabel = pos?.user?.name || '-';
 
-    // Label shift
     const shiftLabel = sess
       ? `Shift #${sess.session_id} (Tertutup)`
       : 'Belum ada shift tertutup';
 
-    const cardLabel = document.getElementById('deposit-card-label');
-    if (cardLabel) cardLabel.textContent = hasEligible ? 'Kas Final Shift' : 'Menunggu Shift Ditutup';
-
+    if (this.el.cardLabel) {
+      this.el.cardLabel.textContent = hasEligible ? 'Kas Final Shift' : 'Menunggu Shift Ditutup';
+    }
+    if (this.el.shiftMetaLabel) {
+      this.el.shiftMetaLabel.textContent = hasEligible ? 'Shift Tertutup' : 'Status Shift';
+    }
     if (this.el.expectedCashEl) {
       this.el.expectedCashEl.textContent = hasEligible ? fRp(this.depositableCash) : '—';
     }
     if (this.el.summaryShift) this.el.summaryShift.textContent = shiftLabel;
     if (this.el.summaryStaff) this.el.summaryStaff.textContent = staffLabel;
-
     if (this.el.headerShift) {
       this.el.headerShift.textContent = hasEligible
         ? shiftLabel
         : 'Belum ada shift tertutup yang bisa disetor';
     }
 
-    // Blocking state info
-    if (this.el.infoNoCash) {
-      const pos = this.getPOS();
-      const hasOpenShift = Boolean(pos?.session?.id);
-      if (!hasEligible && hasOpenShift) {
-        this.el.infoNoCash.textContent = 'Tutup shift terlebih dahulu sebelum setoran tunai';
-        this.el.infoNoCash.style.display = '';
-      } else if (!hasEligible) {
-        this.el.infoNoCash.textContent = 'Belum ada shift tertutup untuk disetor';
-        this.el.infoNoCash.style.display = '';
-      } else if (sess?.block_reason) {
-        this.el.infoNoCash.textContent = sess.block_reason;
-        this.el.infoNoCash.style.display = '';
-      } else if (hasEligible && this.depositableCash <= 0) {
-        this.el.infoNoCash.textContent = 'Tidak ada kas yang dapat disetor pada shift ini';
-        this.el.infoNoCash.style.display = '';
-      } else {
-        this.el.infoNoCash.style.display = 'none';
-      }
-    }
-
     const noCash = hasEligible && this.depositableCash <= 0;
-    if (this.el.panel)    this.el.panel.classList.toggle('no-cash', noCash);
+    if (this.el.panel) this.el.panel.classList.toggle('no-cash', noCash);
     if (this.el.cashCard) {
       this.el.cashCard.classList.toggle('no-cash', noCash);
       this.el.cashCard.classList.toggle('no-session', !hasEligible);
     }
+
+    this.renderBlockingAlert();
+    this.applyFormAvailability();
     this.updateClock();
   },
 
@@ -327,6 +458,9 @@ const depositUi = {
       : (accounts.some(a => String(a.id) === String(lastId)) ? lastId : '');
     this.el.accountSelect.value = selectedId;
 
+    const blocked = this.isFormBlocked();
+    const disabled = blocked || this.isSubmitting;
+
     this.el.accountOptions.innerHTML = accounts.map(account => {
       const id = this.esc(account.id);
       const checked = String(account.id) === String(selectedId);
@@ -334,12 +468,13 @@ const depositUi = {
       const detail = this.esc(this.getAccountDetail(account));
       const icon = this.getAccountIcon(account);
       return `
-        <label class="deposit-method-card ${checked ? 'selected' : ''}"
+        <label class="deposit-method-card ${checked ? 'selected' : ''} ${disabled ? 'is-disabled' : ''}"
           data-deposit-account-id="${id}"
           role="radio"
-          tabindex="0"
-          aria-checked="${checked ? 'true' : 'false'}">
-          <input type="radio" name="deposit-method" value="${id}" ${checked ? 'checked' : ''} tabindex="-1" />
+          tabindex="${disabled ? '-1' : '0'}"
+          aria-checked="${checked ? 'true' : 'false'}"
+          aria-disabled="${disabled ? 'true' : 'false'}">
+          <input type="radio" name="deposit-method" value="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} tabindex="-1" />
           <span class="deposit-method-icon"><i data-lucide="${icon}" class="icon-sm"></i></span>
           <span class="deposit-method-copy">
             <strong>${label}</strong>
@@ -379,12 +514,13 @@ const depositUi = {
     if (raw.includes('bca')) return 1;
     if (raw.includes('bni')) return 2;
     if (raw.includes('bri')) return 3;
-    if (account?.type === 'cash' || raw.includes('manager')) return 4;
+    if (depositService.isCashDepositMethod(account) || raw.includes('manager')) return 4;
     if (account?.type === 'qris') return 5;
     return 9;
   },
 
   selectAccount(id, { persist = true } = {}) {
+    if (!this.canInteractWithForm()) return;
     if (!this.el.accountSelect) return;
     this.el.accountSelect.value = id || '';
     this.el.accountOptions?.querySelectorAll('[data-deposit-account-id]').forEach(card => {
@@ -401,13 +537,18 @@ const depositUi = {
 
   updateMethodDependentFields() {
     const account = this.getSelectedAccount();
+    const isCash = account ? depositService.isCashDepositMethod(account) : false;
+    const blocked = this.isFormBlocked();
+
     if (this.el.proofHint) {
-      if (!account) {
+      if (blocked) {
+        this.el.proofHint.textContent = 'Upload bukti aktif setelah shift ditutup.';
+      } else if (!account) {
         this.el.proofHint.textContent = 'Pilih metode setoran terlebih dahulu.';
-      } else if (account.type === 'cash') {
+      } else if (isCash) {
         this.el.proofHint.textContent = 'Bukti opsional untuk penyerahan tunai langsung.';
       } else if (account.type === 'qris') {
-        this.el.proofHint.textContent = 'Bukti wajib untuk pembayaran QRIS.';
+        this.el.proofHint.textContent = 'Bukti wajib untuk QRIS/e-wallet.';
       } else {
         this.el.proofHint.textContent = 'Bukti wajib untuk transfer bank.';
       }
@@ -422,18 +563,18 @@ const depositUi = {
 
   isProofRequired(account = this.getSelectedAccount()) {
     if (!account) return true;
-    return account.type !== 'cash';
+    return !depositService.isCashDepositMethod(account);
   },
 
   getAccountIcon(account) {
-    if (account?.type === 'cash') return 'hand-coins';
+    if (depositService.isCashDepositMethod(account)) return 'hand-coins';
     if (account?.type === 'qris') return 'qr-code';
     return 'landmark';
   },
 
   getAccountDetail(account) {
     if (!account) return '';
-    if (account.type === 'cash') return 'Serahkan langsung ke manager';
+    if (depositService.isCashDepositMethod(account)) return 'Serahkan langsung ke manager';
     const parts = [account.bank_name, account.account_number].filter(Boolean);
     if (parts.length) return parts.join(' - ');
     if (account.type === 'qris') return 'Scan atau unggah bukti QRIS';
@@ -462,13 +603,14 @@ const depositUi = {
   },
 
   onAmountInput() {
+    if (!this.canInteractWithForm()) return;
     const amount = this.parseAmountInput(this.el.amountInput?.value || '');
     this.setAmountInput(amount, { validate: false });
     this.updateSubmitState();
   },
 
   setQuickAmount(value) {
-    if (this.isSubmitting) return;
+    if (!this.canInteractWithForm()) return;
     const amount = value === 'all' ? this.depositableCash : Number(value || 0);
     this.setAmountInput(amount);
   },
@@ -507,21 +649,20 @@ const depositUi = {
   },
 
   updateSubmitState() {
+    this.applyFormAvailability();
     const { valid } = this.validateAmount();
     const account = this.getSelectedAccount();
     const proofOk = !this.isProofRequired(account) || Boolean(this.selectedFile);
-    const hasEligible = this.hasEligibleClosedShift();
-    const sess = this.selectedClosedSession;
-    // Disable jika tidak ada shift closed, ada deposit aktif, atau kas 0
-    const blocked = !hasEligible || Boolean(sess?.block_reason) || this.depositableCash <= 0;
+    const blocked = this.isFormBlocked();
     const disabled = this.isSubmitting || blocked || !valid || !account || !proofOk;
     if (this.el.submitBtn) this.el.submitBtn.disabled = disabled;
-    this.el.quickButtons.forEach(btn => {
-      btn.disabled = this.isSubmitting || !hasEligible || this.depositableCash <= 0;
-    });
   },
 
   onFileChange(files) {
+    if (!this.canInteractWithForm()) {
+      if (this.el.fileInput) this.el.fileInput.value = '';
+      return;
+    }
     const file = files && files[0];
     if (!file) {
       this.removeFile({ clearInput: false });
@@ -608,6 +749,7 @@ const depositUi = {
   },
 
   async onSubmit() {
+    if (this.isSubmitting) return;
     const pos = this.getPOS();
     if (!pos?.branch) {
       if (typeof showToast === 'function') showToast('Cabang belum dipilih', 'error');
@@ -683,7 +825,7 @@ const depositUi = {
   },
 
   renderSubmitting(isSubmitting) {
-    this.updateSubmitState();
+    this.applyFormAvailability();
     if (!this.el.submitBtn) return;
     this.el.submitBtn.classList.toggle('loading', isSubmitting);
     this.el.submitBtn.innerHTML = isSubmitting
@@ -757,7 +899,14 @@ const depositUi = {
         resolve(result);
       };
 
-      overlay.querySelector('.deposit-confirm-ok')?.addEventListener('click', () => close(true), { signal: ac.signal });
+      const okBtn = overlay.querySelector('.deposit-confirm-ok');
+      let okClicked = false;
+      okBtn?.addEventListener('click', () => {
+        if (okClicked) return;
+        okClicked = true;
+        if (okBtn) okBtn.disabled = true;
+        close(true);
+      }, { signal: ac.signal });
       overlay.querySelector('.deposit-confirm-cancel')?.addEventListener('click', () => close(false), { signal: ac.signal });
       overlay.querySelector('.deposit-confirm-close')?.addEventListener('click', () => close(false), { signal: ac.signal });
       overlay.addEventListener('click', e => {
@@ -766,15 +915,24 @@ const depositUi = {
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') close(false);
       }, { signal: ac.signal });
-      setTimeout(() => overlay.querySelector('.deposit-confirm-ok')?.focus(), 80);
+      setTimeout(() => okBtn?.focus(), 80);
     });
   },
 
   clearForm({ keepAccount = false } = {}) {
     if (this.el.amountInput) this.el.amountInput.value = '';
-    if (!keepAccount && this.el.accountSelect) this.selectAccount('', { persist: false });
+    if (!keepAccount && this.el.accountSelect) {
+      this.el.accountSelect.value = '';
+      this.el.accountOptions?.querySelectorAll('[data-deposit-account-id]').forEach(card => {
+        card.classList.remove('selected');
+        card.setAttribute('aria-checked', 'false');
+        const input = card.querySelector('input[type="radio"]');
+        if (input) input.checked = false;
+      });
+    }
     if (this.el.notesInput) this.el.notesInput.value = '';
     this.removeFile();
+    this.applyFormAvailability();
     this.updateSubmitState();
   },
 

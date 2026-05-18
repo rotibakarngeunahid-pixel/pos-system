@@ -1121,6 +1121,7 @@ const POS = {
   // ── Tab Switching ─────────────────────────────────────────────
   switchMainTab(tab, btnEl) {
     this.currentMainTab = tab;
+    document.body.classList.toggle('deposit-tab-active', tab === 'deposits');
     document.querySelectorAll('.pos-tab-item').forEach(b => b.classList.remove('active'));
     if (btnEl?.classList?.contains('pos-tab-item')) {
       btnEl.classList.add('active');
@@ -1165,6 +1166,7 @@ const POS = {
   switchMobileDrawerTab(tab, btnEl) {
     document.querySelectorAll('.drawer-btn').forEach(b => b.classList.remove('active'));
     if (btnEl) btnEl.classList.add('active');
+    document.body.classList.toggle('deposit-tab-active', tab === 'deposits');
 
     if (tab === 'kasir') {
       document.getElementById('panel-kasir').style.display = '';
