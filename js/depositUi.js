@@ -234,6 +234,9 @@ const depositUi = {
       if (window.POS && typeof POS.updateDepositBlocker === 'function') {
         POS.updateDepositBlocker();
       }
+      if (pos.session?.id && typeof openModal === 'function') {
+        openModal('modal-deposit-blocked');
+      }
     } else {
       if (typeof closeModal === 'function') closeModal('modal-deposit-blocked');
     }

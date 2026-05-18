@@ -1153,11 +1153,6 @@ const POS = {
     if (tab === 'stock')        { if (this._stockDirty) this._stockDirty = false; this.loadInventorySummary(); }
     if (tab === 'cash')         { if (this._cashDirty) this._cashDirty = false; this.updateCashSummary(); }
     if (tab === 'deposits') {
-      // Tampilkan blocker langsung jika shift sedang buka dan belum ada closed session
-      if (this.session && window.depositUi && !depositUi.isRefreshing && !depositUi.hasEligibleClosedShift()) {
-        POS.updateDepositBlocker();
-        openModal('modal-deposit-blocked');
-      }
       if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
     }
     if (tab === 'transactions') this.loadSessionTransactions();
@@ -1190,10 +1185,6 @@ const POS = {
       if (tab === 'stock')        this.loadInventorySummary();
       if (tab === 'cash')         this.updateCashSummary();
       if (tab === 'deposits') {
-        if (this.session && window.depositUi && !depositUi.hasEligibleClosedShift()) {
-          POS.updateDepositBlocker();
-          openModal('modal-deposit-blocked');
-        }
         if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
       }
       if (tab === 'transactions') this.loadSessionTransactions();
