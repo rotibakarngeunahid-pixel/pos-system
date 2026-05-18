@@ -61,6 +61,14 @@ const POS = {
         case 'test-print': POS.testPrint(); break;
         case 'confirm-open-shift': POS.confirmOpenShift(); break;
         case 'confirm-close-shift': POS.confirmCloseShift(); break;
+        case 'deposit-blocker-tutup-shift':
+          closeModal('modal-deposit-blocked');
+          setTimeout(() => POS.openCloseShiftModal(), 160);
+          break;
+        case 'deposit-blocker-buka-shift':
+          closeModal('modal-deposit-blocked');
+          setTimeout(() => openModal('modal-shift'), 160);
+          break;
         case 'post-shift-setor':
           closeModal('modal-post-close-shift');
           POS.switchMainTab('deposits', document.querySelector('.pos-tab-item[data-tab="deposits"]'));
@@ -310,6 +318,31 @@ const POS = {
       btn.disabled = false;
       btn.textContent = 'Buka Shift & Mulai Berjualan';
     }
+  },
+
+  updateDepositBlocker() {
+    const titleEl = document.getElementById('deposit-blocker-title');
+    const descEl  = document.getElementById('deposit-blocker-desc');
+    const btnEl   = document.getElementById('deposit-blocker-primary-btn');
+    const lblEl   = document.getElementById('deposit-blocker-btn-label');
+    const iconEl  = btnEl?.querySelector('[data-lucide]');
+
+    if (this.session) {
+      // Ada shift open — suruh tutup shift dulu
+      if (titleEl) titleEl.textContent = 'Shift Belum Ditutup';
+      if (descEl)  descEl.textContent  = 'Tutup shift terlebih dahulu sebelum melakukan setoran tunai.';
+      if (lblEl)   lblEl.textContent   = 'Tutup Shift Sekarang';
+      if (iconEl)  iconEl.setAttribute('data-lucide', 'x-circle');
+      if (btnEl)   btnEl.dataset.action = 'deposit-blocker-tutup-shift';
+    } else {
+      // Tidak ada shift sama sekali — belum ada yang bisa ditutup
+      if (titleEl) titleEl.textContent = 'Belum Ada Shift Tertutup';
+      if (descEl)  descEl.textContent  = 'Buka shift terlebih dahulu, jalankan transaksi, lalu tutup shift sebelum melakukan setoran tunai.';
+      if (lblEl)   lblEl.textContent   = 'Buka Shift';
+      if (iconEl)  iconEl.setAttribute('data-lucide', 'play-circle');
+      if (btnEl)   btnEl.dataset.action = 'deposit-blocker-buka-shift';
+    }
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
 
   async openCloseShiftModal() {
@@ -1118,7 +1151,14 @@ const POS = {
     if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
     if (tab === 'stock')        { if (this._stockDirty) this._stockDirty = false; this.loadInventorySummary(); }
     if (tab === 'cash')         { if (this._cashDirty) this._cashDirty = false; this.updateCashSummary(); }
-    if (tab === 'deposits')     { if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi); }
+    if (tab === 'deposits') {
+      // Tampilkan blocker langsung jika shift sedang buka dan belum ada closed session
+      if (this.session && window.depositUi && !depositUi.hasEligibleClosedShift()) {
+        POS.updateDepositBlocker();
+        openModal('modal-deposit-blocked');
+      }
+      if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
+    }
     if (tab === 'transactions') this.loadSessionTransactions();
   },
 
@@ -1147,7 +1187,13 @@ const POS = {
       if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
       if (tab === 'stock')        this.loadInventorySummary();
       if (tab === 'cash')         this.updateCashSummary();
-      if (tab === 'deposits')     { if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi); }
+      if (tab === 'deposits') {
+        if (this.session && window.depositUi && !depositUi.hasEligibleClosedShift()) {
+          POS.updateDepositBlocker();
+          openModal('modal-deposit-blocked');
+        }
+        if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
+      }
       if (tab === 'transactions') this.loadSessionTransactions();
     }
 

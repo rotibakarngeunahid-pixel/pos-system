@@ -310,6 +310,49 @@ body, .body { font-size: 14px; font-weight: 400; }
   white-space: nowrap;
 }
 
+/* Deposit blocker modal */
+.deposit-blocker-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
+  padding: 2rem 1.5rem 1.75rem;
+}
+.deposit-blocker-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(234, 179, 8, 0.12);
+  color: #ca8a04;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+.deposit-blocker-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text, #1A1A2E);
+}
+.deposit-blocker-desc {
+  margin: 0 0 1.5rem;
+  color: var(--text-muted, #666);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.deposit-blocker-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  width: 100%;
+}
+.deposit-blocker-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+
 /* Staff cash deposit page */
 .deposit-page {
   background: #F8F9FA;

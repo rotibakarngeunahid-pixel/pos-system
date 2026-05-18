@@ -178,6 +178,7 @@ const depositUi = {
     this.renderAccounts();
     this.updateSummaryCard();
     this.updateSubmitState();
+    this.syncDepositBlocker();
 
     try {
       const rows = await depositService.getMyDeposits({
@@ -189,6 +190,27 @@ const depositUi = {
     } catch (e) {
       console.error('getMyDeposits', e);
       if (typeof showToast === 'function') showToast('Gagal memuat riwayat setoran', 'error');
+    }
+  },
+
+  syncDepositBlocker() {
+    const pos = this.getPOS();
+    if (!pos) return;
+    const hasEligible = this.hasEligibleClosedShift();
+
+    if (!hasEligible) {
+      // Update konten modal sesuai kondisi terkini
+      if (window.POS && typeof POS.updateDepositBlocker === 'function') {
+        POS.updateDepositBlocker();
+      }
+      // Tampilkan hanya jika tab deposits sedang aktif
+      const panel = document.getElementById('panel-deposits');
+      if (panel && panel.classList.contains('active')) {
+        if (typeof openModal === 'function') openModal('modal-deposit-blocked');
+      }
+    } else {
+      // Ada closed session → tutup blocker jika terbuka
+      if (typeof closeModal === 'function') closeModal('modal-deposit-blocked');
     }
   },
 

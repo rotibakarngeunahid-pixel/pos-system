@@ -649,6 +649,32 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       MODAL: Deposit Blocked — Shift Belum Ditutup
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-deposit-blocked">
+    <div class="modal modal-sm">
+      <div class="modal-body deposit-blocker-body">
+        <div class="deposit-blocker-icon">
+          <i data-lucide="lock" style="width:40px;height:40px"></i>
+        </div>
+        <h3 class="deposit-blocker-title" id="deposit-blocker-title">Shift Belum Ditutup</h3>
+        <p class="deposit-blocker-desc" id="deposit-blocker-desc">
+          Setoran tunai hanya bisa dilakukan setelah shift ditutup.
+        </p>
+        <div class="deposit-blocker-actions">
+          <button type="button" class="btn btn-primary" id="deposit-blocker-primary-btn" data-action="deposit-blocker-tutup-shift">
+            <i data-lucide="x-circle" class="icon-sm"></i>
+            <span id="deposit-blocker-btn-label">Tutup Shift Sekarang</span>
+          </button>
+          <button type="button" class="btn btn-ghost" data-action="close-modal" data-modal-id="modal-deposit-blocked">
+            Nanti Saja
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        MODAL: Buka Shift (WAJIB)
   ══════════════════════════════════════════ -->
   <div class="modal-overlay" id="modal-shift">
