@@ -874,6 +874,213 @@ body, .body { font-size: 14px; font-weight: 400; }
   to { background-position: -200% 0; }
 }
 
+/* ── Deposit Method Select Dropdown ─────────────────────────────── */
+.deposit-method-select {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1A1A2E;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235D6D7E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 12px center;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color var(--t), box-shadow var(--t);
+  padding-right: 40px;
+}
+.deposit-method-select:focus {
+  outline: none;
+  border-color: #C0392B;
+  box-shadow: 0 0 0 3px rgba(192,57,43,0.10);
+}
+.deposit-method-select:disabled {
+  background-color: #F9FAFB;
+  color: #9CA3AF;
+  cursor: not-allowed;
+  border-color: #E5E7EB;
+}
+
+/* ── Deposit Method Detail Panel ─────────────────────────────────── */
+.deposit-method-detail {
+  margin-top: var(--s2);
+  animation: fadeInDown 0.18s ease;
+}
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.deposit-method-detail-inner {
+  background: #F8F9FA;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 10px;
+  padding: var(--s3) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.deposit-method-detail-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #5D6D7E;
+  margin-bottom: 2px;
+}
+.deposit-bank-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.deposit-method-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.deposit-method-detail-row span {
+  font-size: 13px;
+  color: #5D6D7E;
+  flex-shrink: 0;
+}
+.deposit-method-detail-row strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1A1A2E;
+  text-align: right;
+  word-break: break-all;
+  min-width: 0;
+}
+
+/* Account Number Row */
+.deposit-account-number-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  min-width: 0;
+}
+.deposit-account-number-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.deposit-account-number-info span {
+  font-size: 12px;
+  color: #5D6D7E;
+}
+.deposit-account-number {
+  font-size: 20px;
+  font-weight: 800;
+  color: #1A1A2E;
+  letter-spacing: 0.04em;
+  user-select: all;
+  word-break: break-all;
+}
+.deposit-copy-btn {
+  flex-shrink: 0;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.deposit-copy-feedback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #16A34A;
+  padding: 6px 0 2px;
+}
+
+/* ── QRIS Detail Panel ───────────────────────────────────────────── */
+.deposit-qris-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.deposit-qris-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  padding: var(--s3);
+  min-height: 80px;
+}
+.deposit-qris-preview img {
+  display: block;
+  max-width: 240px;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.deposit-qris-img-error {
+  font-size: 13px;
+  color: #DC2626;
+  text-align: center;
+  padding: var(--s2);
+}
+.deposit-qris-actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+.deposit-qris-actions .btn {
+  flex: 1 1 auto;
+  min-height: 42px;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.deposit-qris-note {
+  font-size: 12px;
+  color: #5D6D7E;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ── Cash / Tunai Detail Panel ───────────────────────────────────── */
+.deposit-cash-detail {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--s3);
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.5;
+}
+.deposit-cash-icon {
+  flex-shrink: 0;
+  color: #C0392B;
+  margin-top: 2px;
+}
+
+/* ── Config Error State ──────────────────────────────────────────── */
+.deposit-method-config-error {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  background: #FEF2F2;
+  border: 1.5px solid #FECACA;
+  border-radius: 8px;
+  padding: var(--s3) var(--s4);
+  font-size: 13px;
+  font-weight: 500;
+  color: #DC2626;
+}
+.deposit-method-config-error [data-lucide] {
+  flex-shrink: 0;
+}
+
 .deposit-file-input {
   position: absolute;
   width: 1px;
@@ -1444,6 +1651,23 @@ body, .body { font-size: 14px; font-weight: 400; }
     flex-shrink: 0;
   }
 
+  .deposit-method-select {
+    min-height: 48px;
+    font-size: 15px;
+  }
+
+  .deposit-method-detail-inner {
+    padding: 12px 14px;
+  }
+
+  .deposit-account-number {
+    font-size: 18px;
+  }
+
+  .deposit-qris-preview img {
+    max-width: 200px;
+  }
+
   /* FAB: hide on deposit tab mobile to avoid covering form */
   body.deposit-tab-active #ob-reopen-btn.visible {
     display: none;
@@ -1494,6 +1718,30 @@ body, .body { font-size: 14px; font-weight: 400; }
   .deposit-method-grid,
   .deposit-method-loading {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deposit-account-number-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .deposit-copy-btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .deposit-account-number {
+    font-size: 22px;
+  }
+
+  .deposit-qris-actions {
+    flex-direction: column;
+  }
+
+  .deposit-qris-preview img {
+    max-width: 180px;
   }
 
   /* Submit button */

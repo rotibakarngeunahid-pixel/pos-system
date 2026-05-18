@@ -449,10 +449,12 @@
               </div>
 
               <div class="form-group">
-                <label class="form-label">Metode Setoran</label>
-                <input type="hidden" id="deposit-account-select" />
-                <div id="deposit-account-options" class="deposit-method-grid" role="radiogroup" aria-label="Metode setoran"></div>
-                <div id="deposit-account-empty" class="form-hint text-danger" style="display:none">Belum ada metode setoran aktif. Hubungi admin.</div>
+                <label class="form-label" for="deposit-account-select">Metode Setoran</label>
+                <select class="form-control deposit-method-select" id="deposit-account-select" aria-label="Metode setoran">
+                  <option value="">Pilih metode setoran</option>
+                </select>
+                <div id="deposit-account-empty" class="form-hint text-danger" style="display:none"></div>
+                <div id="deposit-method-detail" class="deposit-method-detail" style="display:none"></div>
               </div>
 
               <div class="form-group">

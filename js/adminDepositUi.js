@@ -923,6 +923,10 @@ const adminDepositUi = {
       showToast('Nama bank, nomor rekening, dan pemilik rekening wajib diisi', 'error');
       return;
     }
+    if (type === 'qris' && isActive && !qrisImageUrl && !this.selectedQrisFile) {
+      showToast('Upload atau isi URL gambar QRIS terlebih dahulu.', 'error');
+      return;
+    }
 
     const prevText = this.el.saveAccountBtn?.textContent || 'Simpan';
     if (this.el.saveAccountBtn) {

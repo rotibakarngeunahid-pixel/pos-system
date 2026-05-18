@@ -66,8 +66,8 @@ const depositUi = {
     this.el.amountError = document.getElementById('deposit-amount-error');
     this.el.quickButtons = Array.from(document.querySelectorAll('[data-deposit-quick]'));
     this.el.accountSelect = document.getElementById('deposit-account-select');
-    this.el.accountOptions = document.getElementById('deposit-account-options');
     this.el.accountEmpty = document.getElementById('deposit-account-empty');
+    this.el.methodDetail = document.getElementById('deposit-method-detail');
     this.el.fileInput = document.getElementById('deposit-proof-file');
     this.el.proofZone = document.getElementById('deposit-proof-zone');
     this.el.uploadEmpty = document.getElementById('deposit-upload-empty');
@@ -77,7 +77,7 @@ const depositUi = {
     this.el.submitBtn = document.getElementById('btn-submit-deposit');
     this.el.historyBody = document.getElementById('deposit-history-body');
     this.el.blockingAlert = document.getElementById('deposit-blocking-alert');
-    this.el.infoNoCash = null; // element removed from HTML, kept for safety
+    this.el.infoNoCash = null;
     this.el.success = document.getElementById('deposit-success');
     this.el.summaryShift = document.getElementById('deposit-summary-shift');
     this.el.summaryStaff = document.getElementById('deposit-summary-staff');
@@ -91,19 +91,30 @@ const depositUi = {
     this.el.quickButtons.forEach(btn => {
       btn.addEventListener('click', () => this.setQuickAmount(btn.dataset.depositQuick));
     });
-    if (this.el.accountOptions) {
-      this.el.accountOptions.addEventListener('click', e => {
-        const card = e.target.closest('[data-deposit-account-id]');
-        if (card) this.selectAccount(card.dataset.depositAccountId);
-      });
-      this.el.accountOptions.addEventListener('keydown', e => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        const card = e.target.closest('[data-deposit-account-id]');
-        if (!card) return;
-        e.preventDefault();
-        this.selectAccount(card.dataset.depositAccountId);
+
+    if (this.el.accountSelect) {
+      this.el.accountSelect.addEventListener('change', () => {
+        const id = this.el.accountSelect.value;
+        if (id) this.selectAccount(id);
+        else {
+          if (this.el.methodDetail) {
+            this.el.methodDetail.style.display = 'none';
+            this.el.methodDetail.innerHTML = '';
+          }
+          this.updateMethodDependentFields();
+          this.updateSubmitState();
+        }
       });
     }
+
+    if (this.el.methodDetail) {
+      this.el.methodDetail.addEventListener('click', e => {
+        if (e.target.closest('[data-action="copy-deposit-account-number"]')) {
+          this.copySelectedAccountNumber();
+        }
+      });
+    }
+
     if (this.el.fileInput) this.el.fileInput.addEventListener('change', e => this.onFileChange(e.target.files));
     this.bindUploadZone();
     if (this.el.submitBtn) this.el.submitBtn.addEventListener('click', () => this.onSubmit());
@@ -218,7 +229,6 @@ const depositUi = {
       if (window.POS && typeof POS.updateDepositBlocker === 'function') {
         POS.updateDepositBlocker();
       }
-      // Modal hanya dibuka dari switchMainTab, bukan dari refresh
     } else {
       if (typeof closeModal === 'function') closeModal('modal-deposit-blocked');
     }
@@ -261,7 +271,6 @@ const depositUi = {
     }
     if (sess?.block_reason) {
       const reason = String(sess.block_reason).toLowerCase();
-      // Match Indonesian block_reason strings from RPC get_deposit_eligible_sessions
       const isPending = reason.includes('menunggu') || reason.includes('pending');
       const isConfirmed = reason.includes('selesai') || reason.includes('terkonfirmasi') || reason.includes('confirm');
       const isRejected = reason.includes('ditolak') || reason.includes('reject');
@@ -349,6 +358,10 @@ const depositUi = {
     if (this.el.fileInput) this.el.fileInput.disabled = disabled;
     if (this.el.notesInput) this.el.notesInput.disabled = disabled;
 
+    if (this.el.accountSelect && this.el.accountSelect.tagName === 'SELECT') {
+      this.el.accountSelect.disabled = disabled || !this.accounts.length;
+    }
+
     this.el.amountInput?.closest('.deposit-currency-field')?.classList.toggle('is-disabled', disabled);
 
     if (this.el.proofZone) {
@@ -357,14 +370,6 @@ const depositUi = {
       this.el.proofZone.setAttribute('tabindex', disabled ? '-1' : '0');
       this.el.proofZone.setAttribute('role', disabled ? 'presentation' : 'button');
     }
-
-    this.el.accountOptions?.querySelectorAll('[data-deposit-account-id]').forEach(card => {
-      card.classList.toggle('is-disabled', disabled);
-      card.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-      card.setAttribute('tabindex', disabled ? '-1' : '0');
-      const input = card.querySelector('input[type="radio"]');
-      if (input) input.disabled = disabled;
-    });
 
     this.el.quickButtons.forEach(btn => { btn.disabled = disabled; });
 
@@ -413,25 +418,32 @@ const depositUi = {
   },
 
   renderAccountLoading() {
-    if (this.el.accountOptions) {
-      this.el.accountOptions.innerHTML = `
-        <div class="deposit-method-loading">
-          <span></span><span></span><span></span><span></span>
-        </div>`;
+    const select = this.el.accountSelect;
+    if (select && select.tagName === 'SELECT') {
+      select.innerHTML = '<option value="">Memuat metode...</option>';
+      select.disabled = true;
     }
     if (this.el.accountEmpty) this.el.accountEmpty.style.display = 'none';
-    if (this.el.accountSelect) this.el.accountSelect.value = '';
+    if (this.el.methodDetail) {
+      this.el.methodDetail.style.display = 'none';
+      this.el.methodDetail.innerHTML = '';
+    }
   },
 
   renderAccounts() {
-    if (!this.el.accountOptions || !this.el.accountSelect) return;
+    const select = this.el.accountSelect;
+    if (!select) return;
 
     if (this.accountLoadError) {
-      this.el.accountOptions.innerHTML = '';
-      this.el.accountSelect.value = '';
+      select.innerHTML = '<option value="">Pilih metode setoran</option>';
+      select.disabled = false;
       if (this.el.accountEmpty) {
         this.el.accountEmpty.textContent = `Gagal memuat metode setoran: ${this.accountLoadError}`;
         this.el.accountEmpty.style.display = '';
+      }
+      if (this.el.methodDetail) {
+        this.el.methodDetail.style.display = 'none';
+        this.el.methodDetail.innerHTML = '';
       }
       this.updateSubmitState();
       return;
@@ -439,11 +451,15 @@ const depositUi = {
 
     const accounts = this.sortAccounts(this.accounts);
     if (!accounts.length) {
-      this.el.accountOptions.innerHTML = '';
-      this.el.accountSelect.value = '';
+      select.innerHTML = '<option value="">Pilih metode setoran</option>';
+      select.disabled = true;
       if (this.el.accountEmpty) {
         this.el.accountEmpty.textContent = 'Belum ada metode setoran aktif. Hubungi admin.';
         this.el.accountEmpty.style.display = '';
+      }
+      if (this.el.methodDetail) {
+        this.el.methodDetail.style.display = 'none';
+        this.el.methodDetail.innerHTML = '';
       }
       this.updateSubmitState();
       return;
@@ -451,42 +467,201 @@ const depositUi = {
 
     if (this.el.accountEmpty) this.el.accountEmpty.style.display = 'none';
 
-    const currentId = this.el.accountSelect.value;
+    const currentId = select.value;
     const lastId = this.getLastAccountId();
     const selectedId = accounts.some(a => String(a.id) === String(currentId))
       ? currentId
       : (accounts.some(a => String(a.id) === String(lastId)) ? lastId : '');
-    this.el.accountSelect.value = selectedId;
 
-    const blocked = this.isFormBlocked();
-    const disabled = blocked || this.isSubmitting;
+    select.innerHTML = '<option value="">Pilih metode setoran</option>'
+      + accounts.map(account => {
+        const id = this.esc(account.id);
+        const label = this.esc(account.label || 'Metode Setoran');
+        return `<option value="${id}">${label}</option>`;
+      }).join('');
+    select.value = selectedId;
 
-    this.el.accountOptions.innerHTML = accounts.map(account => {
-      const id = this.esc(account.id);
-      const checked = String(account.id) === String(selectedId);
-      const label = this.esc(account.label || 'Metode Setoran');
-      const detail = this.esc(this.getAccountDetail(account));
-      const icon = this.getAccountIcon(account);
-      return `
-        <label class="deposit-method-card ${checked ? 'selected' : ''} ${disabled ? 'is-disabled' : ''}"
-          data-deposit-account-id="${id}"
-          role="radio"
-          tabindex="${disabled ? '-1' : '0'}"
-          aria-checked="${checked ? 'true' : 'false'}"
-          aria-disabled="${disabled ? 'true' : 'false'}">
-          <input type="radio" name="deposit-method" value="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} tabindex="-1" />
-          <span class="deposit-method-icon"><i data-lucide="${icon}" class="icon-sm"></i></span>
-          <span class="deposit-method-copy">
-            <strong>${label}</strong>
-            <small>${detail}</small>
-          </span>
-        </label>`;
-    }).join('');
-
+    this.renderSelectedAccountDetail();
     this.updateMethodDependentFields();
     this.updateSubmitState();
+  },
+
+  // ── Account Detail Rendering ───────────────────────────────────────
+
+  renderSelectedAccountDetail() {
+    const detail = this.el.methodDetail;
+    if (!detail) return;
+    const account = this.getSelectedAccount();
+    if (!account) {
+      detail.style.display = 'none';
+      detail.innerHTML = '';
+      return;
+    }
+    detail.style.display = '';
+    if (depositService.isCashDepositMethod(account)) {
+      detail.innerHTML = this.renderCashAccountDetail(account);
+    } else if (account.type === 'qris') {
+      detail.innerHTML = this.renderQrisAccountDetail(account);
+    } else {
+      detail.innerHTML = this.renderBankAccountDetail(account);
+    }
     if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
   },
+
+  renderBankAccountDetail(account) {
+    const bankName = this.esc(account.bank_name || '-');
+    const accountNumber = account.account_number || '';
+    const accountHolder = this.esc(account.account_holder || '-');
+
+    if (!accountNumber) {
+      return `<div class="deposit-method-config-error">
+        <i data-lucide="alert-circle" class="icon-sm"></i>
+        <span>Nomor rekening belum dikonfigurasi. Hubungi admin.</span>
+      </div>`;
+    }
+
+    return `
+      <div class="deposit-method-detail-inner">
+        <div class="deposit-method-detail-title">Transfer ke rekening ini</div>
+        <div class="deposit-bank-detail">
+          <div class="deposit-method-detail-row">
+            <span>Bank</span>
+            <strong>${bankName}</strong>
+          </div>
+          <div class="deposit-account-number-row">
+            <div class="deposit-account-number-info">
+              <span>Nomor Rekening</span>
+              <strong class="deposit-account-number">${this.esc(accountNumber)}</strong>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm deposit-copy-btn" data-action="copy-deposit-account-number" aria-label="Salin nomor rekening">
+              <i data-lucide="copy" class="icon-sm"></i>
+              <span>Salin Nomor</span>
+            </button>
+          </div>
+          <div class="deposit-method-detail-row">
+            <span>Atas Nama</span>
+            <strong>${accountHolder}</strong>
+          </div>
+        </div>
+        <div class="deposit-copy-feedback" id="deposit-copy-feedback" aria-live="polite" style="display:none">
+          <i data-lucide="check" class="icon-sm"></i>
+          <span>Nomor rekening disalin</span>
+        </div>
+      </div>`;
+  },
+
+  renderQrisAccountDetail(account) {
+    const qrisUrl = account.qris_image_url || '';
+
+    if (!qrisUrl || !this.isSafeHttpUrl(qrisUrl)) {
+      return `<div class="deposit-method-config-error">
+        <i data-lucide="alert-circle" class="icon-sm"></i>
+        <span>QRIS belum dikonfigurasi. Hubungi admin.</span>
+      </div>`;
+    }
+
+    const safeUrl = this.esc(qrisUrl);
+    return `
+      <div class="deposit-method-detail-inner">
+        <div class="deposit-method-detail-title">Gunakan QRIS ini</div>
+        <div class="deposit-qris-detail">
+          <div class="deposit-qris-preview">
+            <img src="${safeUrl}" alt="QRIS setoran Roti Bakar Ngeunah"
+              onerror="this.parentElement.innerHTML='<div class=\\'deposit-qris-img-error\\'>Gambar QRIS gagal dimuat. Gunakan tombol Buka QRIS.</div>'" />
+          </div>
+          <div class="deposit-qris-actions">
+            <a class="btn btn-primary btn-sm" href="${safeUrl}" download="QRIS-Setoran.png" rel="noopener noreferrer">
+              <i data-lucide="download" class="icon-sm"></i>
+              <span>Unduh QRIS</span>
+            </a>
+            <a class="btn btn-outline btn-sm" href="${safeUrl}" target="_blank" rel="noopener noreferrer">
+              <i data-lucide="external-link" class="icon-sm"></i>
+              <span>Buka QRIS</span>
+            </a>
+          </div>
+          <p class="deposit-qris-note">Setelah pembayaran QRIS selesai, upload bukti pembayaran.</p>
+        </div>
+      </div>`;
+  },
+
+  renderCashAccountDetail(account) {
+    return `
+      <div class="deposit-method-detail-inner deposit-cash-detail">
+        <i data-lucide="hand-coins" class="icon-sm deposit-cash-icon"></i>
+        <span>Serahkan tunai langsung ke manager atau admin. Bukti setoran opsional.</span>
+      </div>`;
+  },
+
+  // ── Copy Rekening ──────────────────────────────────────────────────
+
+  async copySelectedAccountNumber() {
+    const account = this.getSelectedAccount();
+    if (!account?.account_number) return;
+
+    const text = String(account.account_number);
+    const success = await this.copyTextToClipboard(text);
+
+    const feedback = this.el.methodDetail?.querySelector('#deposit-copy-feedback');
+    if (feedback) {
+      feedback.style.display = '';
+      clearTimeout(this._copyFeedbackTimer);
+      this._copyFeedbackTimer = setTimeout(() => {
+        if (feedback) feedback.style.display = 'none';
+      }, 2500);
+      if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+    }
+
+    if (!success) {
+      if (typeof showToast === 'function') showToast('Salin manual: ' + text, 'info');
+    }
+  },
+
+  async copyTextToClipboard(text) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) {
+      // fall through to execCommand
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  // ── Method Readiness ───────────────────────────────────────────────
+
+  isSafeHttpUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch (e) {
+      return false;
+    }
+  },
+
+  isSelectedMethodReady(account) {
+    if (!account) return false;
+    if (depositService.isCashDepositMethod(account)) return true;
+    if (account.type === 'qris') {
+      return Boolean(account.qris_image_url) && this.isSafeHttpUrl(account.qris_image_url);
+    }
+    return Boolean(account.account_number);
+  },
+
+  // ── Account Selection ──────────────────────────────────────────────
 
   sortAccounts(accounts) {
     return this.dedupeAccounts(accounts).sort((a, b) => {
@@ -523,14 +698,8 @@ const depositUi = {
     if (!this.canInteractWithForm()) return;
     if (!this.el.accountSelect) return;
     this.el.accountSelect.value = id || '';
-    this.el.accountOptions?.querySelectorAll('[data-deposit-account-id]').forEach(card => {
-      const checked = String(card.dataset.depositAccountId) === String(id);
-      card.classList.toggle('selected', checked);
-      card.setAttribute('aria-checked', checked ? 'true' : 'false');
-      const input = card.querySelector('input[type="radio"]');
-      if (input) input.checked = checked;
-    });
     if (persist && id) this.setLastAccountId(id);
+    this.renderSelectedAccountDetail();
     this.updateMethodDependentFields();
     this.updateSubmitState();
   },
@@ -548,9 +717,9 @@ const depositUi = {
       } else if (isCash) {
         this.el.proofHint.textContent = 'Bukti opsional untuk penyerahan tunai langsung.';
       } else if (account.type === 'qris') {
-        this.el.proofHint.textContent = 'Bukti wajib untuk QRIS/e-wallet.';
+        this.el.proofHint.textContent = 'Setelah pembayaran QRIS selesai, upload bukti pembayaran.';
       } else {
-        this.el.proofHint.textContent = 'Bukti wajib untuk transfer bank.';
+        this.el.proofHint.textContent = 'Setelah transfer selesai, upload bukti transfer.';
       }
     }
     this.el.proofZone?.classList.toggle('optional', !this.isProofRequired(account));
@@ -564,21 +733,6 @@ const depositUi = {
   isProofRequired(account = this.getSelectedAccount()) {
     if (!account) return true;
     return !depositService.isCashDepositMethod(account);
-  },
-
-  getAccountIcon(account) {
-    if (depositService.isCashDepositMethod(account)) return 'hand-coins';
-    if (account?.type === 'qris') return 'qr-code';
-    return 'landmark';
-  },
-
-  getAccountDetail(account) {
-    if (!account) return '';
-    if (depositService.isCashDepositMethod(account)) return 'Serahkan langsung ke manager';
-    const parts = [account.bank_name, account.account_number].filter(Boolean);
-    if (parts.length) return parts.join(' - ');
-    if (account.type === 'qris') return 'Scan atau unggah bukti QRIS';
-    return 'Transfer bank';
   },
 
   getLastAccountKey() {
@@ -654,7 +808,8 @@ const depositUi = {
     const account = this.getSelectedAccount();
     const proofOk = !this.isProofRequired(account) || Boolean(this.selectedFile);
     const blocked = this.isFormBlocked();
-    const disabled = this.isSubmitting || blocked || !valid || !account || !proofOk;
+    const methodReady = this.isSelectedMethodReady(account);
+    const disabled = this.isSubmitting || blocked || !valid || !account || !proofOk || !methodReady;
     if (this.el.submitBtn) this.el.submitBtn.disabled = disabled;
   },
 
@@ -782,9 +937,19 @@ const depositUi = {
       if (typeof showToast === 'function') showToast('Pilih metode setoran', 'error');
       return;
     }
+
+    if (!this.isSelectedMethodReady(account)) {
+      if (account.type === 'qris') {
+        if (typeof showToast === 'function') showToast('QRIS belum dikonfigurasi. Hubungi admin.', 'error');
+      } else {
+        if (typeof showToast === 'function') showToast('Nomor rekening belum dikonfigurasi. Hubungi admin.', 'error');
+      }
+      return;
+    }
+
     const proofRequired = this.isProofRequired(account);
     if (proofRequired && !this.selectedFile) {
-      if (typeof showToast === 'function') showToast('Bukti setoran wajib dilampirkan untuk transfer bank', 'error');
+      if (typeof showToast === 'function') showToast('Bukti setoran wajib dilampirkan', 'error');
       return;
     }
 
@@ -921,14 +1086,12 @@ const depositUi = {
 
   clearForm({ keepAccount = false } = {}) {
     if (this.el.amountInput) this.el.amountInput.value = '';
-    if (!keepAccount && this.el.accountSelect) {
-      this.el.accountSelect.value = '';
-      this.el.accountOptions?.querySelectorAll('[data-deposit-account-id]').forEach(card => {
-        card.classList.remove('selected');
-        card.setAttribute('aria-checked', 'false');
-        const input = card.querySelector('input[type="radio"]');
-        if (input) input.checked = false;
-      });
+    if (!keepAccount) {
+      if (this.el.accountSelect) this.el.accountSelect.value = '';
+      if (this.el.methodDetail) {
+        this.el.methodDetail.style.display = 'none';
+        this.el.methodDetail.innerHTML = '';
+      }
     }
     if (this.el.notesInput) this.el.notesInput.value = '';
     this.removeFile();
