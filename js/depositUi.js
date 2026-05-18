@@ -8,7 +8,9 @@ const DEPOSIT_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
 const depositUi = {
   el: {},
   accounts: [],
-  expectedCash: 0,
+  eligibleSessions: [],
+  selectedClosedSession: null,
+  depositableCash: 0,
   selectedFile: null,
   selectedFileUrl: null,
   isSubmitting: false,
@@ -23,8 +25,8 @@ const depositUi = {
     return null;
   },
 
-  hasSession() {
-    return Boolean(this.getPOS()?.session?.id);
+  hasEligibleClosedShift() {
+    return this.selectedClosedSession !== null && this.selectedClosedSession.session_status === 'closed';
   },
 
   init() {
@@ -126,25 +128,43 @@ const depositUi = {
     });
   },
 
-  refreshWhenReady(attempt = 0) {
+  refreshWhenReady(attempt = 0, opts = {}) {
     const pos = this.getPOS();
     if (pos?.user && pos?.branch) {
-      this.refresh();
+      this.refresh(opts);
       return;
     }
     if (attempt >= 40) return;
     clearTimeout(this.readyRefreshTimer);
-    this.readyRefreshTimer = setTimeout(() => this.refreshWhenReady(attempt + 1), 250);
+    this.readyRefreshTimer = setTimeout(() => this.refreshWhenReady(attempt + 1, opts), 250);
   },
 
-  async refresh() {
+  async refresh({ preferSessionId = null } = {}) {
     const pos = this.getPOS();
     if (!pos?.branch) return;
 
     const branchId = pos.branch.id;
-    const sessionId = pos.session?.id || null;
+    const staffId = pos.user?.id;
     this.accountLoadError = null;
     this.renderAccountLoading();
+
+    // Load eligible closed sessions dari RPC
+    try {
+      this.eligibleSessions = await depositService.getEligibleSessions({ branchId, staffId });
+    } catch (e) {
+      console.warn('depositUi.refresh getEligibleSessions failed', e);
+      this.eligibleSessions = [];
+    }
+
+    // Pilih session: preferSessionId (dari close shift) atau yang terbaru
+    const preferred = preferSessionId
+      ? this.eligibleSessions.find(s => s.session_id === preferSessionId)
+      : null;
+    this.selectedClosedSession = preferred || this.eligibleSessions[0] || null;
+    this.depositableCash = this.selectedClosedSession
+      ? Number(this.selectedClosedSession.depositable_cash || 0)
+      : 0;
+
     this.updateSummaryCard();
 
     try {
@@ -156,26 +176,14 @@ const depositUi = {
       this.accounts = [];
     }
     this.renderAccounts();
-
-    try {
-      if (!sessionId) {
-        this.expectedCash = 0;
-      } else {
-        const summary = await cashService.getSummary({ branchId, sessionId });
-        this.expectedCash = Number(summary?.expectedCash || 0);
-      }
-    } catch (e) {
-      console.warn('depositUi.refresh summary failed', e);
-      this.expectedCash = 0;
-    }
     this.updateSummaryCard();
     this.updateSubmitState();
 
     try {
       const rows = await depositService.getMyDeposits({
-        staffId: pos.user.id,
+        staffId,
         branchId,
-        daysBack: sessionId ? 0 : 7
+        daysBack: 7
       });
       this.renderHistory(rows);
     } catch (e) {
@@ -197,41 +205,56 @@ const depositUi = {
 
   updateSummaryCard() {
     const pos = this.getPOS();
-    const hasSession = this.hasSession();
-    const shiftLabel = hasSession ? `Shift #${pos.session.id}` : 'Tanpa shift aktif';
+    const sess = this.selectedClosedSession;
+    const hasEligible = this.hasEligibleClosedShift();
     const staffLabel = pos?.user?.name || '-';
 
+    // Label shift
+    const shiftLabel = sess
+      ? `Shift #${sess.session_id} (Tertutup)`
+      : 'Belum ada shift tertutup';
+
     const cardLabel = document.getElementById('deposit-card-label');
-    if (cardLabel) cardLabel.textContent = hasSession ? 'Saldo Kas Aktif' : 'Mode Setoran Manual';
+    if (cardLabel) cardLabel.textContent = hasEligible ? 'Kas Final Shift' : 'Menunggu Shift Ditutup';
+
     if (this.el.expectedCashEl) {
-      this.el.expectedCashEl.textContent = hasSession ? fRp(this.expectedCash) : '—';
+      this.el.expectedCashEl.textContent = hasEligible ? fRp(this.depositableCash) : '—';
     }
     if (this.el.summaryShift) this.el.summaryShift.textContent = shiftLabel;
     if (this.el.summaryStaff) this.el.summaryStaff.textContent = staffLabel;
 
-    const headerText = hasSession
-      ? `${shiftLabel} berjalan`
-      : 'Mode setoran tanpa shift';
-    if (this.el.headerShift) this.el.headerShift.textContent = headerText;
+    if (this.el.headerShift) {
+      this.el.headerShift.textContent = hasEligible
+        ? shiftLabel
+        : 'Belum ada shift tertutup yang bisa disetor';
+    }
 
-    const noCash = hasSession && this.expectedCash <= 0;
-    const noSession = !hasSession;
+    // Blocking state info
     if (this.el.infoNoCash) {
-      if (noSession) {
-        this.el.infoNoCash.textContent = 'Shift sudah ditutup — masukkan nominal setoran secara manual';
+      const pos = this.getPOS();
+      const hasOpenShift = Boolean(pos?.session?.id);
+      if (!hasEligible && hasOpenShift) {
+        this.el.infoNoCash.textContent = 'Tutup shift terlebih dahulu sebelum setoran tunai';
         this.el.infoNoCash.style.display = '';
-      } else if (noCash) {
-        this.el.infoNoCash.textContent = 'Tidak ada kas untuk disetor';
+      } else if (!hasEligible) {
+        this.el.infoNoCash.textContent = 'Belum ada shift tertutup untuk disetor';
+        this.el.infoNoCash.style.display = '';
+      } else if (sess?.block_reason) {
+        this.el.infoNoCash.textContent = sess.block_reason;
+        this.el.infoNoCash.style.display = '';
+      } else if (hasEligible && this.depositableCash <= 0) {
+        this.el.infoNoCash.textContent = 'Tidak ada kas yang dapat disetor pada shift ini';
         this.el.infoNoCash.style.display = '';
       } else {
         this.el.infoNoCash.style.display = 'none';
       }
     }
 
-    if (this.el.panel)    this.el.panel.classList.toggle('no-cash', noCash && !noSession);
+    const noCash = hasEligible && this.depositableCash <= 0;
+    if (this.el.panel)    this.el.panel.classList.toggle('no-cash', noCash);
     if (this.el.cashCard) {
-      this.el.cashCard.classList.toggle('no-cash', noCash && !noSession);
-      this.el.cashCard.classList.toggle('no-session', noSession);
+      this.el.cashCard.classList.toggle('no-cash', noCash);
+      this.el.cashCard.classList.toggle('no-session', !hasEligible);
     }
     this.updateClock();
   },
@@ -424,7 +447,7 @@ const depositUi = {
 
   setQuickAmount(value) {
     if (this.isSubmitting) return;
-    const amount = value === 'all' ? this.expectedCash : Number(value || 0);
+    const amount = value === 'all' ? this.depositableCash : Number(value || 0);
     this.setAmountInput(amount);
   },
 
@@ -446,8 +469,8 @@ const depositUi = {
 
     if (amount <= 0) {
       message = showEmpty ? 'Jumlah setoran harus lebih dari 0' : '';
-    } else if (this.hasSession() && amount > this.expectedCash) {
-      message = `Melebihi saldo kas (${fRp(this.expectedCash)})`;
+    } else if (this.hasEligibleClosedShift() && amount > this.depositableCash) {
+      message = `Melebihi kas yang dapat disetor (${fRp(this.depositableCash)})`;
     } else if (amount % DEPOSIT_STEP !== 0) {
       message = 'Nominal harus kelipatan Rp 50.000';
     }
@@ -465,16 +488,14 @@ const depositUi = {
     const { valid } = this.validateAmount();
     const account = this.getSelectedAccount();
     const proofOk = !this.isProofRequired(account) || Boolean(this.selectedFile);
-    const hasSession = this.hasSession();
-    // Blokir hanya jika shift aktif tapi kas sudah 0 (tidak ada yang bisa disetor)
-    const emptyShiftCash = hasSession && this.expectedCash <= 0;
-    const disabled = this.isSubmitting || !valid || emptyShiftCash || !account || !proofOk;
+    const hasEligible = this.hasEligibleClosedShift();
+    const sess = this.selectedClosedSession;
+    // Disable jika tidak ada shift closed, ada deposit aktif, atau kas 0
+    const blocked = !hasEligible || Boolean(sess?.block_reason) || this.depositableCash <= 0;
+    const disabled = this.isSubmitting || blocked || !valid || !account || !proofOk;
     if (this.el.submitBtn) this.el.submitBtn.disabled = disabled;
     this.el.quickButtons.forEach(btn => {
-      const isAll = btn.dataset.depositQuick === 'all';
-      btn.disabled = this.isSubmitting
-        || (isAll && (!hasSession || this.expectedCash <= 0))
-        || (!isAll && hasSession && this.expectedCash <= 0);
+      btn.disabled = this.isSubmitting || !hasEligible || this.depositableCash <= 0;
     });
   },
 
@@ -571,6 +592,21 @@ const depositUi = {
       return;
     }
 
+    if (!this.hasEligibleClosedShift()) {
+      const hasOpenShift = Boolean(pos?.session?.id);
+      const msg = hasOpenShift
+        ? 'Tutup shift terlebih dahulu sebelum setoran tunai'
+        : 'Belum ada shift tertutup untuk disetor';
+      if (typeof showToast === 'function') showToast(msg, 'error');
+      return;
+    }
+
+    const sess = this.selectedClosedSession;
+    if (sess?.block_reason) {
+      if (typeof showToast === 'function') showToast(sess.block_reason, 'error');
+      return;
+    }
+
     const { amount, valid } = this.validateAmount({ showEmpty: true });
     if (!valid) {
       if (typeof showToast === 'function') showToast(this.el.amountError?.textContent || 'Nominal setoran tidak valid', 'error');
@@ -597,11 +633,11 @@ const depositUi = {
     try {
       const depositId = await depositService.submitDeposit({
         branchId: pos.branch.id,
-        sessionId: pos.session?.id || null,
+        sessionId: sess.session_id,
         staffId: pos.user.id,
         accountId: account.id,
         amount,
-        cashBalance: this.hasSession() ? this.expectedCash : null,
+        cashBalance: this.depositableCash,
         file: this.selectedFile,
         notes: this.composeNotes(),
         requireProof: proofRequired
@@ -654,12 +690,13 @@ const depositUi = {
 
   showDepositConfirm({ amount, account }) {
     return new Promise(resolve => {
-      const hasSession = this.hasSession();
-      const remaining = this.expectedCash - amount;
-      const kasRows = hasSession ? `
-        <div><span>Saldo Kas Saat Ini</span><strong>${this.esc(fRp(this.expectedCash))}</strong></div>
+      const sess = this.selectedClosedSession;
+      const remaining = this.depositableCash - amount;
+      const kasRows = sess ? `
+        <div><span>Shift</span><strong>${this.esc(`#${sess.session_id}`)}</strong></div>
+        <div><span>Kas Dapat Disetor</span><strong>${this.esc(fRp(this.depositableCash))}</strong></div>
         <div><span>Sisa Kas Setelah Setor</span><strong class="${remaining < 0 ? 'text-danger' : ''}">${this.esc(fRp(remaining))}</strong></div>` : `
-        <div><span>Mode</span><strong>Setoran tanpa shift aktif</strong></div>`;
+        <div><span>Kas</span><strong>—</strong></div>`;
       const overlay = document.createElement('div');
       overlay.className = 'deposit-confirm-overlay';
       overlay.innerHTML = `

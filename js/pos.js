@@ -423,6 +423,7 @@ const POS = {
     btn.disabled = true;
     try {
       const result = await transactionService.closeShift({ sessionId: this.session.id, closingCash: cash });
+      this.lastClosedSession = result;
       closeModal('modal-close-shift');
       this.session   = null;
       this.cart      = [];
@@ -435,8 +436,10 @@ const POS = {
       showToast(`Shift ditutup. Selisih kas: ${formatRupiah(Math.abs(diff))} ${diff >= 0 ? 'lebih' : 'kurang'}`, diff >= 0 ? 'success' : 'warning');
       const kasInput = document.getElementById('shift-opening-cash');
       if (kasInput) kasInput.value = '';
-      // Refresh deposit UI agar siap untuk setoran tanpa shift
-      if (window.depositUi) depositUi.refreshWhenReady();
+      // Refresh deposit UI dan preselect shift yang baru saja ditutup
+      if (window.depositUi) {
+        depositUi.refreshWhenReady({ preferSessionId: result.id });
+      }
       setTimeout(() => openModal('modal-post-close-shift'), 400);
     } catch (e) {
       showToast(e.message, 'error');

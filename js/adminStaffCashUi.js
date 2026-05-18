@@ -218,9 +218,14 @@ const adminStaffCashUi = {
         ? `<span class="badge badge-warning" style="font-size:10px">${fRp(r.deposit_pending)}</span>`
         : '<span class="text-muted">&mdash;</span>';
       const detailBtn = `<button type="button" class="btn btn-outline btn-sm scp-detail-btn" data-row="${i}" title="Lihat detail kas"><i data-lucide="eye" style="width:13px;height:13px"></i></button>`;
-      const depositBtn = r.branch_id && r.staff_id
-        ? `<button type="button" class="btn btn-outline btn-sm scp-deposit-btn" data-row="${i}" title="Input setoran manual"><i data-lucide="banknote" style="width:13px;height:13px"></i> Setor</button>`
-        : `<button type="button" class="btn btn-outline btn-sm" disabled title="Data cabang/staff tidak lengkap"><i data-lucide="ban" style="width:13px;height:13px"></i></button>`;
+      let depositBtn;
+      if (!r.branch_id || !r.staff_id) {
+        depositBtn = `<button type="button" class="btn btn-outline btn-sm" disabled title="Data cabang/staff tidak lengkap"><i data-lucide="ban" style="width:13px;height:13px"></i></button>`;
+      } else if (r.session_status === 'closed') {
+        depositBtn = `<button type="button" class="btn btn-outline btn-sm scp-deposit-btn" data-row="${i}" title="Input setoran manual"><i data-lucide="banknote" style="width:13px;height:13px"></i> Setor</button>`;
+      } else {
+        depositBtn = `<button type="button" class="btn btn-outline btn-sm" disabled title="Tutup kas terlebih dahulu"><i data-lucide="lock" style="width:13px;height:13px"></i> Tutup Dulu</button>`;
+      }
 
       return `<tr class="scp-row ${r.session_status === 'open' ? 'scp-row-active' : ''}">
         <td class="text-muted text-xs">#${escHtml(String(r.session_id || ''))}</td>
@@ -693,6 +698,10 @@ const adminStaffCashUi = {
       showToast('Staff tidak memiliki cabang', 'error');
       return;
     }
+    if (row.session_status !== 'closed') {
+      showToast('Tutup kas terlebih dahulu sebelum setoran tunai', 'error');
+      return;
+    }
 
     const depositUi = window.adminDepositUi;
     if (!depositUi.branches.length) {
@@ -700,17 +709,11 @@ const adminStaffCashUi = {
       return;
     }
 
-    depositUi.openManualDepositModal();
-    requestAnimationFrame(() => {
-      const branchSel = document.getElementById('manual-deposit-branch');
-      if (branchSel) {
-        branchSel.value = String(row.branch_id);
-        depositUi.onManualBranchChange();
-        requestAnimationFrame(() => {
-          const staffSel = document.getElementById('manual-deposit-staff');
-          if (staffSel) staffSel.value = String(row.staff_id);
-        });
-      }
+    // Prefill branch, staff, dan session_id dari row Posisi Kas Staff
+    depositUi.openManualDepositModal({
+      prefillBranchId: row.branch_id,
+      prefillStaffId: row.staff_id,
+      prefillSessionId: row.session_id
     });
   },
 

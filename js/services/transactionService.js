@@ -111,15 +111,24 @@ const transactionService = {
       }
     }
 
-    const { error } = await db.from('cashier_sessions').update({
-      status:        'closed',
-      closing_cash:  closingCash,
-      expected_cash: expectedCash,
-      closed_at:     new Date().toISOString()
-    }).eq('id', sessionId);
+    // Update dan refetch row closed agar current_cash_amount terisi dan status = 'closed'
+    const updatePayload = {
+      status:               'closed',
+      closing_cash:         closingCash,
+      expected_cash:        expectedCash,
+      current_cash_amount:  closingCash,
+      closed_at:            new Date().toISOString()
+    };
+
+    const { data: updated, error } = await db.from('cashier_sessions')
+      .update(updatePayload)
+      .eq('id', sessionId)
+      .select()
+      .single();
     if (error) throw error;
 
-    return { ...sess, closing_cash: closingCash, expected_cash: expectedCash };
+    // Fallback jika select gagal (kolom current_cash_amount belum ada di schema lama)
+    return updated || { ...sess, ...updatePayload };
   },
 
   // ── Process refund (ATOMIC) ───────────────────────────────────
