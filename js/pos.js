@@ -1154,7 +1154,7 @@ const POS = {
     if (tab === 'cash')         { if (this._cashDirty) this._cashDirty = false; this.updateCashSummary(); }
     if (tab === 'deposits') {
       // Tampilkan blocker langsung jika shift sedang buka dan belum ada closed session
-      if (this.session && window.depositUi && !depositUi.hasEligibleClosedShift()) {
+      if (this.session && window.depositUi && !depositUi.isRefreshing && !depositUi.hasEligibleClosedShift()) {
         POS.updateDepositBlocker();
         openModal('modal-deposit-blocked');
       }

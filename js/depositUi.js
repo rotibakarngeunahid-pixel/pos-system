@@ -14,6 +14,7 @@ const depositUi = {
   selectedFile: null,
   selectedFileUrl: null,
   isSubmitting: false,
+  isRefreshing: false,
   readyRefreshTimer: null,
   clockTimer: null,
   accountLoadError: null,
@@ -172,6 +173,9 @@ const depositUi = {
     const pos = this.getPOS();
     if (!pos?.branch) return;
 
+    this.isRefreshing = true;
+    this.updateSummaryCard();
+
     const branchId = pos.branch.id;
     const staffId = pos.user?.id;
     this.accountLoadError = null;
@@ -192,6 +196,7 @@ const depositUi = {
       ? Number(this.selectedClosedSession.depositable_cash || 0)
       : 0;
 
+    this.isRefreshing = false;
     this.updateSummaryCard();
 
     try {
@@ -246,6 +251,7 @@ const depositUi = {
   },
 
   getBlockedReasonMeta() {
+    if (this.isRefreshing) return null;
     const pos = this.getPOS();
     const sess = this.selectedClosedSession;
     const hasEligible = this.hasEligibleClosedShift();
@@ -389,7 +395,8 @@ const depositUi = {
       : 'Belum ada shift tertutup';
 
     if (this.el.cardLabel) {
-      this.el.cardLabel.textContent = hasEligible ? 'Kas Final Shift' : 'Menunggu Shift Ditutup';
+      this.el.cardLabel.textContent = hasEligible ? 'Kas Final Shift'
+        : (this.isRefreshing ? 'Memuat...' : 'Menunggu Shift Ditutup');
     }
     if (this.el.shiftMetaLabel) {
       this.el.shiftMetaLabel.textContent = hasEligible ? 'Shift Tertutup' : 'Status Shift';
@@ -402,7 +409,7 @@ const depositUi = {
     if (this.el.headerShift) {
       this.el.headerShift.textContent = hasEligible
         ? shiftLabel
-        : 'Belum ada shift tertutup yang bisa disetor';
+        : (this.isRefreshing ? 'Memuat data shift...' : 'Belum ada shift tertutup yang bisa disetor');
     }
 
     const noCash = hasEligible && this.depositableCash <= 0;
