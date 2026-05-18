@@ -184,8 +184,9 @@ const depositUi = {
     try {
       this.eligibleSessions = await depositService.getEligibleSessions({ branchId, staffId });
     } catch (e) {
-      console.warn('depositUi.refresh getEligibleSessions failed', e);
+      console.error('depositUi.refresh getEligibleSessions failed', e);
       this.eligibleSessions = [];
+      if (typeof showToast === 'function') showToast('Gagal memuat data shift. Coba tekan Refresh.', 'error');
     }
 
     const preferred = preferSessionId

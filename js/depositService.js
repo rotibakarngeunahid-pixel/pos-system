@@ -181,8 +181,63 @@ const depositService = {
       p_staff_id: staffId,
       p_limit: limit
     });
-    if (error) throw error;
-    return data || [];
+    if (!error) return data || [];
+
+    console.warn('[depositService] get_deposit_eligible_sessions RPC gagal, menggunakan fallback query:', error.message);
+    return this._getEligibleSessionsFallback({ branchId, staffId, limit });
+  },
+
+  async _getEligibleSessionsFallback({ branchId, staffId, limit = 10 } = {}) {
+    const { data: sessions, error: sessErr } = await db
+      .from('cashier_sessions')
+      .select('id, branch_id, staff_id, status, opened_at, closed_at, closing_cash, expected_cash, current_cash_amount')
+      .eq('branch_id', branchId)
+      .eq('staff_id', staffId)
+      .eq('status', 'closed')
+      .order('closed_at', { ascending: false, nullsFirst: false })
+      .limit(limit);
+    if (sessErr) throw sessErr;
+    if (!sessions || sessions.length === 0) return [];
+
+    const sessionIds = sessions.map(s => s.id);
+    const { data: deposits } = await db
+      .from('cash_deposits')
+      .select('session_id, amount, status')
+      .in('session_id', sessionIds)
+      .in('status', ['pending', 'confirmed']);
+    const depsBySession = {};
+    (deposits || []).forEach(d => {
+      if (!depsBySession[d.session_id]) depsBySession[d.session_id] = { pending: 0, confirmed: 0, lastStatus: null };
+      if (d.status === 'pending')   depsBySession[d.session_id].pending   += Number(d.amount || 0);
+      if (d.status === 'confirmed') depsBySession[d.session_id].confirmed += Number(d.amount || 0);
+      depsBySession[d.session_id].lastStatus = d.status;
+    });
+
+    return sessions.map(sess => {
+      const finalCash = Number(sess.current_cash_amount ?? sess.closing_cash ?? sess.expected_cash ?? 0);
+      const dep = depsBySession[sess.id] || { pending: 0, confirmed: 0, lastStatus: null };
+      const totalDep = dep.pending + dep.confirmed;
+      const depositable = Math.max(0, finalCash - totalDep);
+      let blockReason = null;
+      if (totalDep > 0 && dep.lastStatus === 'pending')   blockReason = 'Setoran sedang menunggu konfirmasi';
+      if (totalDep > 0 && dep.lastStatus === 'confirmed') blockReason = 'Setoran shift ini sudah selesai';
+      return {
+        session_id:          sess.id,
+        branch_id:           sess.branch_id,
+        staff_id:            sess.staff_id,
+        session_status:      sess.status,
+        opened_at:           sess.opened_at,
+        closed_at:           sess.closed_at,
+        closing_cash:        sess.closing_cash,
+        expected_cash:       sess.expected_cash,
+        current_cash_amount: sess.current_cash_amount,
+        final_cash_amount:   finalCash,
+        depositable_cash:    depositable,
+        has_active_deposit:  totalDep > 0,
+        last_deposit_status: dep.lastStatus,
+        block_reason:        blockReason
+      };
+    });
   },
 
   async submitDeposit({ branchId, sessionId, staffId, accountId, amount, cashBalance = null, file = null, notes = null, requireProof = true }) {
