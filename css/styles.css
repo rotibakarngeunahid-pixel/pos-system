@@ -951,7 +951,8 @@ body, .body { font-size: 14px; font-weight: 400; }
   font-weight: 700;
   color: #1A1A2E;
   text-align: right;
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
   min-width: 0;
 }
 
