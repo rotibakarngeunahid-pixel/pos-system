@@ -25,6 +25,10 @@ const POS = {
   _pendingProduct:   null,
   _openShiftDeposit: { sessions: [], accounts: [], session: null, depositableCash: 0, file: null },
   _openShiftBlocker: null,
+  _ingredientLogId:     null,
+  _ingredientLogName:   null,
+  _ingredientLogOffset: 0,
+  _ingredientLogLimit:  50,
 
   // ── Cache dirty flags (set by cross-page events from Admin) ──
   _productsDirty:     false,
@@ -107,6 +111,9 @@ const POS = {
         case 'print-receipt': window.print(); break;
         case 'open-stock-adjust-modal': POS.openStockAdjustModal(); break;
         case 'submit-stock-adjust': POS.submitStockAdjust(); break;
+        case 'view-ingredient-log': POS.viewIngredientLog(btn.dataset.ingredientId, btn.dataset.ingredientName); break;
+        case 'refresh-ingredient-log': POS.loadIngredientLogData(false); break;
+        case 'ingredient-log-load-more': POS.loadIngredientLogData(true); break;
         case 'edit-item-price': POS.editItemPrice(Number(btn.dataset.id)); break;
         // FIX: close-success-popup handler properly resets all locks
         case 'close-success-popup': POS.closeSuccessPopup(); break;
@@ -128,6 +135,7 @@ const POS = {
       else if (action === 'save-printer-settings') POS.savePrinterSettings();
       else if (action === 'toggle-discount-input') POS.toggleDiscountInput();
       else if (action === 'toggle-stock-adj-type') POS.toggleStockAdjType();
+      else if (action === 'ingredient-log-filter-change') POS.loadIngredientLogData(false);
     });
     document.addEventListener('input', e => {
       const inputNode = e.target.closest('[data-action-input]');
@@ -1582,10 +1590,23 @@ const POS = {
           const awal    = sisa + terpakai;
           const low     = sisa < 5;
           const unit    = escapeHtml(r.ingredients?.unit || '');
+          const ingName = escapeHtml(r.ingredients?.name || '—');
           return `
-            <div class="trx-item" style="padding:16px;">
+            <div class="trx-item"
+              style="padding:16px;cursor:pointer;transition:background .15s;"
+              data-action="view-ingredient-log"
+              data-ingredient-id="${r.ingredient_id}"
+              data-ingredient-name="${ingName}"
+              onmouseenter="this.style.background='var(--surface-2)'"
+              onmouseleave="this.style.background=''">
               <div class="trx-item-left" style="flex:1;">
-                <div class="fw-700 text-md mb-1">${escapeHtml(r.ingredients?.name || '—')}</div>
+                <div class="fw-700 text-md mb-1">
+                  ${ingName}
+                  <span style="font-size:10px;font-weight:500;color:var(--primary);margin-left:6px;vertical-align:middle;opacity:.8;">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+                    Log
+                  </span>
+                </div>
                 <div class="flex gap-3 text-xs text-muted">
                   <span>Stok Awal: <strong style="color:var(--text-main)">${awal.toLocaleString('id-ID')} ${unit}</strong></span>
                   <span>Terpakai: <strong class="text-danger">${terpakai > 0 ? '−'+terpakai.toLocaleString('id-ID') : '0'} ${unit}</strong></span>
@@ -1639,6 +1660,201 @@ const POS = {
     }
 
     if (window.lucide) lucide.createIcons();
+  },
+
+  // ── Ingredient Inventory Log ──────────────────────────────────
+  viewIngredientLog(ingredientIdStr, ingredientName) {
+    const ingredientId = parseInt(ingredientIdStr);
+    if (!ingredientId || !this.branch) return;
+
+    this._ingredientLogId     = ingredientId;
+    this._ingredientLogName   = ingredientName || '—';
+    this._ingredientLogOffset = 0;
+
+    const titleEl = document.getElementById('ingredient-log-title');
+    if (titleEl) titleEl.textContent = this._ingredientLogName;
+
+    // Reset semua filter
+    const fromEl = document.getElementById('ing-log-date-from');
+    const toEl   = document.getElementById('ing-log-date-to');
+    const typeEl = document.getElementById('ing-log-type-filter');
+    if (fromEl) fromEl.value = '';
+    if (toEl)   toEl.value   = '';
+    if (typeEl) typeEl.value = '';
+
+    const moreBtn = document.getElementById('btn-ingredient-log-loadmore');
+    if (moreBtn) moreBtn.style.display = 'none';
+
+    openModal('modal-ingredient-log');
+    this.loadIngredientLogData(false);
+  },
+
+  async loadIngredientLogData(append = false) {
+    if (!this._ingredientLogId || !this.branch || !this.user) return;
+
+    const listEl  = document.getElementById('ingredient-log-list');
+    const moreBtn = document.getElementById('btn-ingredient-log-loadmore');
+    if (!listEl) return;
+
+    if (!append) {
+      this._ingredientLogOffset = 0;
+      listEl.innerHTML = `
+        <div class="empty-state" style="padding:40px 0;">
+          <div class="empty-icon" style="opacity:.4;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          </div>
+          <div class="empty-title">Memuat riwayat...</div>
+        </div>`;
+      if (moreBtn) moreBtn.style.display = 'none';
+    }
+
+    const fromEl   = document.getElementById('ing-log-date-from');
+    const toEl     = document.getElementById('ing-log-date-to');
+    const typeEl   = document.getElementById('ing-log-type-filter');
+    const dateFrom = fromEl?.value ? (fromEl.value + 'T00:00:00') : null;
+    const dateTo   = toEl?.value   ? (toEl.value   + 'T23:59:59') : null;
+    const typeVal  = typeEl?.value || null;
+
+    try {
+      const { data, error } = await db.rpc('get_ingredient_inventory_logs', {
+        p_ingredient_id: this._ingredientLogId,
+        p_branch_id:     this.branch.id,
+        p_user_id:       this.user.id,
+        p_date_from:     dateFrom,
+        p_date_to:       dateTo,
+        p_type:          typeVal,
+        p_limit:         this._ingredientLogLimit,
+        p_offset:        this._ingredientLogOffset
+      });
+
+      if (error) throw new Error(error.message);
+
+      const logs = Array.isArray(data) ? data : [];
+
+      if (!append) {
+        if (!logs.length) {
+          listEl.innerHTML = `
+            <div class="empty-state" style="padding:48px 0;">
+              <div class="empty-icon"><i data-lucide="inbox" class="icon"></i></div>
+              <div class="empty-title">Belum ada riwayat pergerakan</div>
+              <div class="empty-desc" style="max-width:220px;">Bahan ini belum memiliki histori stok yang tercatat.</div>
+            </div>`;
+          if (window.lucide) lucide.createIcons();
+          return;
+        }
+        listEl.innerHTML = '';
+      }
+
+      this._renderIngredientLogRows(listEl, logs);
+      this._ingredientLogOffset += logs.length;
+
+      if (moreBtn) {
+        moreBtn.style.display = logs.length >= this._ingredientLogLimit ? 'inline-flex' : 'none';
+      }
+
+      if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+    } catch (e) {
+      if (!append) {
+        listEl.innerHTML = `
+          <div class="empty-state" style="padding:48px 0;">
+            <div class="empty-icon"><i data-lucide="wifi-off" class="icon"></i></div>
+            <div class="empty-title" style="color:var(--danger);">Riwayat bahan belum bisa dimuat</div>
+            <div class="empty-desc">Silakan coba lagi.</div>
+          </div>`;
+        if (window.lucide) lucide.createIcons();
+      }
+      console.error('[RBN] loadIngredientLogData:', e.message);
+    }
+  },
+
+  _renderIngredientLogRows(container, logs) {
+    const typeLabel = {
+      'in':           'Stok Masuk',
+      'out':          'Stok Keluar',
+      'transfer_in':  'Transfer Masuk',
+      'transfer_out': 'Transfer Keluar',
+      'opname':       'Opname',
+    };
+    const typeBadge = {
+      'in':           'badge-green',
+      'out':          'badge-red',
+      'transfer_in':  'badge-green',
+      'transfer_out': 'badge-orange',
+      'opname':       'badge-orange',
+    };
+    const refLabel = {
+      'transaction': 'Pemakaian Transaksi',
+      'void':        'Void / Retur Transaksi',
+      'purchase':    'Pembelian / Restock',
+      'transfer':    'Transfer Antar Outlet',
+      'manual':      'Penyesuaian Manual',
+    };
+
+    const rows = logs.map(log => {
+      const qty    = parseFloat(log.qty || 0);
+      const isIn   = qty >= 0;
+      const absQty = Math.abs(qty);
+      const unit   = escapeHtml(log.ingredient_unit || '');
+      const ts     = new Date(log.created_at);
+      const tStr   = ts.toLocaleString('id-ID', {
+        day:'2-digit', month:'short', year:'numeric',
+        hour:'2-digit', minute:'2-digit'
+      });
+      const actor   = escapeHtml(log.user_name || 'Sistem');
+      const before  = parseFloat(log.stock_before ?? 0);
+      const after   = parseFloat(log.stock_after  ?? 0);
+      const notes   = escapeHtml(log.notes || '');
+      const typeKey = log.type || 'out';
+      const refType = log.reference_type || '';
+      const refId   = log.reference_id;
+
+      let refHtml = '';
+      if ((refType === 'transaction' || refType === 'void') && refId) {
+        const trxNum = parseInt(refId) || refId;
+        const labelTrx = refType === 'void' ? 'Void Transaksi' : 'Transaksi Penjualan';
+        refHtml = `
+          <button class="btn btn-ghost btn-sm"
+            style="padding:2px 8px;font-size:11px;height:auto;margin-top:4px;color:var(--primary);border:1px solid var(--border);border-radius:var(--r-sm);"
+            data-action="view-trx" data-id="${trxNum}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Lihat ${labelTrx} #${trxNum}
+          </button>`;
+      } else if (refLabel[refType]) {
+        refHtml = `<span class="text-xs text-muted" style="margin-top:3px;display:inline-block;">${escapeHtml(refLabel[refType])}</span>`;
+      }
+
+      return `
+        <div class="trx-item" style="padding:12px 16px;gap:10px;align-items:flex-start;border-bottom:1px solid var(--border);">
+          <div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:2px;background:${isIn ? 'var(--success-bg)' : 'var(--danger-bg)'};">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="${isIn ? 'var(--success)' : 'var(--danger)'}"
+              stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              ${isIn ? '<polyline points="18 15 12 9 6 15"/>' : '<polyline points="6 9 12 15 18 9"/>'}
+            </svg>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="badge ${typeBadge[typeKey] || 'badge-orange'}" style="font-size:10px;">
+                ${escapeHtml(typeLabel[typeKey] || typeKey)}
+              </span>
+              <span class="fw-700 text-sm ${isIn ? 'text-success' : 'text-danger'}">
+                ${isIn ? '+' : '−'}${absQty.toLocaleString('id-ID')} ${unit}
+              </span>
+            </div>
+            <div class="text-xs text-muted" style="margin-top:4px;">
+              Stok: <strong>${before.toLocaleString('id-ID')}</strong>
+              &rarr;
+              <strong>${after.toLocaleString('id-ID')} ${unit}</strong>
+            </div>
+            ${notes ? `<div class="text-xs text-muted" style="margin-top:3px;font-style:italic;">${notes}</div>` : ''}
+            <div style="margin-top:4px;">${refHtml}</div>
+            <div class="text-xs text-muted" style="margin-top:4px;">Oleh: ${actor}</div>
+          </div>
+          <div style="flex-shrink:0;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap;margin-top:2px;">${tStr}</div>
+        </div>`;
+    });
+
+    container.insertAdjacentHTML('beforeend', rows.join(''));
   },
 
   // ── Stock Adjust (Staff & Admin) ──────────────────────────────

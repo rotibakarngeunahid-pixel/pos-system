@@ -963,6 +963,63 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       MODAL: Log Inventori Bahan Baku
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-ingredient-log">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title"><i data-lucide="history" class="icon-sm"></i> Log Inventori Bahan</div>
+          <div class="modal-subtitle" id="ingredient-log-title">—</div>
+        </div>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-ingredient-log">✕</button>
+      </div>
+      <!-- Filter bar -->
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--surface);">
+        <input type="date" id="ing-log-date-from"
+          class="form-control"
+          style="width:130px;height:32px;font-size:12px;padding:4px 8px;"
+          data-action-change="ingredient-log-filter-change"
+          placeholder="Dari tanggal" />
+        <input type="date" id="ing-log-date-to"
+          class="form-control"
+          style="width:130px;height:32px;font-size:12px;padding:4px 8px;"
+          data-action-change="ingredient-log-filter-change"
+          placeholder="Sampai" />
+        <select id="ing-log-type-filter"
+          class="form-control"
+          style="width:160px;height:32px;font-size:12px;padding:4px 8px;"
+          data-action-change="ingredient-log-filter-change">
+          <option value="">Semua Jenis</option>
+          <option value="in">Stok Masuk</option>
+          <option value="out">Stok Keluar</option>
+          <option value="transfer_in">Transfer Masuk</option>
+          <option value="transfer_out">Transfer Keluar</option>
+          <option value="opname">Opname</option>
+        </select>
+        <button class="btn btn-outline btn-sm" data-action="refresh-ingredient-log" title="Refresh">
+          <i data-lucide="refresh-cw" class="icon-sm"></i>
+        </button>
+      </div>
+      <!-- Log list -->
+      <div id="ingredient-log-list" style="overflow-y:auto;max-height:440px;padding-bottom:8px;">
+        <div class="empty-state" style="padding:40px 0;">
+          <div class="empty-icon"><i data-lucide="history" class="icon"></i></div>
+          <div class="empty-title">Pilih bahan untuk melihat log</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:space-between;align-items:center;">
+        <button class="btn btn-outline btn-sm" id="btn-ingredient-log-loadmore"
+          style="display:none;"
+          data-action="ingredient-log-load-more">
+          <i data-lucide="chevrons-down" class="icon-sm"></i> Muat Lebih Banyak
+        </button>
+        <button class="btn btn-ghost" data-action="close-modal" data-modal-id="modal-ingredient-log">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        MODAL: Konfirmasi Custom
   ══════════════════════════════════════════ -->
   <div class="modal-overlay" id="modal-confirm">
