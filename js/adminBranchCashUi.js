@@ -96,7 +96,8 @@ const adminBranchCashUi = {
       this._applyFilters();
     } catch (e) {
       showDbError(e, { action: 'memuat posisi kas outlet', entity: 'Kas Outlet' });
-      this._setTableLoading(false);
+      const tbody = document.getElementById('bc-table-body');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="11" class="empty-td">Gagal memuat data. Klik Refresh untuk coba lagi.</td></tr>';
     } finally {
       this._loading = false;
     }

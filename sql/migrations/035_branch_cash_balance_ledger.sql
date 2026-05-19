@@ -690,9 +690,12 @@ END;
 $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 10. FUNCTION: confirm_deposit (CREATE OR REPLACE — apply ke branch balance)
---     Signature dipertahankan dari migration 030 agar tidak breaking.
+-- 10. FUNCTION: confirm_deposit (DROP+CREATE — apply ke branch balance)
+--     Signature param dipertahankan dari migration 030 agar caller tidak rusak.
+--     DROP diperlukan karena return type berubah menjadi jsonb.
 -- ─────────────────────────────────────────────────────────────────────────────
+DROP FUNCTION IF EXISTS public.confirm_deposit(uuid, bigint, text, text);
+
 CREATE OR REPLACE FUNCTION public.confirm_deposit(
   p_deposit_id   uuid,
   p_admin_id     bigint,
