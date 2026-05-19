@@ -205,8 +205,8 @@ const adminBranchCashUi = {
             <button class="btn btn-outline btn-xs" data-bc-action="ledger" data-branch-id="${r.branch_id}" title="Riwayat Kas">
               <i data-lucide="scroll-text" style="width:12px;height:12px"></i>
             </button>
-            <button class="btn btn-outline btn-xs" data-bc-action="correct" data-branch-id="${r.branch_id}" title="Koreksi Kas">
-              <i data-lucide="edit-3" style="width:12px;height:12px"></i>
+            <button class="btn btn-outline btn-xs" data-bc-action="correct" data-branch-id="${r.branch_id}" title="Set / Input Kas Outlet">
+              <i data-lucide="edit-3" style="width:12px;height:12px"></i> Set Kas
             </button>
             ${forceCloseBtn}
           </div>
@@ -281,12 +281,12 @@ const adminBranchCashUi = {
     if (isNaN(newBalance) || newBalance < 0) {
       showToast('Masukkan posisi kas baru yang valid (≥ 0)', 'error'); return;
     }
-    if (reason.length < 5) {
-      showToast('Alasan koreksi wajib diisi minimal 5 karakter', 'error'); return;
+    if (reason.length < 3) {
+      showToast('Keterangan wajib diisi minimal 3 karakter', 'error'); return;
     }
 
     this._corrSaving = true;
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Menyimpan...'; }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Menyimpan…'; }
     try {
       const adminId = auth.getSession()?.id;
       await cashService.adminSetBranchCashBalance({
@@ -296,14 +296,14 @@ const adminBranchCashUi = {
         reason,
         version:    this._corrTarget.version
       });
-      showToast(`Posisi kas ${this._corrTarget.branchName} berhasil dikoreksi menjadi ${formatRupiah(newBalance)}`, 'success');
+      showToast(`Posisi kas ${this._corrTarget.branchName} diset ke ${formatRupiah(newBalance)}. Shift berikutnya akan mulai dari nilai ini.`, 'success');
       this._closeModal('modal-branch-cash-correction');
       this.load();
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
       this._corrSaving = false;
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Simpan Koreksi'; }
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Simpan'; }
     }
   },
 

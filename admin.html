@@ -1215,7 +1215,7 @@
       <div class="modal-overlay" id="modal-branch-cash-correction" style="display:none">
         <div class="modal modal-sm">
           <div class="modal-header">
-            <span class="modal-title"><i data-lucide="edit-3" class="icon-sm"></i> Koreksi Posisi Kas Outlet</span>
+            <span class="modal-title"><i data-lucide="edit-3" class="icon-sm"></i> Set Posisi Kas Outlet</span>
             <button class="modal-close" id="bc-correction-close-btn">&times;</button>
           </div>
           <div class="modal-body">
@@ -1226,24 +1226,24 @@
               </div>
               <div id="bc-correction-shift-warn" style="display:none;margin-top:6px;padding:6px 8px;background:#fff3cd;border-radius:var(--r-sm);font-size:12px;color:#856404">
                 <i data-lucide="alert-triangle" class="icon-sm"></i>
-                Shift sedang aktif. Koreksi tetap bisa dilakukan untuk keadaan darurat dan akan masuk audit.
+                Shift sedang aktif. Perubahan posisi kas akan berlaku pada shift berikutnya.
               </div>
             </div>
             <div class="form-group" style="margin-bottom:12px">
-              <label class="form-label">Posisi Kas Baru (Rp) *</label>
+              <label class="form-label">Posisi Kas Outlet (Rp) *</label>
               <div class="input-prefix-wrap">
                 <span class="input-prefix">Rp</span>
                 <input type="number" class="form-control" id="bc-correction-new-balance" placeholder="0" min="0" />
               </div>
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label class="form-label">Alasan Koreksi * <span style="font-size:11px;color:var(--text-muted)">(min. 5 karakter)</span></label>
-              <textarea class="form-control" id="bc-correction-reason" rows="3" placeholder="Contoh: Penyesuaian setelah penghitungan ulang fisik kas"></textarea>
+              <label class="form-label">Keterangan * <span style="font-size:11px;color:var(--text-muted)">(min. 3 karakter)</span></label>
+              <textarea class="form-control" id="bc-correction-reason" rows="2" placeholder="Contoh: Input awal kas, penyesuaian fisik, koreksi admin"></textarea>
             </div>
           </div>
           <div class="modal-footer">
             <button class="btn btn-outline" id="bc-correction-cancel-btn">Batal</button>
-            <button class="btn btn-primary" id="bc-correction-save-btn">Simpan Koreksi</button>
+            <button class="btn btn-primary" id="bc-correction-save-btn">Simpan</button>
           </div>
         </div>
       </div>
@@ -2533,7 +2533,7 @@
   <script src="js/depositService.js?v=20260519-deposit-confirm-fix-1"></script>
   <script src="js/adminDepositUi.js?v=20260519-deposit-confirm-fix-1"></script>
   <script src="js/adminStaffCashUi.js?v=20260520-saldo-aktif-1"></script>
-  <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-2"></script>
+  <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-3"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260518-admin-cash-ui-2"></script>
