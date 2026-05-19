@@ -495,6 +495,75 @@ const cashService = {
     if (error) throw error;
   },
 
+  // ── Staff Cash Balance Methods (migration 034) ────────────────
+
+  // Ambil saldo aktif staff + pending deposit + info sesi terbuka
+  async getStaffBalance(branchId, staffId) {
+    if (!branchId || !staffId) throw new Error('branchId dan staffId wajib diisi');
+    const { data, error } = await db.rpc('get_staff_cash_balance', {
+      p_branch_id: branchId,
+      p_staff_id:  staffId
+    });
+    if (error) {
+      if (isMissingRpcError(error)) throw new Error('Fitur saldo aktif perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
+      throw error;
+    }
+    return data;
+  },
+
+  // Daftar saldo aktif semua staff (untuk UI admin)
+  async getAdminStaffBalances({ adminId, branchId = null, staffId = null } = {}) {
+    if (!adminId) throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
+    const { data, error } = await db.rpc('get_admin_staff_cash_balances', {
+      p_admin_id:  adminId,
+      p_branch_id: branchId || null,
+      p_staff_id:  staffId  || null
+    });
+    if (error) {
+      if (isMissingRpcError(error)) throw new Error('Fitur saldo aktif perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
+      throw error;
+    }
+    return data || [];
+  },
+
+  // Set/koreksi saldo aktif staff (admin only) — alasan wajib
+  async adminSetStaffBalance({ adminId, branchId, staffId, newBalance, reason, version = null }) {
+    if (!adminId)  throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
+    if (!branchId) throw new Error('branchId wajib diisi');
+    if (!staffId)  throw new Error('staffId wajib diisi');
+    if (!reason?.trim()) throw new Error('Alasan koreksi saldo wajib diisi');
+    const amount = safeNum(newBalance, 'Nominal saldo baru');
+    if (amount < 0) throw new Error('Nominal saldo tidak boleh negatif');
+    const { data, error } = await db.rpc('admin_set_staff_cash_balance', {
+      p_admin_id:    adminId,
+      p_branch_id:   branchId,
+      p_staff_id:    staffId,
+      p_new_balance: amount,
+      p_reason:      reason.trim(),
+      p_version:     version !== null ? Number(version) : null
+    });
+    if (error) {
+      if (isMissingRpcError(error)) throw new Error('Fitur saldo aktif perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
+      throw error;
+    }
+    return data;
+  },
+
+  // Riwayat perubahan saldo aktif staff (ledger)
+  async getStaffCashLedger({ branchId, staffId, limit = 30 } = {}) {
+    if (!branchId || !staffId) throw new Error('branchId dan staffId wajib diisi');
+    const { data, error } = await db.rpc('get_staff_cash_ledger', {
+      p_branch_id: branchId,
+      p_staff_id:  staffId,
+      p_limit:     limit
+    });
+    if (error) {
+      if (isMissingRpcError(error)) throw new Error('Fitur ledger saldo perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
+      throw error;
+    }
+    return data || [];
+  },
+
   // ── Get cash positions for all active staff (admin dashboard) ─
   // Calls the get_staff_cash_positions RPC which is a single aggregated query.
   // Do NOT replace this with a loop of getSummary() calls — that would be N+1.

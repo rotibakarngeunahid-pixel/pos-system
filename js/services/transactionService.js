@@ -139,6 +139,54 @@ const transactionService = {
     }
   },
 
+  // ── Open shift dari saldo aktif staff (RPC baru) ─────────────
+  async openShiftFromBalance({ branchId, staffId, physicalCash = null, varianceReason = null }) {
+    if (!branchId) throw new Error('branchId wajib diisi');
+    if (!staffId)  throw new Error('staffId wajib diisi — silakan login ulang');
+
+    const { data, error } = await db.rpc('open_cash_session_from_balance', {
+      p_branch_id:       branchId,
+      p_staff_id:        staffId,
+      p_physical_cash:   physicalCash !== null ? physicalCash : null,
+      p_variance_reason: varianceReason || null
+    });
+
+    if (error) {
+      // Jika RPC belum di-deploy, fallback ke metode lama
+      if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
+        console.warn('openShiftFromBalance: RPC belum tersedia, fallback ke openShift lama');
+        return this.openShift({ branchId, staffId, openingCash: 0 });
+      }
+      throw new Error(error.message);
+    }
+
+    // RPC mengembalikan jsonb yang sudah include semua field sesi
+    return data;
+  },
+
+  // ── Tutup shift dan apply saldo aktif staff (RPC baru) ────────
+  async closeShiftApplyBalance({ sessionId, closingCash, staffId }) {
+    if (!sessionId) throw new Error('sessionId wajib diisi');
+    if (!staffId)   throw new Error('staffId wajib diisi');
+
+    const { data, error } = await db.rpc('close_cash_session_apply_balance', {
+      p_session_id:   sessionId,
+      p_closing_cash: closingCash,
+      p_staff_id:     staffId
+    });
+
+    if (error) {
+      // Fallback ke closeShift lama jika RPC belum ada
+      if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
+        console.warn('closeShiftApplyBalance: RPC belum tersedia, fallback ke closeShift lama');
+        return this.closeShift({ sessionId, closingCash });
+      }
+      throw new Error(error.message);
+    }
+
+    return data;
+  },
+
   // ── Close cashier shift ───────────────────────────────────────
   async closeShift({ sessionId, closingCash }) {
     const { data: sess } = await db.from('cashier_sessions')

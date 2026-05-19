@@ -14,6 +14,19 @@ const adminStaffCashUi = {
   _activeAction: null,
   _savingAction: false,
 
+  // Saldo aktif staff
+  _balances: [],
+  _balancesLoading: false,
+  _activeTab: 'sessions',   // 'sessions' | 'balances'
+
+  // Balance correction modal state
+  _bcTarget: null,          // { staffId, staffName, branchId, branchName, currentBalance, version }
+  _bcSaving: false,
+
+  // Staff ledger modal state
+  _slTarget: null,          // { staffId, staffName, branchId }
+  _slData: [],
+
   init() {
     document.addEventListener('DOMContentLoaded', () => {
       try {
@@ -21,6 +34,9 @@ const adminStaffCashUi = {
         this._bindFilterEvents();
         this._bindRefreshBtn();
         this._bindDetailModalControls();
+        this._bindTabEvents();
+        this._bindBalanceModalEvents();
+        this._bindLedgerModalEvents();
       } catch (e) {
         console.error('adminStaffCashUi.init', e);
       }
@@ -30,12 +46,20 @@ const adminStaffCashUi = {
   async load() {
     await this._loadBranches();
     await this._loadStaff();
-    await this._loadSessions();
+    if (this._activeTab === 'balances') {
+      await this._loadBalances();
+    } else {
+      await this._loadSessions();
+    }
   },
 
   markDirty() {
     if (window.ADMIN && ADMIN.currentSection === 'staff-cash-position') {
-      this._loadSessions();
+      if (this._activeTab === 'balances') {
+        this._loadBalances();
+      } else {
+        this._loadSessions();
+      }
     }
     if (this._activeDetail?.session?.id) {
       this._refreshActiveDetail(this._activeDetail.session.id).catch(err => {
@@ -767,6 +791,297 @@ const adminStaffCashUi = {
   _setHtml(id, value) {
     const el = document.getElementById(id);
     if (el) el.innerHTML = value;
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // TAB: Saldo Aktif Staff
+  // ─────────────────────────────────────────────────────────────
+
+  _bindTabEvents() {
+    document.querySelectorAll('.scp-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._switchTab(btn.dataset.tab));
+    });
+  },
+
+  _switchTab(tab) {
+    this._activeTab = tab || 'sessions';
+    document.querySelectorAll('.scp-tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === this._activeTab);
+    });
+    const sessTab = document.getElementById('scp-tab-sessions');
+    const balTab  = document.getElementById('scp-tab-balances');
+    if (sessTab) sessTab.style.display = this._activeTab === 'sessions' ? '' : 'none';
+    if (balTab)  balTab.style.display  = this._activeTab === 'balances' ? '' : 'none';
+    if (this._activeTab === 'balances' && !this._balances.length) {
+      this._loadBalances();
+    }
+  },
+
+  async _loadBalances() {
+    if (this._balancesLoading) return;
+    this._balancesLoading = true;
+    this._renderBalancesLoading();
+    try {
+      const session   = auth.getSession();
+      const branchId  = Number(document.getElementById('scp-filter-branch')?.value || 0) || null;
+      this._balances  = await cashService.getAdminStaffBalances({
+        adminId:  session?.id,
+        branchId
+      });
+      this._renderBalancesTable();
+    } catch (e) {
+      console.error('adminStaffCashUi._loadBalances', e);
+      const tbody = document.getElementById('scp-balances-body');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-td text-danger">${escHtml(e.message || 'Gagal memuat saldo staff')}</td></tr>`;
+    } finally {
+      this._balancesLoading = false;
+    }
+  },
+
+  _renderBalancesLoading() {
+    const tbody = document.getElementById('scp-balances-body');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat saldo aktif staff...</td></tr>';
+  },
+
+  _renderBalancesTable() {
+    const tbody = document.getElementById('scp-balances-body');
+    if (!tbody) return;
+    if (!this._balances.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Tidak ada staff aktif ditemukan</td></tr>';
+      return;
+    }
+    tbody.innerHTML = this._balances.map((r, i) => {
+      const balance    = this._num(r.current_balance);
+      const pending    = this._num(r.pending_deposit);
+      const hasSession = !!r.open_session_id;
+      const sessionBadge = hasSession
+        ? `<span class="badge badge-success" style="font-size:10px">Sesi Terbuka</span>`
+        : `<span class="text-muted" style="font-size:11px">Tidak ada sesi</span>`;
+      const lastUpd = r.last_updated ? fDate(r.last_updated) : '<span class="text-muted">Belum pernah</span>';
+      const pendingCell = pending > 0
+        ? `<span class="text-warning fw-700">${fRp(pending)}</span>`
+        : `<span class="text-muted">—</span>`;
+      return `<tr>
+        <td class="fw-700">${escHtml(r.staff_name || '-')}</td>
+        <td>${escHtml(r.branch_name || '-')}</td>
+        <td class="fw-700 text-green" style="font-size:15px">${fRp(balance)}</td>
+        <td>${pendingCell}</td>
+        <td>${sessionBadge}</td>
+        <td class="text-muted" style="font-size:11px">${lastUpd}</td>
+        <td style="white-space:nowrap">
+          <div class="flex gap-1">
+            <button type="button" class="btn btn-outline btn-sm scp-balance-correct-btn" data-row="${i}" title="Set/Koreksi Saldo">
+              <i data-lucide="edit-3" style="width:12px;height:12px"></i> Koreksi
+            </button>
+            <button type="button" class="btn btn-outline btn-sm scp-balance-ledger-btn" data-row="${i}" title="Riwayat Saldo">
+              <i data-lucide="list" style="width:12px;height:12px"></i>
+            </button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.scp-balance-correct-btn').forEach(btn => {
+      const row = this._balances[parseInt(btn.dataset.row, 10)];
+      btn.addEventListener('click', () => this._openBalanceCorrection(row));
+    });
+    tbody.querySelectorAll('.scp-balance-ledger-btn').forEach(btn => {
+      const row = this._balances[parseInt(btn.dataset.row, 10)];
+      btn.addEventListener('click', () => this._openStaffLedger(row));
+    });
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // MODAL: Koreksi Saldo Staff
+  // ─────────────────────────────────────────────────────────────
+
+  _bindBalanceModalEvents() {
+    const closeBtn   = document.getElementById('bc-close-btn');
+    const cancelBtn  = document.getElementById('bc-cancel-btn');
+    const saveBtn    = document.getElementById('bc-save-btn');
+    const amtInput   = document.getElementById('bc-new-balance');
+
+    if (closeBtn)  closeBtn.addEventListener('click', () => closeModal('modal-balance-correction'));
+    if (cancelBtn) cancelBtn.addEventListener('click', () => closeModal('modal-balance-correction'));
+    if (saveBtn)   saveBtn.addEventListener('click', () => this._saveBalanceCorrection());
+    if (amtInput)  amtInput.addEventListener('input', () => this._updateBcDiff());
+  },
+
+  _openBalanceCorrection(row) {
+    this._bcTarget = {
+      staffId:        row.staff_id,
+      staffName:      row.staff_name || '-',
+      branchId:       row.branch_id,
+      branchName:     row.branch_name || '-',
+      currentBalance: this._num(row.current_balance),
+      version:        this._num(row.version)
+    };
+    this._bcSaving = false;
+
+    this._setText('bc-staff-name',       this._bcTarget.staffName);
+    this._setText('bc-branch-name',      this._bcTarget.branchName);
+    this._setText('bc-current-balance',  fRp(this._bcTarget.currentBalance));
+
+    const amtInput = document.getElementById('bc-new-balance');
+    if (amtInput) amtInput.value = '';
+    const reasonInput = document.getElementById('bc-reason');
+    if (reasonInput) reasonInput.value = '';
+    this._setText('bc-error', '');
+    this._setText('bc-balance-diff', '');
+
+    const saveBtn = document.getElementById('bc-save-btn');
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i data-lucide="save" class="icon-sm"></i> Simpan Saldo';
+    }
+    openModal('modal-balance-correction');
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+    setTimeout(() => document.getElementById('bc-new-balance')?.focus(), 200);
+  },
+
+  _updateBcDiff() {
+    const input   = document.getElementById('bc-new-balance');
+    const diffEl  = document.getElementById('bc-balance-diff');
+    if (!input || !diffEl || !this._bcTarget) return;
+    const digits  = String(input.value || '').replace(/[^\d]/g, '');
+    input.value   = digits ? Number(digits).toLocaleString('id-ID') : '';
+    const newVal  = digits ? Number(digits) : NaN;
+    if (!Number.isFinite(newVal)) { diffEl.textContent = ''; return; }
+    const diff    = newVal - this._bcTarget.currentBalance;
+    const sign    = diff >= 0 ? '+' : '−';
+    diffEl.textContent = `Selisih: ${sign}${fRp(Math.abs(diff))}`;
+    diffEl.style.color = diff === 0 ? 'var(--text-muted)' : diff > 0 ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
+  },
+
+  async _saveBalanceCorrection() {
+    if (this._bcSaving || !this._bcTarget) return;
+    const digits  = String(document.getElementById('bc-new-balance')?.value || '').replace(/[^\d]/g, '');
+    const newBal  = digits ? Number(digits) : NaN;
+    const reason  = document.getElementById('bc-reason')?.value?.trim() || '';
+    if (!Number.isFinite(newBal)) {
+      this._setText('bc-error', 'Nominal saldo baru wajib diisi');
+      return;
+    }
+    if (newBal < 0) {
+      this._setText('bc-error', 'Nominal tidak boleh negatif');
+      return;
+    }
+    if (!reason) {
+      this._setText('bc-error', 'Alasan koreksi wajib diisi');
+      return;
+    }
+    this._setText('bc-error', '');
+
+    const diff = newBal - this._bcTarget.currentBalance;
+    const warnMsg = Math.abs(diff) > 1000000 ? 'Selisih sangat besar (>Rp1 juta). Yakin?' : '';
+    const ok = await showConfirm({
+      title:       'Konfirmasi Koreksi Saldo',
+      message:     `Staff: ${this._bcTarget.staffName}\nSebelum: ${fRp(this._bcTarget.currentBalance)}\nSesudah: ${fRp(newBal)}\nSelisih: ${diff >= 0 ? '+' : '−'}${fRp(Math.abs(diff))}\nAlasan: ${reason}`,
+      subText:     warnMsg,
+      confirmText: 'Ya, Simpan Saldo',
+      danger:      false
+    });
+    if (!ok) return;
+
+    this._bcSaving = true;
+    const saveBtn = document.getElementById('bc-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="btn-spinner"></span> Menyimpan...'; }
+
+    try {
+      const adminId = auth.getSession()?.id;
+      await cashService.adminSetStaffBalance({
+        adminId,
+        branchId:   this._bcTarget.branchId,
+        staffId:    this._bcTarget.staffId,
+        newBalance: newBal,
+        reason,
+        version:    this._bcTarget.version || null
+      });
+      showToast(`Saldo ${this._bcTarget.staffName} berhasil dikoreksi ke ${fRp(newBal)}`, 'success');
+      closeModal('modal-balance-correction');
+      await this._loadBalances();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-balance-correction' });
+    } catch (e) {
+      console.error('adminStaffCashUi._saveBalanceCorrection', e);
+      this._setText('bc-error', e.message || 'Gagal menyimpan koreksi saldo');
+    } finally {
+      this._bcSaving = false;
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i data-lucide="save" class="icon-sm"></i> Simpan Saldo';
+        if (window.lucide) lucide.createIcons();
+      }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // MODAL: Riwayat Saldo Staff (Ledger)
+  // ─────────────────────────────────────────────────────────────
+
+  _bindLedgerModalEvents() {
+    ['sl-close-btn', 'sl-close-btn-footer'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', () => closeModal('modal-staff-ledger'));
+    });
+  },
+
+  async _openStaffLedger(row) {
+    this._slTarget = {
+      staffId:   row.staff_id,
+      staffName: row.staff_name || '-',
+      branchId:  row.branch_id
+    };
+    this._setText('sl-staff-name', this._slTarget.staffName);
+    const tbody = document.getElementById('sl-ledger-body');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat riwayat...</td></tr>';
+    openModal('modal-staff-ledger');
+    try {
+      this._slData = await cashService.getStaffCashLedger({
+        branchId: this._slTarget.branchId,
+        staffId:  this._slTarget.staffId,
+        limit:    50
+      });
+      this._renderLedgerTable();
+    } catch (e) {
+      console.error('adminStaffCashUi._openStaffLedger', e);
+      if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-td text-danger">${escHtml(e.message || 'Gagal memuat riwayat')}</td></tr>`;
+    }
+  },
+
+  _renderLedgerTable() {
+    const tbody = document.getElementById('sl-ledger-body');
+    if (!tbody) return;
+    if (!this._slData.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-td text-muted">Belum ada riwayat perubahan saldo</td></tr>';
+      return;
+    }
+    const typeLabel = {
+      admin_set_balance:    '<span class="badge badge-success">Set Saldo Admin</span>',
+      admin_adjustment:     '<span class="badge badge-warning">Koreksi Admin</span>',
+      session_open_confirm: '<span class="badge badge-info" style="background:var(--info,#3b82f6);color:#fff">Buka Kas</span>',
+      opening_variance:     '<span class="badge badge-warning">Selisih Buka</span>',
+      session_close:        '<span class="badge badge-success">Tutup Kas</span>',
+      deposit_approved:     '<span class="badge badge-danger">Setoran Approved</span>',
+      deposit_rejected:     '<span class="badge badge-secondary" style="background:#6b7280;color:#fff">Setoran Ditolak</span>',
+      system_repair:        '<span class="badge badge-secondary" style="background:#6b7280;color:#fff">Perbaikan Sistem</span>'
+    };
+    tbody.innerHTML = this._slData.map(l => {
+      const dirCls  = l.direction === 'in' ? 'text-green' : l.direction === 'out' ? 'text-danger' : 'text-muted';
+      const sign    = l.direction === 'in' ? '+' : l.direction === 'out' ? '−' : '';
+      const amtText = l.direction === 'none' ? '—' : `${sign}${fRp(l.amount)}`;
+      const label   = typeLabel[l.movement_type] || `<span class="badge">${escHtml(l.movement_type)}</span>`;
+      const byName  = escHtml(l.created_by_name || l.approved_by_name || '-');
+      return `<tr>
+        <td class="text-muted" style="font-size:11px">${fDate(l.created_at)}</td>
+        <td>${label}</td>
+        <td class="${dirCls} fw-700">${amtText}</td>
+        <td class="text-right text-muted">${fRp(l.balance_before)}</td>
+        <td class="text-right fw-700">${fRp(l.balance_after)}</td>
+        <td class="text-muted" style="font-size:11px">${byName}</td>
+        <td class="text-muted" style="font-size:11px">${escHtml(l.reason || '-')}</td>
+      </tr>`;
+    }).join('');
   }
 };
 

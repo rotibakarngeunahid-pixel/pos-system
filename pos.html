@@ -692,18 +692,70 @@
           <i data-lucide="lock" class="icon"></i>
           <span id="shift-open-blocker-msg">Kas masih terbuka. Tutup kas aktif terlebih dahulu.</span>
         </div>
-        <div class="alert-warning" id="shift-opening-warning">
+        <div class="alert-warning" id="shift-opening-warning" style="display:none">
           <i data-lucide="alert-triangle" class="icon"></i>
-          Shift harus dibuka sebelum mulai berjualan. Hitung uang awal di laci kasir.
+          Shift harus dibuka sebelum mulai berjualan.
         </div>
-        <div class="form-group" id="shift-opening-cash-group">
-          <label class="form-label">Kas Awal (Rp) *</label>
-          <div class="input-prefix-wrap">
-            <span class="input-prefix">Rp</span>
-            <input type="number" class="form-control" id="shift-opening-cash" placeholder="0" min="0" />
+
+        <!-- Saldo aktif otomatis — menggantikan input kas awal manual -->
+        <div id="shift-balance-wrap">
+          <!-- Loading state -->
+          <div id="shift-balance-loading" style="text-align:center;padding:14px 0;color:var(--text-muted);font-size:13px">
+            <span style="opacity:.6">Memuat saldo aktif…</span>
           </div>
-          <span class="form-hint">Jumlah uang tunai di laci kasir saat ini (boleh 0)</span>
+          <!-- Display saldo -->
+          <div id="shift-balance-display" style="display:none">
+            <div class="form-label" style="margin-bottom:6px;color:var(--text-muted)">Kas Awal Sistem (Saldo Aktif)</div>
+            <div style="background:var(--bg-alt);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:10px;border:1.5px solid var(--border)">
+              <div id="shift-balance-amount" style="font-size:26px;font-weight:900;color:var(--text);letter-spacing:-.5px">Rp 0</div>
+              <div id="shift-balance-hint" style="font-size:11px;color:var(--text-muted);margin-top:3px"></div>
+            </div>
+            <!-- Peringatan setoran pending -->
+            <div id="shift-balance-pending-warn" style="display:none;margin-bottom:10px">
+              <div class="alert-warning" style="padding:7px 10px;font-size:12px">
+                <i data-lucide="clock" class="icon-sm"></i>
+                <span id="shift-balance-pending-text"></span>
+              </div>
+            </div>
+            <!-- Toggle jika kas fisik tidak sesuai -->
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:2px">
+              <input type="checkbox" id="shift-variance-toggle" style="width:16px;height:16px" />
+              <span style="font-size:13px;color:var(--text-muted)">Kas fisik berbeda dari saldo di atas</span>
+            </label>
+            <!-- Form selisih (hidden by default) -->
+            <div id="shift-variance-group" style="display:none;margin-top:10px;padding:12px;background:var(--bg-alt);border-radius:var(--r-md);border:1px solid var(--border)">
+              <div class="alert-info" style="padding:7px 10px;font-size:12px;margin-bottom:10px">
+                <i data-lucide="info" class="icon-sm"></i>
+                Kas awal sistem tetap dipakai. Selisih akan dicatat sebagai laporan ke admin.
+              </div>
+              <div class="form-group" style="margin-bottom:8px">
+                <label class="form-label" style="font-size:12px">Kas Fisik yang Dihitung (Rp) *</label>
+                <div class="input-prefix-wrap">
+                  <span class="input-prefix">Rp</span>
+                  <input type="number" class="form-control" id="shift-physical-cash" placeholder="0" min="0"
+                    data-action-input="update-shift-variance" />
+                </div>
+                <div id="shift-variance-diff" style="font-size:11px;margin-top:4px;color:var(--text-muted)"></div>
+              </div>
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label" style="font-size:12px">Alasan Selisih *</label>
+                <input type="text" class="form-control" id="shift-variance-reason"
+                  placeholder="Contoh: Ada kembalian lebih dari shift sebelumnya" />
+              </div>
+            </div>
+          </div>
+          <!-- Error state -->
+          <div id="shift-balance-error" style="display:none;padding:8px 0">
+            <div class="alert-warning" style="padding:8px 10px;font-size:12px">
+              <i data-lucide="alert-circle" class="icon-sm"></i>
+              Gagal memuat saldo aktif.
+              <button type="button" class="btn-link" style="font-size:12px;margin-left:4px"
+                data-action="reload-staff-balance">Coba lagi</button>
+            </div>
+          </div>
         </div>
+        <!-- Input tersembunyi untuk kompatibilitas backward (diisi otomatis oleh JS) -->
+        <input type="hidden" id="shift-opening-cash" value="0" />
 
         <!-- ── Setoran Tunai Opsional ──────────────────────────── -->
         <div id="shift-open-deposit-wrap" style="margin-top:16px">
@@ -1046,12 +1098,12 @@
   <script src="js/utils/validator.js"></script>
   <script src="js/ui.js?v=20260516-crud-friendly-1"></script>
   <script src="js/services/inventoryService.js"></script>
-  <script src="js/services/cashService.js?v=20260517-manual-deposit-2"></script>
-  <script src="js/services/transactionService.js?v=20260519-single-open-cashier-1"></script>
+  <script src="js/services/cashService.js?v=20260520-saldo-aktif-1"></script>
+  <script src="js/services/transactionService.js?v=20260520-saldo-aktif-1"></script>
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260517-manual-deposit-3"></script>
   <script src="js/depositUi.js?v=20260517-manual-deposit-2"></script>
-  <script src="js/pos.js?v=20260519-single-open-cashier-1"></script>
+  <script src="js/pos.js?v=20260520-saldo-aktif-1"></script>
 
   <!-- ══════════════════════════════════════════
        MODAL: Pilih Topping

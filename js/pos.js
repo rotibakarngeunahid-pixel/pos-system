@@ -25,6 +25,7 @@ const POS = {
   _pendingProduct:   null,
   _openShiftDeposit: { sessions: [], accounts: [], session: null, depositableCash: 0, file: null },
   _openShiftBlocker: null,
+  _staffBalance: { currentBalance: 0, pendingDeposit: 0, version: 0, hasBalanceRow: false, loaded: false, error: false },
   _ingredientLogId:     null,
   _ingredientLogName:   null,
   _ingredientLogOffset: 0,
@@ -105,6 +106,7 @@ const POS = {
         case 'start-new-transaction': POS.startNewTransaction(); break;
         case 'close-receipt': POS.closeReceipt(); break;
         case 'open-shift-modal': POS.openShiftModal(); break;
+        case 'reload-staff-balance': POS.loadStaffBalance(); break;
         case 'void-cash-log': POS.voidCashLogFromPOS(Number(btn.dataset.id)); break;
         case 'switch-cash-subtab': POS.switchCashSubTab(btn.dataset.type); break;
         case 'submit-cash-entry': POS.submitCashEntry(); break;
@@ -146,6 +148,7 @@ const POS = {
       if (action === 'apply-discount-preview') POS.applyDiscountPreview();
       else if (action === 'calc-change') POS.calcChange();
       else if (action === 'update-shift-diff') POS.updateShiftDiff(inputNode.value);
+      else if (action === 'update-shift-variance') POS.updateShiftVariance(inputNode.value);
     });
 
     // Handle Android back button / browser popstate
@@ -157,11 +160,15 @@ const POS = {
     });
 
     window.addEventListener('rbn:modal:opened', e => {
-      if (e.detail?.id === 'modal-shift' && !POS._openShiftBlocker) POS.loadOpenShiftDeposit();
+      if (e.detail?.id === 'modal-shift') {
+        POS.loadStaffBalance();
+        if (!POS._openShiftBlocker) POS.loadOpenShiftDeposit();
+      }
     });
     document.addEventListener('change', e => {
       if (e.target.id === 'shift-open-dep-account') POS.onOpenShiftDepositAccountChange();
       if (e.target.id === 'shift-open-dep-proof') POS._openShiftDeposit.file = e.target.files?.[0] || null;
+      if (e.target.id === 'shift-variance-toggle') POS.onVarianceToggle(e.target.checked);
     });
 
     this.user = auth.requireRole('staff');
@@ -368,6 +375,90 @@ const POS = {
     if (blocker) showToast(this.getOpenShiftBlockerMessage(blocker), 'warning');
   },
 
+  // ── Staff Balance (Saldo Aktif) ───────────────────────────────
+  async loadStaffBalance() {
+    if (!this.branch || !this.user) return;
+    const b = this._staffBalance;
+    b.loaded = false; b.error = false;
+    this._renderShiftBalance('loading');
+    try {
+      const result = await cashService.getStaffBalance(this.branch.id, this.user.id);
+      b.currentBalance = Number(result?.current_balance || 0);
+      b.pendingDeposit = Number(result?.pending_deposit || 0);
+      b.version        = Number(result?.version || 0);
+      b.hasBalanceRow  = !!result?.has_balance_row;
+      b.loaded         = true;
+      this._renderShiftBalance('display');
+    } catch (e) {
+      console.error('loadStaffBalance', e);
+      b.error = true;
+      this._renderShiftBalance('error');
+    }
+  },
+
+  _renderShiftBalance(state) {
+    const g   = id => document.getElementById(id);
+    const show = id => { const el = g(id); if (el) el.style.display = ''; };
+    const hide = id => { const el = g(id); if (el) el.style.display = 'none'; };
+    ['shift-balance-loading', 'shift-balance-display', 'shift-balance-error'].forEach(hide);
+    if (state === 'loading') { show('shift-balance-loading'); return; }
+    if (state === 'error')   { show('shift-balance-error');   return; }
+    show('shift-balance-display');
+    const b = this._staffBalance;
+    const amountEl  = g('shift-balance-amount');
+    const hintEl    = g('shift-balance-hint');
+    const pendWrap  = g('shift-balance-pending-warn');
+    const pendText  = g('shift-balance-pending-text');
+    const varToggle = g('shift-variance-toggle');
+    const varGroup  = g('shift-variance-group');
+    if (amountEl) amountEl.textContent = formatRupiah(b.currentBalance);
+    if (hintEl) hintEl.textContent = b.currentBalance === 0 && !b.hasBalanceRow
+      ? 'Belum ada saldo tercatat — kas awal default Rp 0'
+      : 'Saldo aktif terakhir — akan menjadi kas awal shift ini';
+    if (pendWrap && pendText) {
+      if (b.pendingDeposit > 0) {
+        pendText.textContent = `Ada setoran menunggu approval ${formatRupiah(b.pendingDeposit)}. Saldo belum dikurangi hingga admin approve.`;
+        pendWrap.style.display = '';
+      } else {
+        pendWrap.style.display = 'none';
+      }
+    }
+    if (varToggle) varToggle.checked = false;
+    if (varGroup)  varGroup.style.display = 'none';
+    const physInput   = g('shift-physical-cash');
+    const varReason   = g('shift-variance-reason');
+    const varDiff     = g('shift-variance-diff');
+    if (physInput)  physInput.value = '';
+    if (varReason)  varReason.value = '';
+    if (varDiff)    varDiff.textContent = '';
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  onVarianceToggle(checked) {
+    const varGroup = document.getElementById('shift-variance-group');
+    if (varGroup) varGroup.style.display = checked ? '' : 'none';
+    if (!checked) {
+      const physInput = document.getElementById('shift-physical-cash');
+      const varDiff   = document.getElementById('shift-variance-diff');
+      const varReason = document.getElementById('shift-variance-reason');
+      if (physInput) physInput.value = '';
+      if (varDiff)   varDiff.textContent = '';
+      if (varReason) varReason.value = '';
+    }
+  },
+
+  updateShiftVariance(val) {
+    const physical  = parseFloat(val) || 0;
+    const system    = this._staffBalance.currentBalance;
+    const diff      = physical - system;
+    const diffEl    = document.getElementById('shift-variance-diff');
+    if (!diffEl) return;
+    if (!val) { diffEl.textContent = ''; return; }
+    const sign = diff >= 0 ? '+' : '−';
+    diffEl.textContent = `Selisih: ${sign}${formatRupiah(Math.abs(diff))}`;
+    diffEl.style.color = diff === 0 ? 'var(--text-muted)' : diff > 0 ? 'var(--success)' : 'var(--danger)';
+  },
+
   async initShift() {
     const data = await this.getOwnOpenShift();
 
@@ -391,19 +482,26 @@ const POS = {
   },
 
   async confirmOpenShift() {
-    const cash = parseFloat(document.getElementById('shift-opening-cash').value) || 0;
-    const btn  = document.getElementById('btn-open-shift');
+    const btn = document.getElementById('btn-open-shift');
     btn.disabled = true;
     btn.textContent = 'Membuka...';
     try {
       const blocker = await this.refreshOpenShiftBlocker();
       if (blocker) throw new Error(this.getOpenShiftBlockerMessage(blocker));
-      btn.disabled = true;
-      btn.textContent = 'Membuka...';
 
+      // Ambil data variance jika aktif
+      const isVariance    = document.getElementById('shift-variance-toggle')?.checked || false;
+      const physicalCash  = isVariance ? (parseFloat(document.getElementById('shift-physical-cash')?.value) || null) : null;
+      const varianceReason = isVariance ? (document.getElementById('shift-variance-reason')?.value?.trim() || '') : null;
+      if (isVariance && physicalCash === null) throw new Error('Masukkan jumlah kas fisik yang dihitung');
+      if (isVariance && physicalCash !== this._staffBalance.currentBalance && !varianceReason) {
+        throw new Error('Alasan selisih kas wajib diisi');
+      }
+
+      // Proses setoran opsional dari shift sebelumnya
       const depAmount = parseFloat(document.getElementById('shift-open-dep-amount')?.value) || 0;
       if (depAmount > 0) {
-        const d = this._openShiftDeposit;
+        const d         = this._openShiftDeposit;
         const accountId = document.getElementById('shift-open-dep-account')?.value || '';
         if (!accountId) throw new Error('Pilih metode setoran sebelum membuka shift');
         if (depAmount % 50000 !== 0) throw new Error('Nominal setoran harus kelipatan Rp 50.000');
@@ -427,14 +525,19 @@ const POS = {
         showToast('Setoran berhasil dikirim', 'success');
         btn.textContent = 'Membuka...';
       }
-      this.session = await transactionService.openShift({
-        branchId:    this.branch.id,
-        staffId:     this.user.id,
-        openingCash: cash
+
+      // Buka shift dari saldo aktif (RPC baru)
+      this.session = await transactionService.openShiftFromBalance({
+        branchId:       this.branch.id,
+        staffId:        this.user.id,
+        physicalCash:   physicalCash,
+        varianceReason: varianceReason
       });
+
       closeModal('modal-shift');
       this.updateShiftUI();
-      showToast('Shift berhasil dibuka — Selamat berjualan!', 'success');
+      const openingCash = this.session.opening_cash || 0;
+      showToast(`Shift dibuka — Kas awal: ${formatRupiah(openingCash)}. Selamat berjualan!`, 'success');
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -661,7 +764,11 @@ const POS = {
     const btn = document.getElementById('btn-close-shift');
     btn.disabled = true;
     try {
-      const result = await transactionService.closeShift({ sessionId: this.session.id, closingCash: cash });
+      const result = await transactionService.closeShiftApplyBalance({
+        sessionId:  this.session.id,
+        closingCash: cash,
+        staffId:    this.user.id
+      });
       this.lastClosedSession = result;
       closeModal('modal-close-shift');
       this.session   = null;
@@ -671,11 +778,17 @@ const POS = {
       this.renderCart();
       this.updateHeldBadge();
       this.updateShiftUI();
-      const diff = cash - result.expected_cash;
-      showToast(`Shift ditutup. Selisih kas: ${formatRupiah(Math.abs(diff))} ${diff >= 0 ? 'lebih' : 'kurang'}`, diff >= 0 ? 'success' : 'warning');
-      const kasInput = document.getElementById('shift-opening-cash');
-      if (kasInput) kasInput.value = '';
-      // Refresh deposit UI dan preselect shift yang baru saja ditutup
+      const diff        = cash - (result.expected_cash || 0);
+      const balanceAfter = result.balance_after ?? cash;
+      const toastType   = diff >= 0 ? 'success' : 'warning';
+      showToast(
+        `Shift ditutup. Saldo aktif baru: ${formatRupiah(balanceAfter)}. Selisih: ${diff >= 0 ? '+' : '−'}${formatRupiah(Math.abs(diff))}`,
+        toastType
+      );
+      // Update cached balance state
+      this._staffBalance.currentBalance = balanceAfter;
+      this._staffBalance.hasBalanceRow  = true;
+
       if (window.depositUi) {
         depositUi.refreshWhenReady({ preferSessionId: result.id });
       }
