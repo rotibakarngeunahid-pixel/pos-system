@@ -25,7 +25,8 @@ const POS = {
   _pendingProduct:   null,
   _openShiftDeposit: { sessions: [], accounts: [], session: null, depositableCash: 0, file: null },
   _openShiftBlocker: null,
-  _staffBalance: { currentBalance: 0, pendingDeposit: 0, version: 0, hasBalanceRow: false, loaded: false, error: false },
+  _staffBalance: { currentBalance: 0, pendingDeposit: 0, version: 0, hasBalanceRow: false, loaded: false, error: false,
+    source: null, lastClosedBy: null, lastClosedAt: null, openSession: null },
   _ingredientLogId:     null,
   _ingredientLogName:   null,
   _ingredientLogOffset: 0,
@@ -375,62 +376,97 @@ const POS = {
     if (blocker) showToast(this.getOpenShiftBlockerMessage(blocker), 'warning');
   },
 
-  // ── Staff Balance (Saldo Aktif) ───────────────────────────────
+  // ── Branch Cash Position (Posisi Kas Outlet) ─────────────────
   async loadStaffBalance() {
     if (!this.branch || !this.user) return;
     const b = this._staffBalance;
     b.loaded = false; b.error = false;
     this._renderShiftBalance('loading');
     try {
-      const result = await cashService.getStaffBalance(this.branch.id, this.user.id);
-      b.currentBalance = Number(result?.current_balance || 0);
-      b.pendingDeposit = Number(result?.pending_deposit || 0);
-      b.version        = Number(result?.version || 0);
+      const result = await transactionService.getBranchCashPosition({
+        branchId: this.branch.id,
+        staffId:  this.user.id
+      });
+      b.currentBalance = Number(result?.current_balance ?? 0);
+      b.pendingDeposit = Number(result?.pending_deposit_amount ?? 0);
+      b.version        = Number(result?.version ?? 0);
       b.hasBalanceRow  = !!result?.has_balance_row;
+      b.source         = result?.source || null;
+      b.openSession    = result?.open_session || null;
+      b.lastClosedBy   = result?.last_closed_session?.staff_name || null;
+      b.lastClosedAt   = result?.last_closed_session?.closed_at  || null;
       b.loaded         = true;
       this._renderShiftBalance('display');
     } catch (e) {
-      console.error('loadStaffBalance', e);
+      console.error('loadStaffBalance (branch)', e);
       b.error = true;
       this._renderShiftBalance('error');
     }
   },
 
   _renderShiftBalance(state) {
-    const g   = id => document.getElementById(id);
+    const g    = id => document.getElementById(id);
     const show = id => { const el = g(id); if (el) el.style.display = ''; };
     const hide = id => { const el = g(id); if (el) el.style.display = 'none'; };
     ['shift-balance-loading', 'shift-balance-display', 'shift-balance-error'].forEach(hide);
     if (state === 'loading') { show('shift-balance-loading'); return; }
     if (state === 'error')   { show('shift-balance-error');   return; }
-    show('shift-balance-display');
+
     const b = this._staffBalance;
+
+    // Jika ada shift aktif di outlet (dari staff lain), sinkron dgn blocker
+    if (b.openSession && b.openSession.staff_id !== this.user?.id) {
+      this.setOpenShiftBlocker(b.openSession);
+      return;
+    }
+
+    show('shift-balance-display');
+
     const amountEl  = g('shift-balance-amount');
     const hintEl    = g('shift-balance-hint');
+    const sourceEl  = g('shift-balance-source');
+    const lastByEl  = g('shift-balance-last-closed-by');
     const pendWrap  = g('shift-balance-pending-warn');
     const pendText  = g('shift-balance-pending-text');
     const varToggle = g('shift-variance-toggle');
     const varGroup  = g('shift-variance-group');
+
     if (amountEl) amountEl.textContent = formatRupiah(b.currentBalance);
-    if (hintEl) hintEl.textContent = b.currentBalance === 0 && !b.hasBalanceRow
-      ? 'Belum ada saldo tercatat — kas awal default Rp 0'
-      : 'Saldo aktif terakhir — akan menjadi kas awal shift ini';
+
+    const sourceLabels = {
+      'branch_balance':          'Posisi kas terakhir outlet',
+      'latest_closed_session':   'Kas akhir terakhir (belum ada saldo tercatat)',
+      'default_cash':            'Default outlet (belum ada riwayat kas)'
+    };
+    if (hintEl) hintEl.textContent = 'Kas awal ini diambil dari posisi kas terakhir outlet.';
+    if (sourceEl) sourceEl.textContent = sourceLabels[b.source] || 'Posisi kas outlet';
+
+    if (lastByEl) {
+      if (b.lastClosedBy && b.lastClosedAt) {
+        lastByEl.textContent = `Kas terakhir ditutup oleh ${b.lastClosedBy} pada ${fDate(b.lastClosedAt)}.`;
+        lastByEl.style.display = '';
+      } else {
+        lastByEl.style.display = 'none';
+      }
+    }
+
     if (pendWrap && pendText) {
       if (b.pendingDeposit > 0) {
-        pendText.textContent = `Ada setoran menunggu approval ${formatRupiah(b.pendingDeposit)}. Saldo belum dikurangi hingga admin approve.`;
+        pendText.textContent = `Ada setoran pending ${formatRupiah(b.pendingDeposit)} menunggu approval admin. Posisi kas belum berkurang.`;
         pendWrap.style.display = '';
       } else {
         pendWrap.style.display = 'none';
       }
     }
+
     if (varToggle) varToggle.checked = false;
     if (varGroup)  varGroup.style.display = 'none';
-    const physInput   = g('shift-physical-cash');
-    const varReason   = g('shift-variance-reason');
-    const varDiff     = g('shift-variance-diff');
-    if (physInput)  physInput.value = '';
-    if (varReason)  varReason.value = '';
-    if (varDiff)    varDiff.textContent = '';
+    const physInput = g('shift-physical-cash');
+    const varReason = g('shift-variance-reason');
+    const varDiff   = g('shift-variance-diff');
+    if (physInput) physInput.value = '';
+    if (varReason) varReason.value = '';
+    if (varDiff)   varDiff.textContent = '';
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
 
@@ -778,11 +814,12 @@ const POS = {
       this.renderCart();
       this.updateHeldBadge();
       this.updateShiftUI();
-      const diff        = cash - (result.expected_cash || 0);
+      const diff         = cash - (result.expected_cash || 0);
       const balanceAfter = result.balance_after ?? cash;
-      const toastType   = diff >= 0 ? 'success' : 'warning';
+      const toastType    = diff >= 0 ? 'success' : 'warning';
       showToast(
-        `Shift ditutup. Saldo aktif baru: ${formatRupiah(balanceAfter)}. Selisih: ${diff >= 0 ? '+' : '−'}${formatRupiah(Math.abs(diff))}`,
+        `Shift ditutup. Posisi kas outlet diperbarui menjadi ${formatRupiah(balanceAfter)}.` +
+        (diff !== 0 ? ` Selisih: ${diff >= 0 ? '+' : '−'}${formatRupiah(Math.abs(diff))}` : ''),
         toastType
       );
       // Update cached balance state

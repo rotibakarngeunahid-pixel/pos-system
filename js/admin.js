@@ -371,6 +371,7 @@ const ADMIN = {
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
       'staff-cash-position': 'Kas Aktif & Posisi Staff',
+      'branch-cash': 'Kas Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
@@ -399,6 +400,7 @@ const ADMIN = {
       case 'api-keys':              this.loadApiKeysSection();    break;
       case 'investor-access':       this.loadInvestorAccess();    break;
       case 'staff-cash-position':   this.loadStaffCashPosition(); break;
+      case 'branch-cash':           this.loadBranchCash();        break;
     }
   },
 
@@ -3098,6 +3100,13 @@ const ADMIN = {
   loadStaffCashPosition() {
     if (window.adminStaffCashUi) {
       adminStaffCashUi.load();
+    }
+  },
+
+  // ── Branch Cash (Kas Outlet) ──────────────────────────────────
+  loadBranchCash() {
+    if (window.adminBranchCashUi) {
+      adminBranchCashUi.load();
     }
   },
 

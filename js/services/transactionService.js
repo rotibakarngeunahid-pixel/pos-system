@@ -139,12 +139,23 @@ const transactionService = {
     }
   },
 
-  // ── Open shift dari saldo aktif staff (RPC baru) ─────────────
+  // ── Ambil posisi kas outlet saat ini (branch-based) ──────────
+  async getBranchCashPosition({ branchId, staffId = null }) {
+    if (!branchId) throw new Error('branchId wajib diisi');
+    const { data, error } = await db.rpc('get_branch_cash_position', {
+      p_branch_id: branchId,
+      p_user_id:   staffId || null
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  // ── Buka shift dari posisi kas outlet (branch-based RPC) ─────
   async openShiftFromBalance({ branchId, staffId, physicalCash = null, varianceReason = null }) {
     if (!branchId) throw new Error('branchId wajib diisi');
     if (!staffId)  throw new Error('staffId wajib diisi — silakan login ulang');
 
-    const { data, error } = await db.rpc('open_cash_session_from_balance', {
+    const { data, error } = await db.rpc('open_cash_session_from_branch_balance', {
       p_branch_id:       branchId,
       p_staff_id:        staffId,
       p_physical_cash:   physicalCash !== null ? physicalCash : null,
@@ -152,38 +163,51 @@ const transactionService = {
     });
 
     if (error) {
-      // Jika RPC belum di-deploy, fallback ke metode lama
       if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
-        console.warn('openShiftFromBalance: RPC belum tersedia, fallback ke openShift lama');
+        console.warn('openShiftFromBalance: RPC branch belum tersedia, fallback ke openShift lama');
         return this.openShift({ branchId, staffId, openingCash: 0 });
       }
       throw new Error(error.message);
     }
 
-    // RPC mengembalikan jsonb yang sudah include semua field sesi
     return data;
   },
 
-  // ── Tutup shift dan apply saldo aktif staff (RPC baru) ────────
-  async closeShiftApplyBalance({ sessionId, closingCash, staffId }) {
+  // ── Tutup shift dan update posisi kas outlet (branch-based) ──
+  async closeShiftApplyBalance({ sessionId, closingCash, staffId, closingNote = null }) {
     if (!sessionId) throw new Error('sessionId wajib diisi');
     if (!staffId)   throw new Error('staffId wajib diisi');
 
-    const { data, error } = await db.rpc('close_cash_session_apply_balance', {
+    const { data, error } = await db.rpc('close_cash_session_apply_branch_balance', {
       p_session_id:   sessionId,
       p_closing_cash: closingCash,
-      p_staff_id:     staffId
+      p_staff_id:     staffId,
+      p_closing_note: closingNote || null
     });
 
     if (error) {
-      // Fallback ke closeShift lama jika RPC belum ada
       if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
-        console.warn('closeShiftApplyBalance: RPC belum tersedia, fallback ke closeShift lama');
+        console.warn('closeShiftApplyBalance: RPC branch belum tersedia, fallback ke closeShift lama');
         return this.closeShift({ sessionId, closingCash });
       }
       throw new Error(error.message);
     }
 
+    return data;
+  },
+
+  // ── Admin: forced close shift darurat ─────────────────────────
+  async adminForceCloseBranchSession({ adminId, sessionId, closingCash, reason }) {
+    if (!sessionId) throw new Error('sessionId wajib diisi');
+    if (!adminId)   throw new Error('adminId wajib diisi');
+    if (!reason?.trim()) throw new Error('Alasan forced close wajib diisi');
+    const { data, error } = await db.rpc('admin_force_close_branch_cash_session', {
+      p_admin_id:     adminId,
+      p_session_id:   sessionId,
+      p_closing_cash: closingCash,
+      p_reason:       reason.trim()
+    });
+    if (error) throw new Error(error.message);
     return data;
   },
 

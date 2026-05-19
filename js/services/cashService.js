@@ -603,5 +603,48 @@ const cashService = {
       logs,
       deposits: depositsData || []
     };
+  },
+
+  // ── Branch Cash Balance (Posisi Kas Outlet) ───────────────────
+
+  async getAdminBranchCashPositions({ adminId, branchId = null, staffId = null, status = 'all', dateFrom = null, dateTo = null } = {}) {
+    const { data, error } = await db.rpc('get_admin_branch_cash_positions', {
+      p_admin_id:  adminId,
+      p_branch_id: branchId  || null,
+      p_staff_id:  staffId   || null,
+      p_status:    status    || 'all',
+      p_date_from: dateFrom  || null,
+      p_date_to:   dateTo    || null
+    });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  async adminSetBranchCashBalance({ adminId, branchId, newBalance, reason, version = null }) {
+    if (!adminId)  throw new Error('adminId wajib diisi');
+    if (!branchId) throw new Error('branchId wajib diisi');
+    if (!reason?.trim()) throw new Error('Alasan koreksi wajib diisi');
+    const { data, error } = await db.rpc('admin_set_branch_cash_balance', {
+      p_admin_id:    adminId,
+      p_branch_id:   branchId,
+      p_new_balance: newBalance,
+      p_reason:      reason.trim(),
+      p_version:     version !== null ? version : null
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  async getBranchCashLedger({ adminId, branchId, dateFrom = null, dateTo = null, movementType = null, limit = 100 } = {}) {
+    const { data, error } = await db.rpc('get_branch_cash_ledger', {
+      p_admin_id:      adminId,
+      p_branch_id:     branchId,
+      p_date_from:     dateFrom     || null,
+      p_date_to:       dateTo       || null,
+      p_movement_type: movementType || null,
+      p_limit:         limit        || 100
+    });
+    if (error) throw new Error(error.message);
+    return data || [];
   }
 };
