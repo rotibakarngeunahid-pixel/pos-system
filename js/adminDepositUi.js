@@ -774,7 +774,11 @@ const adminDepositUi = {
       await this.loadDeposits();
       if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
     } catch (err) {
-      showToast(err.message || 'Gagal konfirmasi', 'error');
+      console.error('doConfirm', err);
+      this.showDepositActionError(err, {
+        action: 'mengkonfirmasi setoran',
+        fallback: 'Gagal konfirmasi'
+      });
     }
   },
 
@@ -788,8 +792,25 @@ const adminDepositUi = {
       await this.loadDeposits();
       if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
     } catch (err) {
-      showToast(err.message || 'Gagal menolak', 'error');
+      console.error('doReject', err);
+      this.showDepositActionError(err, {
+        action: 'menolak setoran',
+        fallback: 'Gagal menolak'
+      });
     }
+  },
+
+  showDepositActionError(error, { action, fallback }) {
+    const message = String(error?.message || '').trim();
+    const code = String(error?.code || '');
+    const dbSyntaxError = code === '22P02' || message.toLowerCase().includes('invalid input syntax');
+
+    if (dbSyntaxError && window.showDbError) {
+      showDbError(error, { action, entity: 'Setoran' });
+      return;
+    }
+
+    showToast(message || fallback, 'error');
   },
 
   async loadAccounts() {
