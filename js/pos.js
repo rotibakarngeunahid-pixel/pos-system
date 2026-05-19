@@ -23,6 +23,8 @@ const POS = {
   _cartIdCounter: 0,   // increments to give each cart line a unique cartItemId
   _pendingVariantId: null,   // staged while topping modal is open
   _pendingProduct:   null,
+  _openShiftDeposit: { sessions: [], accounts: [], session: null, depositableCash: 0, file: null },
+  _openShiftBlocker: null,
 
   // ── Cache dirty flags (set by cross-page events from Admin) ──
   _productsDirty:     false,
@@ -67,7 +69,7 @@ const POS = {
           break;
         case 'deposit-blocker-buka-shift':
           closeModal('modal-deposit-blocked');
-          setTimeout(() => openModal('modal-shift'), 160);
+          setTimeout(() => POS.openShiftModal(), 160);
           break;
         case 'post-shift-setor':
           closeModal('modal-post-close-shift');
@@ -75,7 +77,7 @@ const POS = {
           break;
         case 'post-shift-buka-shift':
           closeModal('modal-post-close-shift');
-          setTimeout(() => openModal('modal-shift'), 150);
+          setTimeout(() => POS.openShiftModal(), 150);
           break;
         case 'close-payment-modal': POS.closePaymentModal(); break;
         case 'apply-discount': POS.applyDiscount(); break;
@@ -97,7 +99,7 @@ const POS = {
         // FIX: 'start-new-transaction' was missing from switch-case — added here
         case 'start-new-transaction': POS.startNewTransaction(); break;
         case 'close-receipt': POS.closeReceipt(); break;
-        case 'open-shift-modal': openModal('modal-shift'); break;
+        case 'open-shift-modal': POS.openShiftModal(); break;
         case 'void-cash-log': POS.voidCashLogFromPOS(Number(btn.dataset.id)); break;
         case 'switch-cash-subtab': POS.switchCashSubTab(btn.dataset.type); break;
         case 'submit-cash-entry': POS.submitCashEntry(); break;
@@ -144,6 +146,14 @@ const POS = {
       }
     });
 
+    window.addEventListener('rbn:modal:opened', e => {
+      if (e.detail?.id === 'modal-shift' && !POS._openShiftBlocker) POS.loadOpenShiftDeposit();
+    });
+    document.addEventListener('change', e => {
+      if (e.target.id === 'shift-open-dep-account') POS.onOpenShiftDepositAccountChange();
+      if (e.target.id === 'shift-open-dep-proof') POS._openShiftDeposit.file = e.target.files?.[0] || null;
+    });
+
     this.user = auth.requireRole('staff');
     if (!this.user) return;
     this.user = await auth.validateCurrentUser();
@@ -170,7 +180,7 @@ const POS = {
       } catch (e) {
         showToast('Koneksi bermasalah. Coba refresh halaman.', 'error');
         this.session = null;
-        openModal('modal-shift');
+        await this.openShiftModal();
       }
     } else {
       await this.showBranchSelector();
@@ -272,23 +282,95 @@ const POS = {
   },
 
   // ── Shift / Session ──────────────────────────────────────────
-  async initShift() {
-    const { data } = await db.from('cashier_sessions')
+  async getOwnOpenShift() {
+    const { data, error } = await db.from('cashier_sessions')
       .select('*')
       .eq('branch_id', this.branch.id)
       .eq('staff_id', this.user.id)
       .eq('status', 'open')
       .order('opened_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+    if (error) throw error;
+    return (data || [])[0] || null;
+  },
+
+  getOpenShiftBlockerMessage(session = this._openShiftBlocker) {
+    if (typeof transactionService !== 'undefined' && transactionService.formatOpenShiftBlocker) {
+      return transactionService.formatOpenShiftBlocker(session, this.user?.name || null);
+    }
+    const staffName = session?.staff_name || 'Staff lain';
+    const currentName = this.user?.name || 'akun ini';
+    return `${staffName} belum tutup kas. Minta ${staffName} tutup kas dulu sebelum ${currentName} membuka kas.`;
+  },
+
+  setOpenShiftBlocker(session = null) {
+    this._openShiftBlocker = session || null;
+    const blocked = !!this._openShiftBlocker;
+    const setDisplay = (id, show) => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = show ? '' : 'none';
+    };
+
+    setDisplay('shift-open-blocker', blocked);
+    setDisplay('shift-opening-warning', !blocked);
+    setDisplay('shift-opening-cash-group', !blocked);
+    setDisplay('shift-open-deposit-wrap', !blocked);
+
+    const msgEl = document.getElementById('shift-open-blocker-msg');
+    if (msgEl && blocked) {
+      const openedAt = this._openShiftBlocker.opened_at ? ` Dibuka: ${fDate(this._openShiftBlocker.opened_at)}.` : '';
+      msgEl.textContent = `${this.getOpenShiftBlockerMessage(this._openShiftBlocker)}${openedAt}`;
+    }
+
+    const btn = document.getElementById('btn-open-shift');
+    if (btn) {
+      btn.disabled = blocked;
+      btn.textContent = blocked ? 'Kas Belum Ditutup' : 'Buka Shift & Mulai Berjualan';
+    }
+
+    if (blocked) this.renderOpenShiftDeposit('hidden');
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  async refreshOpenShiftBlocker() {
+    if (!this.branch?.id || !this.user?.id || typeof transactionService === 'undefined') {
+      this.setOpenShiftBlocker(null);
+      return null;
+    }
+    const blocker = await transactionService.getOpenShiftForBranch({
+      branchId: this.branch.id,
+      excludeStaffId: this.user.id
+    });
+    this.setOpenShiftBlocker(blocker);
+    return blocker;
+  },
+
+  async openShiftModal() {
+    let blocker = null;
+    try {
+      blocker = await this.refreshOpenShiftBlocker();
+    } catch (e) {
+      console.error('openShiftModal: failed to check active cashier shift', e);
+      this.setOpenShiftBlocker(null);
+      showToast('Gagal memeriksa kas aktif. Coba refresh halaman.', 'error');
+    }
+    openModal('modal-shift');
+    if (blocker) showToast(this.getOpenShiftBlockerMessage(blocker), 'warning');
+  },
+
+  async initShift() {
+    const data = await this.getOwnOpenShift();
 
     if (data) {
       this.session = data;
+      this.setOpenShiftBlocker(null);
       this.updateShiftUI();
     } else {
       this.session = null;
+      const blocker = await this.refreshOpenShiftBlocker();
       this.updateShiftUI();
       openModal('modal-shift');
+      if (blocker) showToast(this.getOpenShiftBlockerMessage(blocker), 'warning');
     }
   },
 
@@ -304,6 +386,37 @@ const POS = {
     btn.disabled = true;
     btn.textContent = 'Membuka...';
     try {
+      const blocker = await this.refreshOpenShiftBlocker();
+      if (blocker) throw new Error(this.getOpenShiftBlockerMessage(blocker));
+      btn.disabled = true;
+      btn.textContent = 'Membuka...';
+
+      const depAmount = parseFloat(document.getElementById('shift-open-dep-amount')?.value) || 0;
+      if (depAmount > 0) {
+        const d = this._openShiftDeposit;
+        const accountId = document.getElementById('shift-open-dep-account')?.value || '';
+        if (!accountId) throw new Error('Pilih metode setoran sebelum membuka shift');
+        if (depAmount % 50000 !== 0) throw new Error('Nominal setoran harus kelipatan Rp 50.000');
+        if (depAmount > d.depositableCash) throw new Error(`Jumlah setoran melebihi kas yang dapat disetor (maks ${formatRupiah(d.depositableCash)})`);
+        const acc = d.accounts.find(a => a.id === accountId);
+        const requireProof = acc && !depositService.isCashDepositMethod(acc);
+        if (requireProof && !d.file) throw new Error('Bukti setoran wajib dilampirkan');
+        if (!d.session?.session_id) throw new Error('Shift tertutup tidak ditemukan untuk setoran');
+        btn.textContent = 'Menyetor...';
+        await depositService.submitDeposit({
+          branchId:    this.branch.id,
+          sessionId:   d.session.session_id,
+          staffId:     this.user.id,
+          accountId,
+          amount:      depAmount,
+          cashBalance: d.depositableCash,
+          file:        d.file,
+          notes:       null,
+          requireProof
+        });
+        showToast('Setoran berhasil dikirim', 'success');
+        btn.textContent = 'Membuka...';
+      }
       this.session = await transactionService.openShift({
         branchId:    this.branch.id,
         staffId:     this.user.id,
@@ -315,8 +428,91 @@ const POS = {
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
-      btn.disabled = false;
-      btn.textContent = 'Buka Shift & Mulai Berjualan';
+      btn.disabled = !!this._openShiftBlocker;
+      btn.textContent = this._openShiftBlocker ? 'Kas Belum Ditutup' : 'Buka Shift & Mulai Berjualan';
+    }
+  },
+
+  async loadOpenShiftDeposit() {
+    if (!this.branch || !this.user) return;
+    const d = this._openShiftDeposit;
+    d.sessions = []; d.accounts = []; d.session = null; d.depositableCash = 0; d.file = null;
+    const fileInput = document.getElementById('shift-open-dep-proof');
+    if (fileInput) fileInput.value = '';
+    const amountInput = document.getElementById('shift-open-dep-amount');
+    if (amountInput) amountInput.value = '';
+    this.renderOpenShiftDeposit('loading');
+    try {
+      [d.sessions, d.accounts] = await Promise.all([
+        depositService.getEligibleSessions({ branchId: this.branch.id, staffId: this.user.id, limit: 5 }),
+        depositService.getAccounts({ branchId: this.branch.id })
+      ]);
+      const eligible = d.sessions.filter(s => !s.block_reason && s.depositable_cash > 0);
+      if (eligible.length > 0) {
+        d.session = eligible[0];
+        d.depositableCash = Number(d.session.depositable_cash || 0);
+        this.renderOpenShiftDeposit('form');
+      } else if (d.sessions.length > 0) {
+        d.session = d.sessions[0];
+        this.renderOpenShiftDeposit('blocked');
+      } else {
+        this.renderOpenShiftDeposit('none');
+      }
+    } catch (e) {
+      console.error('loadOpenShiftDeposit', e);
+      this.renderOpenShiftDeposit('none');
+    }
+  },
+
+  renderOpenShiftDeposit(state) {
+    const g = id => document.getElementById(id);
+    const show = id => { const el = g(id); if (el) el.style.display = ''; };
+    const hide = id => { const el = g(id); if (el) el.style.display = 'none'; };
+    ['shift-open-dep-loading', 'shift-open-dep-none', 'shift-open-dep-blocked', 'shift-open-dep-form'].forEach(hide);
+    if (state === 'loading') { show('shift-open-dep-loading'); return; }
+    if (state === 'none') { show('shift-open-dep-none'); return; }
+    if (state === 'blocked') {
+      show('shift-open-dep-blocked');
+      const msg = g('shift-open-dep-blocked-msg');
+      if (msg) msg.textContent = this._openShiftDeposit.session?.block_reason || 'Setoran shift sebelumnya sedang diproses.';
+      return;
+    }
+    if (state !== 'form') return;
+    show('shift-open-dep-form');
+    const d = this._openShiftDeposit;
+    const sess = d.session;
+    const infoEl = g('shift-open-dep-session-info');
+    if (infoEl && sess) {
+      infoEl.innerHTML = `Shift ditutup: <strong>${fDate(sess.closed_at)}</strong> &nbsp;·&nbsp; Dapat disetor: <strong>${formatRupiah(d.depositableCash)}</strong>`;
+    }
+    const hintEl = g('shift-open-dep-hint');
+    if (hintEl) hintEl.textContent = `Maks. dapat disetor: ${formatRupiah(d.depositableCash)}`;
+    const sel = g('shift-open-dep-account');
+    if (sel) {
+      sel.innerHTML = '<option value="">— Pilih —</option>';
+      d.accounts.forEach(acc => {
+        const opt = document.createElement('option');
+        opt.value = acc.id;
+        opt.textContent = acc.label || acc.name || '—';
+        sel.appendChild(opt);
+      });
+    }
+    hide('shift-open-dep-proof-wrap');
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  onOpenShiftDepositAccountChange() {
+    const sel = document.getElementById('shift-open-dep-account');
+    const proofWrap = document.getElementById('shift-open-dep-proof-wrap');
+    const d = this._openShiftDeposit;
+    if (!sel || !proofWrap) return;
+    const acc = d.accounts.find(a => a.id === sel.value);
+    const requireProof = acc && !depositService.isCashDepositMethod(acc);
+    proofWrap.style.display = requireProof ? '' : 'none';
+    if (!requireProof) {
+      d.file = null;
+      const fi = document.getElementById('shift-open-dep-proof');
+      if (fi) fi.value = '';
     }
   },
 
@@ -804,7 +1000,7 @@ const POS = {
     if (this.loading) return;
     if (!this.session) {
       showToast('Buka shift terlebih dahulu sebelum bertransaksi', 'warning');
-      openModal('modal-shift');
+      this.openShiftModal();
       return;
     }
 
@@ -1888,7 +2084,7 @@ const POS = {
     if (!this.cart.length) { showToast('Keranjang masih kosong', 'warning'); return; }
     if (!this.session) {
       showToast('Buka shift terlebih dahulu sebelum bertransaksi', 'warning');
-      openModal('modal-shift');
+      this.openShiftModal();
       return;
     }
 

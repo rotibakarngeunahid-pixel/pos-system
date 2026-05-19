@@ -42,6 +42,44 @@ const transactionService = {
   },
 
   // ── Open cashier shift ────────────────────────────────────────
+  async getOpenShiftForBranch({ branchId, excludeStaffId = null } = {}) {
+    if (!branchId) throw new Error('branchId wajib diisi');
+
+    let query = db.from('cashier_sessions')
+      .select('id, branch_id, staff_id, status, opened_at')
+      .eq('branch_id', branchId)
+      .eq('status', 'open')
+      .order('opened_at', { ascending: false })
+      .limit(1);
+
+    if (excludeStaffId) query = query.neq('staff_id', excludeStaffId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const session = (data || [])[0] || null;
+    if (!session?.staff_id) return session;
+
+    try {
+      const { data: staff } = await db.from('users')
+        .select('id, name')
+        .eq('id', session.staff_id)
+        .maybeSingle();
+      return {
+        ...session,
+        staff_name: staff?.name || null
+      };
+    } catch (e) {
+      return session;
+    }
+  },
+
+  formatOpenShiftBlocker(session, currentStaffName = null) {
+    const staffName = session?.staff_name || 'Staff lain';
+    const currentName = currentStaffName || 'akun ini';
+    return `${staffName} belum tutup kas. Minta ${staffName} tutup kas dulu sebelum ${currentName} membuka kas.`;
+  },
+
   async openShift({ branchId, staffId, openingCash }) {
     // Basic param checks
     if (!branchId) throw new Error('branchId wajib diisi');
@@ -57,21 +95,22 @@ const transactionService = {
     }
 
     // Verify staff/user exists (prevent FK violation)
+    let staff = null;
     try {
-      const { data: user } = await db.from('users').select('id').eq('id', staffId).maybeSingle();
+      const { data: user } = await db.from('users').select('id, name').eq('id', staffId).maybeSingle();
+      staff = user || null;
       if (!user) throw new Error('Staff tidak ditemukan di database — silakan login ulang atau hubungi admin');
     } catch (e) {
       throw new Error('Gagal memverifikasi staff: ' + (e.message || e));
     }
 
-    // Prevent opening duplicate open shifts for same staff+branch
-    const { data: existing } = await db.from('cashier_sessions')
-      .select('id')
-      .eq('branch_id', branchId)
-      .eq('staff_id', staffId)
-      .eq('status', 'open')
-      .maybeSingle();
-    if (existing) throw new Error('Shift sudah dibuka. Tutup shift sebelumnya dulu.');
+    const activeShift = await this.getOpenShiftForBranch({ branchId });
+    if (activeShift) {
+      if (Number(activeShift.staff_id) === Number(staffId)) {
+        throw new Error('Shift sudah dibuka. Tutup shift sebelumnya dulu.');
+      }
+      throw new Error(this.formatOpenShiftBlocker(activeShift, staff?.name || null));
+    }
 
     // Insert session with guarded error handling for FK violations
     try {
@@ -88,6 +127,13 @@ const transactionService = {
       const msg = (err && err.message) ? String(err.message) : '';
       if (msg.toLowerCase().includes('violates foreign key') || (err && err.code === '23503')) {
         throw new Error('Gagal membuka shift: referensi staff atau cabang tidak valid. Silakan periksa data akun dan cabang.');
+      }
+      if ((err && err.code === '23505') || msg.toLowerCase().includes('duplicate key')) {
+        const activeShift = await this.getOpenShiftForBranch({ branchId });
+        if (activeShift && Number(activeShift.staff_id) !== Number(staffId)) {
+          throw new Error(this.formatOpenShiftBlocker(activeShift, staff?.name || null));
+        }
+        throw new Error('Masih ada kas yang belum ditutup. Tutup kas aktif dulu sebelum membuka kas baru.');
       }
       throw err;
     }
