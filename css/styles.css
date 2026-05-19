@@ -2109,6 +2109,20 @@ tbody tr:hover td { background: var(--surface-2); }
 .modal-lg { max-width: 660px; }
 .modal-sm { max-width: 380px; }
 
+/* ── Ingredient Log Modal: smooth fade-in AND fade-out ──────────────────────
+   Fix: default CSS transitions visibility at midpoint (0.14s) so backdrop
+   disappears abruptly on close. This override delays visibility:hidden until
+   after opacity finishes fading, giving a true smooth close animation.      */
+#modal-ingredient-log {
+  transition: opacity 0.26s ease, visibility 0s linear 0.26s;
+}
+#modal-ingredient-log.active {
+  transition: opacity 0.26s ease, visibility 0s;
+}
+#modal-ingredient-log .modal {
+  transition: transform 0.28s cubic-bezier(0.34, 1.30, 0.64, 1);
+}
+
 /* ── Confirm Modal (Custom) ── */
 .modal-confirm-card {
   text-align: center;

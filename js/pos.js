@@ -29,6 +29,7 @@ const POS = {
   _ingredientLogName:   null,
   _ingredientLogOffset: 0,
   _ingredientLogLimit:  50,
+  _logTrxLock:          false,
 
   // ── Cache dirty flags (set by cross-page events from Admin) ──
   _productsDirty:     false,
@@ -114,6 +115,7 @@ const POS = {
         case 'view-ingredient-log': POS.viewIngredientLog(btn.dataset.ingredientId, btn.dataset.ingredientName); break;
         case 'refresh-ingredient-log': POS.loadIngredientLogData(false); break;
         case 'ingredient-log-load-more': POS.loadIngredientLogData(true); break;
+        case 'view-log-trx': POS.viewLogTransaction(Number(btn.dataset.id), btn); break;
         case 'edit-item-price': POS.editItemPrice(Number(btn.dataset.id)); break;
         // FIX: close-success-popup handler properly resets all locks
         case 'close-success-popup': POS.closeSuccessPopup(); break;
@@ -1670,6 +1672,7 @@ const POS = {
     this._ingredientLogId     = ingredientId;
     this._ingredientLogName   = ingredientName || '—';
     this._ingredientLogOffset = 0;
+    this._logTrxLock          = false; // reset lock jika modal dibuka ulang
 
     const titleEl = document.getElementById('ingredient-log-title');
     if (titleEl) titleEl.textContent = this._ingredientLogName;
@@ -1682,11 +1685,49 @@ const POS = {
     if (toEl)   toEl.value   = '';
     if (typeEl) typeEl.value = '';
 
+    // Pre-set loading state SEBELUM openModal agar layout stabil saat animasi dimulai
+    // (menghindari reflow yang bisa mengganggu CSS transition)
+    const listEl  = document.getElementById('ingredient-log-list');
     const moreBtn = document.getElementById('btn-ingredient-log-loadmore');
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="empty-state" style="padding:40px 0;">
+          <div class="empty-icon" style="opacity:.4;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          </div>
+          <div class="empty-title">Memuat riwayat...</div>
+        </div>`;
+    }
     if (moreBtn) moreBtn.style.display = 'none';
 
     openModal('modal-ingredient-log');
-    this.loadIngredientLogData(false);
+
+    // Mulai fetch setelah satu frame — animasi open berjalan duluan, baru data load
+    requestAnimationFrame(() => this.loadIngredientLogData(false));
+  },
+
+  // Tutup modal log inventori dulu, baru buka detail transaksi
+  // Mencegah dua modal menumpuk + double-click
+  viewLogTransaction(trxId, triggerBtn) {
+    if (!trxId || this._logTrxLock) return;
+    this._logTrxLock = true;
+
+    // Disable semua tombol transaksi di log agar tidak bisa diklik lagi
+    document.querySelectorAll('[data-action="view-log-trx"]').forEach(btn => {
+      btn.disabled = true;
+      btn.style.opacity = '0.55';
+      btn.style.pointerEvents = 'none';
+    });
+
+    // Tutup modal log inventori
+    closeModal('modal-ingredient-log');
+
+    // Tunggu animasi tutup selesai (~280ms), baru buka transaksi
+    // --t-slow = 0.28s; pakai 310ms agar animasi benar-benar selesai dulu
+    setTimeout(() => {
+      this._logTrxLock = false;
+      if (trxId) this.viewPosTransaction(trxId);
+    }, 310);
   },
 
   async loadIngredientLogData(append = false) {
@@ -1815,7 +1856,7 @@ const POS = {
         refHtml = `
           <button class="btn btn-ghost btn-sm"
             style="padding:2px 8px;font-size:11px;height:auto;margin-top:4px;color:var(--primary);border:1px solid var(--border);border-radius:var(--r-sm);"
-            data-action="view-trx" data-id="${trxNum}">
+            data-action="view-log-trx" data-id="${trxNum}">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             Lihat ${labelTrx} #${trxNum}
           </button>`;
