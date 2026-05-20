@@ -59,6 +59,19 @@
     .cbf-val  { font-size:14px; font-weight:700; }
     .cbf-lbl  { font-size:10px; color:var(--text-muted); margin-top:2px; }
     .cbf-op   { font-size:20px; font-weight:700; color:var(--text-muted); line-height:1; padding-bottom:10px; }
+
+    /* ── Kas Outlet Cards ───────────────────── */
+    .bc-cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+    .bc-card { background:var(--card-bg,#fff); border:1px solid var(--border,#e5e7eb); border-radius:var(--r-md,8px); padding:14px 16px; display:flex; flex-direction:column; gap:0; }
+    .bc-card-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:4px; }
+    .bc-card-name { font-weight:700; font-size:14px; line-height:1.3; }
+    .bc-card-balance { font-size:22px; font-weight:800; color:var(--text); margin:6px 0 12px; }
+    .bc-card-meta { display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; margin-bottom:12px; }
+    .bc-meta-label { font-size:10px; color:var(--text-muted,#6b7280); text-transform:uppercase; letter-spacing:.3px; margin-bottom:2px; }
+    .bc-meta-value { font-size:12px; font-weight:600; }
+    .bc-card-actions { display:flex; gap:6px; flex-wrap:wrap; border-top:1px solid var(--border,#e5e7eb); padding-top:10px; margin-top:auto; }
+    .bc-cards-empty { padding:32px; text-align:center; color:var(--text-muted); font-size:14px; }
+    @media (max-width:480px) { .bc-cards-grid { grid-template-columns:1fr; } }
   </style>
 </head>
 <body class="admin-page">
@@ -1184,30 +1197,9 @@
           </label>
         </div>
 
-        <!-- Table -->
-        <div class="card">
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Outlet</th>
-                  <th>Posisi Kas</th>
-                  <th>Est. Berjalan</th>
-                  <th>Kas Awal Terakhir</th>
-                  <th>Kas Akhir Terakhir</th>
-                  <th>Staff Terakhir Buka</th>
-                  <th>Staff Terakhir Tutup</th>
-                  <th>Status Shift</th>
-                  <th>Setoran Pending</th>
-                  <th>Selisih Terakhir</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="bc-table-body">
-                <tr><td colspan="11" class="empty-td">Memuat...</td></tr>
-              </tbody>
-            </table>
-          </div>
+        <!-- Cards -->
+        <div id="bc-table-body" class="bc-cards-grid">
+          <div class="bc-cards-empty">Memuat...</div>
         </div>
       </section>
 
@@ -2533,7 +2525,7 @@
   <script src="js/depositService.js?v=20260519-deposit-confirm-fix-1"></script>
   <script src="js/adminDepositUi.js?v=20260519-deposit-confirm-fix-1"></script>
   <script src="js/adminStaffCashUi.js?v=20260520-saldo-aktif-1"></script>
-  <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-5"></script>
+  <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-6"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260518-admin-cash-ui-2"></script>

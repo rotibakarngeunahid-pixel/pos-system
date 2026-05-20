@@ -350,10 +350,10 @@ BEGIN
      ORDER BY cs.branch_id, cs.closed_at DESC
   ),
   pending AS (
-    SELECT branch_id, SUM(amount) AS total
-      FROM cash_deposits
-     WHERE status = 'pending'
-     GROUP BY branch_id
+    SELECT cd.branch_id, SUM(cd.amount) AS total
+      FROM cash_deposits cd
+     WHERE cd.status = 'pending'
+     GROUP BY cd.branch_id
   )
   SELECT
     b.id                                                 AS branch_id,

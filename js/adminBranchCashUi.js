@@ -99,7 +99,7 @@ const adminBranchCashUi = {
       console.error('[adminBranchCashUi] load error:', msg, e);
       showToast('Error: ' + msg, 'error');
       const tbody = document.getElementById('bc-table-body');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="11" class="empty-td" style="color:var(--danger,red);font-size:12px;word-break:break-word">${escHtml(msg)}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<div class="bc-cards-empty" style="color:var(--danger,red);font-size:12px;word-break:break-word">${escHtml(msg)}</div>`;
     } finally {
       this._loading = false;
     }
@@ -170,50 +170,67 @@ const adminBranchCashUi = {
     const tbody = document.getElementById('bc-table-body');
     if (!tbody) return;
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="11" class="empty-td">Tidak ada data outlet.</td></tr>';
+      tbody.innerHTML = '<div class="bc-cards-empty">Tidak ada data outlet.</div>';
       return;
     }
 
     tbody.innerHTML = rows.map(r => {
       const statusBadge = this._shiftStatusBadge(r);
-      const pendingBadge = Number(r.pending_deposit_amount || 0) > 0
+      const hasPending = Number(r.pending_deposit_amount || 0) > 0;
+      const pendingHtml = hasPending
         ? `<span class="badge badge-warning">${formatRupiah(r.pending_deposit_amount)}</span>`
         : '<span class="text-muted">—</span>';
-      const varianceBadge = r.has_variance && r.last_variance_amount != null
+      const varianceHtml = r.has_variance && r.last_variance_amount != null
         ? `<span class="badge ${Number(r.last_variance_amount) >= 0 ? 'badge-success' : 'badge-danger'}">${Number(r.last_variance_amount) >= 0 ? '+' : ''}${formatRupiah(r.last_variance_amount)}</span>`
         : '<span class="text-muted">—</span>';
-      const estKas = r.open_session_id && r.running_estimated_cash != null
-        ? `<div style="font-size:11px;color:var(--primary)">${formatRupiah(r.running_estimated_cash)}</div>`
-        : '';
       const forceCloseBtn = r.shift_status === 'open'
         ? `<button class="btn btn-danger btn-xs" data-bc-action="force-close" data-branch-id="${r.branch_id}" title="Paksa Tutup Shift">
-             <i data-lucide="x-octagon" style="width:12px;height:12px"></i>
+             <i data-lucide="x-octagon" style="width:12px;height:12px"></i> Paksa Tutup
            </button>`
         : '';
 
-      return `<tr>
-        <td><span style="font-weight:600">${escHtml(r.branch_name)}</span></td>
-        <td style="font-weight:700;color:var(--text)">${formatRupiah(r.current_balance)}</td>
-        <td>${estKas || '<span class="text-muted">—</span>'}</td>
-        <td>${r.last_opening_cash != null ? formatRupiah(r.last_opening_cash) : '<span class="text-muted">—</span>'}</td>
-        <td>${r.last_closing_cash != null ? formatRupiah(r.last_closing_cash) : '<span class="text-muted">—</span>'}</td>
-        <td style="font-size:12px">${escHtml(r.last_opened_by_name || '—')}</td>
-        <td style="font-size:12px">${escHtml(r.last_closed_by_name || '—')}</td>
-        <td>${statusBadge}</td>
-        <td>${pendingBadge}</td>
-        <td>${varianceBadge}</td>
-        <td>
-          <div class="flex gap-1">
-            <button class="btn btn-outline btn-xs" data-bc-action="ledger" data-branch-id="${r.branch_id}" title="Riwayat Kas">
-              <i data-lucide="scroll-text" style="width:12px;height:12px"></i>
-            </button>
-            <button class="btn btn-outline btn-xs" data-bc-action="correct" data-branch-id="${r.branch_id}" title="Set / Input Kas Outlet">
-              <i data-lucide="edit-3" style="width:12px;height:12px"></i> Set Kas
-            </button>
-            ${forceCloseBtn}
+      return `<div class="bc-card">
+        <div class="bc-card-header">
+          <div class="bc-card-name">${escHtml(r.branch_name)}</div>
+          ${statusBadge}
+        </div>
+        <div class="bc-card-balance">${formatRupiah(r.current_balance)}</div>
+        <div class="bc-card-meta">
+          <div>
+            <div class="bc-meta-label">Kas Awal Terakhir</div>
+            <div class="bc-meta-value">${r.last_opening_cash != null ? formatRupiah(r.last_opening_cash) : '—'}</div>
           </div>
-        </td>
-      </tr>`;
+          <div>
+            <div class="bc-meta-label">Kas Akhir Terakhir</div>
+            <div class="bc-meta-value">${r.last_closing_cash != null ? formatRupiah(r.last_closing_cash) : '—'}</div>
+          </div>
+          <div>
+            <div class="bc-meta-label">Staff Buka</div>
+            <div class="bc-meta-value">${escHtml(r.last_opened_by_name || '—')}</div>
+          </div>
+          <div>
+            <div class="bc-meta-label">Staff Tutup</div>
+            <div class="bc-meta-value">${escHtml(r.last_closed_by_name || '—')}</div>
+          </div>
+          <div>
+            <div class="bc-meta-label">Setoran Pending</div>
+            <div class="bc-meta-value">${pendingHtml}</div>
+          </div>
+          <div>
+            <div class="bc-meta-label">Selisih Terakhir</div>
+            <div class="bc-meta-value">${varianceHtml}</div>
+          </div>
+        </div>
+        <div class="bc-card-actions">
+          <button class="btn btn-outline btn-xs" data-bc-action="ledger" data-branch-id="${r.branch_id}" title="Riwayat Kas">
+            <i data-lucide="scroll-text" style="width:12px;height:12px"></i> Riwayat
+          </button>
+          <button class="btn btn-outline btn-xs" data-bc-action="correct" data-branch-id="${r.branch_id}" title="Set / Input Kas Outlet">
+            <i data-lucide="edit-3" style="width:12px;height:12px"></i> Set Kas
+          </button>
+          ${forceCloseBtn}
+        </div>
+      </div>`;
     }).join('');
     if (window.lucide) lucide.createIcons();
   },
@@ -238,7 +255,7 @@ const adminBranchCashUi = {
   _setTableLoading(loading) {
     const tbody = document.getElementById('bc-table-body');
     if (tbody && loading) {
-      tbody.innerHTML = '<tr><td colspan="11" class="empty-td">Memuat...</td></tr>';
+      tbody.innerHTML = '<div class="bc-cards-empty">Memuat...</div>';
     }
   },
 
