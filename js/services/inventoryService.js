@@ -98,7 +98,7 @@ const inventoryService = {
   },
 
 
-  // ── Transfer stock between branches (ATOMIC) ─────────────────
+  // ── [LEGACY] Transfer langsung antar cabang (masih dipakai untuk kompatibilitas) ──
   async transferStock({ fromBranchId, toBranchId, ingredientId, qty, notes, userId }) {
     const { error } = await db.rpc('transfer_stock_atomic', {
       p_from_branch: fromBranchId,
@@ -109,6 +109,83 @@ const inventoryService = {
       p_user_id: userId || null
     });
     if (error) throw new Error(error.message || 'Transfer stok gagal di server');
+  },
+
+  // ── Transfer v2: Buat permintaan transfer (stok pengirim berkurang, status pending) ──
+  async createStockTransfer({ fromBranchId, toBranchId, items, notes, userId }) {
+    const { data, error } = await db.rpc('create_stock_transfer', {
+      p_from_branch_id: fromBranchId,
+      p_to_branch_id:   toBranchId,
+      p_items:          items,   // [{ingredient_id, qty}, ...]
+      p_notes:          notes || null,
+      p_user_id:        userId
+    });
+    if (error) throw new Error(error.message || 'Gagal membuat transfer');
+    if (!data?.success) throw new Error(data?.error || 'Gagal membuat transfer');
+    return { transferId: data.transfer_id, transferCode: data.transfer_code };
+  },
+
+  // ── Transfer v2: Outlet penerima menerima barang ─────────────
+  async confirmTransfer({ transferId, userId }) {
+    const { data, error } = await db.rpc('confirm_stock_transfer', {
+      p_transfer_id: transferId,
+      p_user_id:     userId
+    });
+    if (error) throw new Error(error.message || 'Gagal konfirmasi transfer');
+    if (!data?.success) throw new Error(data?.error || 'Gagal konfirmasi transfer');
+    return data.transfer_code;
+  },
+
+  // ── Transfer v2: Outlet penerima menolak barang ───────────────
+  async rejectTransfer({ transferId, userId, reason }) {
+    const { data, error } = await db.rpc('reject_stock_transfer', {
+      p_transfer_id: transferId,
+      p_user_id:     userId,
+      p_reason:      reason || null
+    });
+    if (error) throw new Error(error.message || 'Gagal menolak transfer');
+    if (!data?.success) throw new Error(data?.error || 'Gagal menolak transfer');
+    return data.transfer_code;
+  },
+
+  // ── Transfer v2: Pengirim membatalkan sebelum diterima ────────
+  async cancelTransfer({ transferId, userId }) {
+    const { data, error } = await db.rpc('cancel_stock_transfer', {
+      p_transfer_id: transferId,
+      p_user_id:     userId
+    });
+    if (error) throw new Error(error.message || 'Gagal membatalkan transfer');
+    if (!data?.success) throw new Error(data?.error || 'Gagal membatalkan transfer');
+    return data.transfer_code;
+  },
+
+  // ── Transfer v2: Daftar transfer masuk yang menunggu konfirmasi ──
+  async getPendingTransfers(branchId) {
+    const { data, error } = await db.rpc('get_pending_transfers', { p_branch_id: branchId });
+    if (error) throw new Error(error.message || 'Gagal memuat transfer masuk');
+    return Array.isArray(data) ? data : [];
+  },
+
+  // ── Transfer v2: Riwayat transfer untuk satu outlet ──────────
+  async getTransferHistory(branchId, limit = 50, offset = 0) {
+    const { data, error } = await db.rpc('get_transfer_history', {
+      p_branch_id: branchId,
+      p_limit:     limit,
+      p_offset:    offset
+    });
+    if (error) throw new Error(error.message || 'Gagal memuat riwayat transfer');
+    return Array.isArray(data) ? data : [];
+  },
+
+  // ── Transfer v2: Admin melihat semua transfer ─────────────────
+  async getAllTransfersAdmin(limit = 100, offset = 0, status = null) {
+    const { data, error } = await db.rpc('get_all_transfers_admin', {
+      p_limit:  limit,
+      p_offset: offset,
+      p_status: status || null
+    });
+    if (error) throw new Error(error.message || 'Gagal memuat semua transfer');
+    return Array.isArray(data) ? data : [];
   },
 
   // ── Receive purchase order → add stock ────────────────────────

@@ -119,6 +119,9 @@
       <button class="nav-item" data-admin-action="navigate" data-section="inventory" title="Inventori">
         <i data-lucide="archive"></i><span class="nav-text">Inventori</span>
       </button>
+      <button class="nav-item" data-admin-action="navigate" data-section="transfer-monitoring" title="Transfer Stok">
+        <i data-lucide="repeat-2"></i><span class="nav-text">Transfer Stok</span>
+      </button>
 
       <button class="nav-item" data-admin-action="navigate" data-section="transactions" title="Transaksi">
         <i data-lucide="receipt"></i><span class="nav-text">Transaksi</span>
@@ -545,8 +548,8 @@
             <button class="btn btn-outline btn-sm" data-admin-action="open-inventory-modal" data-type="opname">
               <i data-lucide="clipboard-list" class="icon-sm"></i> Opname
             </button>
-            <button class="btn btn-primary btn-sm" data-admin-action="open-inventory-modal" data-type="transfer">
-              <i data-lucide="repeat-2" class="icon-sm"></i> Transfer
+            <button class="btn btn-primary btn-sm" data-admin-action="navigate" data-section="transfer-monitoring">
+              <i data-lucide="repeat-2" class="icon-sm"></i> Transfer Stok
             </button>
           </div>
         </div>
@@ -567,6 +570,49 @@
         </div>
       </section>
 
+
+      <!-- ══════════ TRANSFER MONITORING ══════════ -->
+      <section class="admin-section" id="section-transfer-monitoring">
+        <div class="section-header">
+          <h2 class="section-title">Monitoring Transfer Stok</h2>
+          <div class="section-actions">
+            <button class="btn btn-outline btn-sm" data-admin-action="refresh-transfer-monitoring">
+              <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
+            </button>
+          </div>
+        </div>
+        <div class="filters-bar" style="margin-bottom:16px;">
+          <div class="form-group">
+            <label class="form-label">Filter Status</label>
+            <select class="form-control w-auto" id="transfer-status-filter" data-admin-change="load-transfer-monitoring">
+              <option value="">Semua Status</option>
+              <option value="pending">Menunggu Konfirmasi</option>
+              <option value="confirmed">Selesai</option>
+              <option value="rejected">Ditolak</option>
+              <option value="cancelled">Dibatalkan</option>
+            </select>
+          </div>
+        </div>
+        <div class="card"><div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Kode</th>
+                <th>Tanggal</th>
+                <th>Dari Outlet</th>
+                <th>Ke Outlet</th>
+                <th>Bahan Dikirim</th>
+                <th>Status</th>
+                <th>Dikirim Oleh</th>
+                <th>Diterima Oleh</th>
+              </tr>
+            </thead>
+            <tbody id="transfer-monitoring-body">
+              <tr><td colspan="8" class="empty-td">Pilih filter atau klik Refresh untuk memuat data.</td></tr>
+            </tbody>
+          </table>
+        </div></div>
+      </section>
 
       <!-- ══════════ TRANSACTIONS ══════════ -->
       <section class="admin-section" id="section-transactions">
@@ -2196,18 +2242,14 @@
             <option value="stock_in">Stok Masuk (Pembelian / Penerimaan)</option>
             <option value="stock_out">Stok Keluar (Pemakaian / Waste)</option>
             <option value="opname">Stok Opname (Hitung Fisik)</option>
-            <option value="transfer">Transfer antar Cabang</option>
           </select>
+          <div style="margin-top:6px;padding:7px 10px;background:#eff6ff;border-radius:var(--r-sm);font-size:11px;color:#1e40af;border-left:3px solid #3b82f6;">
+            Untuk transfer stok antar outlet, gunakan menu <strong>Transfer Stok</strong> di sidebar.
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label">Cabang *</label>
           <select class="form-control" id="inv-adj-branch-id"></select>
-        </div>
-        <div id="inv-transfer-row" class="hidden">
-          <div class="form-group">
-            <label class="form-label">Cabang Tujuan *</label>
-            <select class="form-control" id="inv-transfer-to"></select>
-          </div>
         </div>
         <div class="form-group">
           <label class="form-label">Bahan *</label>

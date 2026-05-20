@@ -115,6 +115,15 @@ const POS = {
         case 'print-receipt': window.print(); break;
         case 'open-stock-adjust-modal': POS.openStockAdjustModal(); break;
         case 'submit-stock-adjust': POS.submitStockAdjust(); break;
+        case 'open-send-transfer-modal': POS.openSendTransferModal(); break;
+        case 'submit-send-transfer': POS.submitSendTransfer(); break;
+        case 'add-transfer-item': POS.addTransferItem(); break;
+        case 'remove-transfer-item': POS.removeTransferItem(Number(btn.dataset.index)); break;
+        case 'open-pending-transfers-modal': POS.openPendingTransfersModal(); break;
+        case 'confirm-transfer': POS.confirmTransfer(Number(btn.dataset.id)); break;
+        case 'reject-transfer': POS.rejectTransfer(Number(btn.dataset.id)); break;
+        case 'cancel-transfer': POS.cancelTransfer(Number(btn.dataset.id)); break;
+        case 'open-transfer-history-modal': POS.openTransferHistoryModal(); break;
         case 'view-ingredient-log': POS.viewIngredientLog(btn.dataset.ingredientId, btn.dataset.ingredientName); break;
         case 'refresh-ingredient-log': POS.loadIngredientLogData(false); break;
         case 'ingredient-log-load-more': POS.loadIngredientLogData(true); break;
@@ -139,7 +148,6 @@ const POS = {
       else if (action === 'load-inventory-summary') POS.loadInventorySummary();
       else if (action === 'save-printer-settings') POS.savePrinterSettings();
       else if (action === 'toggle-discount-input') POS.toggleDiscountInput();
-      else if (action === 'toggle-stock-adj-type') POS.toggleStockAdjType();
       else if (action === 'ingredient-log-filter-change') POS.loadIngredientLogData(false);
     });
     document.addEventListener('input', e => {
@@ -2034,13 +2042,12 @@ const POS = {
     container.insertAdjacentHTML('beforeend', rows.join(''));
   },
 
-  // ── Stock Adjust (Staff & Admin) ──────────────────────────────
+  // ── Stock Adjust (Koreksi manual: masuk, keluar, opname) ────────
   async openStockAdjustModal() {
     if (!this.branch) return;
-    const [invRes, branchRes] = await Promise.all([
-      db.from('branch_inventory').select('ingredient_id, ingredients(id, name, unit)').eq('branch_id', this.branch.id),
-      db.from('branches').select('*').order('name')
-    ]);
+    const invRes = await db.from('branch_inventory')
+      .select('ingredient_id, ingredients(id, name, unit)')
+      .eq('branch_id', this.branch.id);
 
     const sel = document.getElementById('stock-adj-ingredient');
     if (!sel) return;
@@ -2059,22 +2066,9 @@ const POS = {
       .map(i => `<option value="${i.id}">${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`)
       .join('');
 
-    const targetSel = document.getElementById('stock-adj-target-branch');
-    if (targetSel) {
-      targetSel.innerHTML = (branchRes.data || [])
-        .filter(b => b.is_active !== false)
-        .filter(b => b.id !== this.branch.id)
-        .map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`)
-        .join('');
-    }
-
     document.getElementById('stock-adj-qty').value   = '';
     document.getElementById('stock-adj-notes').value = '';
     document.getElementById('stock-adj-type').value  = 'in';
-    const transferDiv  = document.getElementById('stock-adj-transfer-target');
-    const branchLabel  = document.getElementById('stock-adj-branch-label');
-    if (transferDiv) transferDiv.style.display = 'none';
-    if (branchLabel) branchLabel.textContent = 'Outlet Tujuan';
     openModal('modal-stock-adjust');
   },
 
@@ -2093,48 +2087,6 @@ const POS = {
     if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
 
     try {
-      if (type === 'transfer_in' || type === 'transfer_out') {
-        const otherBranchId = parseInt(document.getElementById('stock-adj-target-branch').value);
-        if (!otherBranchId) throw new Error(type === 'transfer_in' ? 'Pilih outlet sumber' : 'Pilih outlet tujuan');
-        if (otherBranchId === this.branch.id) throw new Error('Outlet tidak boleh sama dengan cabang sendiri');
-
-        const fromBranchId = type === 'transfer_in' ? otherBranchId    : this.branch.id;
-        const toBranchId   = type === 'transfer_in' ? this.branch.id    : otherBranchId;
-        const defaultNotes = type === 'transfer_in'
-          ? `Transfer masuk ke ${this.branch.name}`
-          : `Transfer keluar dari ${this.branch.name}`;
-
-        await inventoryService.transferStock({
-          fromBranchId,
-          toBranchId,
-          ingredientId,
-          qty,
-          notes:  notes || defaultNotes,
-          userId: this.user.id
-        });
-
-        // Notify the RECEIVING branch so they see "Stok Masuk dari Transfer".
-        // transfer_out: current sends to other  → notify other (from=current, to=other)
-        // transfer_in:  current receives from other → notify current (from=other, to=current)
-        const notifFrom = type === 'transfer_in' ? otherBranchId : this.branch.id;
-        const notifTo   = type === 'transfer_in' ? this.branch.id : otherBranchId;
-        await db.from('stock_transfer_notifications').insert({
-          from_branch_id: notifFrom,
-          to_branch_id:   notifTo,
-          ingredient_id:  ingredientId,
-          qty,
-          notes:          notes || null,
-          created_by:     this.user.id,
-          is_read:        false
-        });
-
-        closeModal('modal-stock-adjust');
-        this.loadInventorySummary();
-        this.refreshStockCache();
-        showToast('Transfer stok berhasil', 'success');
-        return;
-      }
-
       await inventoryService.adjustStock({
         branchId:      this.branch.id,
         ingredientId,
@@ -2155,93 +2107,305 @@ const POS = {
     }
   },
 
-  // ── Stock Adjust: Toggle Transfer Target ─────────────────────
-  toggleStockAdjType() {
-    const type        = document.getElementById('stock-adj-type').value;
-    const transferDiv = document.getElementById('stock-adj-transfer-target');
-    const branchLabel = document.getElementById('stock-adj-branch-label');
-    const isTransfer  = type === 'transfer_in' || type === 'transfer_out';
-    if (transferDiv) transferDiv.style.display = isTransfer ? '' : 'none';
-    if (branchLabel) branchLabel.textContent = type === 'transfer_in' ? 'Outlet Sumber' : 'Outlet Tujuan';
-  },
-
-  // ── Transfer Notifications Polling ───────────────────────────
+  // ── Cek pending transfer masuk & update badge ────────────────
   async _checkTransferNotifications() {
     if (!this.branch?.id) return;
     try {
-      const { data: notifs } = await db.from('stock_transfer_notifications')
-        .select('id, qty, notes, created_at, from_branch_id, ingredient_id, branches!from_branch_id(name), ingredients(name, unit)')
-        .eq('to_branch_id', this.branch.id)
-        .eq('is_read', false)
-        .order('created_at', { ascending: true })
-        .limit(5);
-
-      if (!notifs?.length) return;
-      this._showTransferNotif(notifs, 0);
+      const pending = await inventoryService.getPendingTransfers(this.branch.id);
+      this._updatePendingBadge(pending.length);
     } catch (e) {
-      console.warn('[POS] Transfer notif check failed:', e.message);
+      console.warn('[POS] Transfer pending check failed:', e.message);
     }
   },
 
-  async _showTransferNotif(notifs, index) {
-    if (index >= notifs.length) return;
-    const n = notifs[index];
+  _updatePendingBadge(count) {
+    const badge = document.getElementById('pending-transfer-badge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 9 ? '9+' : count;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  },
 
-    const fromName = n.branches?.name || 'Outlet lain';
-    const ingName  = n.ingredients?.name || '?';
-    const ingUnit  = n.ingredients?.unit || '';
-    const qty      = parseFloat(n.qty);
+  // ══════════════════════════════════════════════════════════
+  // TRANSFER V2: KIRIM STOK
+  // ══════════════════════════════════════════════════════════
+  async openSendTransferModal() {
+    if (!this.branch) return;
+    const [invRes, branchRes] = await Promise.all([
+      db.from('branch_inventory').select('ingredient_id, stock, ingredients(id, name, unit)').eq('branch_id', this.branch.id),
+      db.from('branches').select('id, name').eq('is_active', true).order('name')
+    ]);
 
-    const body = document.getElementById('transfer-notif-body');
-    body.innerHTML = `
-      <p style="color:var(--text-muted);font-size:13px;margin:0 0 12px;">Transfer baru diterima:</p>
-      <div class="transfer-notif-detail">
-        <div class="transfer-notif-row">
-          <span class="label">Dari Outlet</span>
-          <span class="value fw-700">${escapeHtml(fromName)}</span>
+    const otherBranches = (branchRes.data || []).filter(b => b.id !== this.branch.id);
+    if (!otherBranches.length) { showToast('Tidak ada outlet lain yang aktif', 'warning'); return; }
+
+    const branchSel = document.getElementById('send-transfer-branch');
+    if (branchSel) branchSel.innerHTML = otherBranches.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+
+    const ingredients = (invRes.data || [])
+      .map(r => ({ ...r.ingredients, stock: parseFloat(r.stock || 0) }))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    this._sendTransferIngredients = ingredients;
+    document.getElementById('send-transfer-notes').value = '';
+
+    const container = document.getElementById('send-transfer-items');
+    container.innerHTML = '';
+    this.addTransferItem();
+
+    openModal('modal-send-transfer');
+  },
+
+  _renderTransferItemRow(index) {
+    const ingredients = this._sendTransferIngredients || [];
+    const opts = ingredients.map(i =>
+      `<option value="${i.id}">${escapeHtml(i.name)} (${escapeHtml(i.unit)}) — Stok: ${i.stock.toLocaleString('id-ID')}</option>`
+    ).join('');
+    return `
+      <div class="transfer-item-row" id="transfer-item-row-${index}"
+        style="display:flex;gap:8px;align-items:center;background:var(--bg-alt);border-radius:var(--r-sm);padding:8px 10px;">
+        <div style="flex:1;">
+          <select class="form-control" id="transfer-ing-${index}" style="margin-bottom:4px;">${opts}</select>
+          <input type="number" class="form-control" id="transfer-qty-${index}"
+            placeholder="Jumlah" min="0.01" step="0.01" inputmode="decimal"
+            style="height:34px;font-size:13px;" />
         </div>
-        <div class="transfer-notif-row">
-          <span class="label">Bahan</span>
-          <span class="value">${escapeHtml(ingName)}</span>
+        <button class="btn btn-ghost btn-sm" data-action="remove-transfer-item" data-index="${index}"
+          title="Hapus baris" style="flex-shrink:0;color:var(--danger);">
+          <i data-lucide="trash-2" class="icon-sm"></i>
+        </button>
+      </div>`;
+  },
+
+  addTransferItem() {
+    const container = document.getElementById('send-transfer-items');
+    if (!container) return;
+    const index = container.children.length;
+    container.insertAdjacentHTML('beforeend', this._renderTransferItemRow(index));
+    if (window.lucide) lucide.createIcons();
+  },
+
+  removeTransferItem(index) {
+    const row = document.getElementById(`transfer-item-row-${index}`);
+    if (row) row.remove();
+  },
+
+  async submitSendTransfer() {
+    const toBranchId = parseInt(document.getElementById('send-transfer-branch').value);
+    const notes      = (document.getElementById('send-transfer-notes').value || '').trim();
+
+    if (!toBranchId) { showToast('Pilih outlet tujuan', 'error'); return; }
+
+    const container = document.getElementById('send-transfer-items');
+    const rows = container ? container.querySelectorAll('.transfer-item-row') : [];
+    const items = [];
+
+    for (const row of rows) {
+      const idx = row.id.replace('transfer-item-row-', '');
+      const ingId = parseInt(document.getElementById(`transfer-ing-${idx}`)?.value);
+      const qty   = parseFloat(document.getElementById(`transfer-qty-${idx}`)?.value);
+      if (!ingId || !qty || qty <= 0) continue;
+      if (items.some(it => it.ingredient_id === ingId)) {
+        showToast('Bahan yang sama tidak boleh dipilih lebih dari satu kali', 'error');
+        return;
+      }
+      items.push({ ingredient_id: ingId, qty });
+    }
+
+    if (!items.length) { showToast('Isi minimal satu bahan dengan jumlah yang valid', 'error'); return; }
+
+    const btn = document.getElementById('btn-submit-send-transfer');
+    if (btn) { btn.disabled = true; btn.textContent = 'Mengirim...'; }
+
+    try {
+      const { transferCode } = await inventoryService.createStockTransfer({
+        fromBranchId: this.branch.id,
+        toBranchId,
+        items,
+        notes: notes || null,
+        userId: this.user.id
+      });
+      closeModal('modal-send-transfer');
+      this.loadInventorySummary();
+      this.refreshStockCache();
+      showToast(`Transfer ${transferCode} berhasil dikirim. Menunggu konfirmasi outlet tujuan.`, 'success');
+    } catch (e) {
+      showToast('Gagal mengirim: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="send" class="icon-sm"></i> Kirim Stok'; if (window.lucide) lucide.createIcons(); }
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════
+  // TRANSFER V2: TERIMA STOK (pending transfers)
+  // ══════════════════════════════════════════════════════════
+  async openPendingTransfersModal() {
+    openModal('modal-pending-transfers');
+    const list = document.getElementById('pending-transfers-list');
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Memuat...</div>';
+    try {
+      const pending = await inventoryService.getPendingTransfers(this.branch.id);
+      this._updatePendingBadge(pending.length);
+      if (!pending.length) {
+        list.innerHTML = `
+          <div style="text-align:center;padding:32px 16px;">
+            <div style="font-size:2rem;margin-bottom:8px;">📭</div>
+            <div style="font-weight:700;color:var(--text);">Tidak ada transfer masuk</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Semua kiriman dari outlet lain sudah diterima.</div>
+          </div>`;
+        return;
+      }
+      list.innerHTML = pending.map(t => this._renderPendingTransferCard(t)).join('');
+      if (window.lucide) lucide.createIcons();
+    } catch (e) {
+      list.innerHTML = `<div style="padding:12px;color:var(--danger);">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+    }
+  },
+
+  _renderPendingTransferCard(t) {
+    const dateStr = new Date(t.created_at).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    const items = (t.items || []).map(it =>
+      `<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0;border-bottom:1px solid var(--border);">
+        <span>${escapeHtml(it.ingredient_name)}</span>
+        <span style="font-weight:700;color:var(--primary);">+${parseFloat(it.qty).toLocaleString('id-ID')} ${escapeHtml(it.unit)}</span>
+      </div>`
+    ).join('');
+    const noteHtml = t.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-style:italic;">Catatan: ${escapeHtml(t.notes)}</div>` : '';
+    return `
+      <div style="border:1.5px solid var(--border);border-radius:var(--r-lg);padding:14px;background:#fff;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--primary);letter-spacing:.5px;">${escapeHtml(t.transfer_code)}</div>
+            <div style="font-size:13px;font-weight:700;margin-top:1px;">Dari: ${escapeHtml(t.from_branch_name)}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${dateStr} &middot; Dikirim oleh: ${escapeHtml(t.created_by_name)}</div>
+          </div>
+          <span style="flex-shrink:0;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:#fff7ed;color:#c05621;">Menunggu</span>
         </div>
-        <div class="transfer-notif-row">
-          <span class="label">Jumlah Masuk</span>
-          <span class="value fw-700" style="color:var(--success);">+${qty.toLocaleString('id-ID')} ${escapeHtml(ingUnit)}</span>
+        <div style="background:var(--bg-alt);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;">${items}</div>
+        ${noteHtml}
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn btn-primary btn-sm" style="flex:1;" data-action="confirm-transfer" data-id="${t.id}">
+            <i data-lucide="check" class="icon-sm"></i> Terima
+          </button>
+          <button class="btn btn-sm" style="flex:1;border:1.5px solid var(--danger);color:var(--danger);background:transparent;" data-action="reject-transfer" data-id="${t.id}">
+            <i data-lucide="x" class="icon-sm"></i> Tolak
+          </button>
         </div>
       </div>`;
+  },
 
-    const modal     = document.getElementById('modal-transfer-notif');
-    const btn       = document.getElementById('btn-close-transfer-notif');
-    const countdown = document.getElementById('transfer-notif-countdown');
+  async confirmTransfer(transferId) {
+    const ok = await showConfirm({
+      title:       'Terima Transfer?',
+      message:     'Konfirmasi penerimaan barang? Stok outlet Anda akan bertambah sesuai jumlah yang dikirim.',
+      confirmText: 'Ya, Terima',
+    });
+    if (!ok) return;
+    try {
+      const code = await inventoryService.confirmTransfer({ transferId, userId: this.user.id });
+      showToast(`Transfer ${code} berhasil diterima. Stok sudah bertambah.`, 'success');
+      this.openPendingTransfersModal();
+      this.loadInventorySummary();
+      this.refreshStockCache();
+    } catch (e) {
+      showToast('Gagal menerima transfer: ' + e.message, 'error');
+    }
+  },
 
-    modal.style.display = 'flex';
-    btn.disabled = true;
-    countdown.textContent = '3';
+  async rejectTransfer(transferId) {
+    const reason = await showPrompt({
+      title:       'Tolak Transfer',
+      message:     'Alasan penolakan (opsional, kosongkan jika tidak ingin mengisi):',
+      placeholder: 'Contoh: Barang tidak sesuai pesanan',
+      confirmText: 'Tolak',
+    });
+    if (reason === null) return;
+    try {
+      const code = await inventoryService.rejectTransfer({ transferId, userId: this.user.id, reason });
+      showToast(`Transfer ${code} ditolak. Stok pengirim dikembalikan.`, 'success');
+      this.openPendingTransfersModal();
+    } catch (e) {
+      showToast('Gagal menolak transfer: ' + e.message, 'error');
+    }
+  },
 
-    let secs = 3;
-    const timer = setInterval(() => {
-      secs--;
-      countdown.textContent = secs;
-      if (secs <= 0) {
-        clearInterval(timer);
-        btn.disabled = false;
-        btn.textContent = 'Mengerti';
+  // ══════════════════════════════════════════════════════════
+  // TRANSFER V2: RIWAYAT TRANSFER
+  // ══════════════════════════════════════════════════════════
+  async openTransferHistoryModal() {
+    openModal('modal-transfer-history');
+    const list = document.getElementById('transfer-history-list');
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Memuat...</div>';
+    try {
+      const history = await inventoryService.getTransferHistory(this.branch.id, 50, 0);
+      if (!history.length) {
+        list.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);">Belum ada riwayat transfer.</div>';
+        return;
       }
-    }, 1000);
+      list.innerHTML = history.map(t => this._renderTransferHistoryCard(t)).join('');
+      if (window.lucide) lucide.createIcons();
+    } catch (e) {
+      list.innerHTML = `<div style="padding:12px;color:var(--danger);">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+    }
+  },
 
-    const closeHandler = async () => {
-      clearInterval(timer);
-      modal.style.display = 'none';
-      btn.removeEventListener('click', closeHandler);
-      try {
-        await db.from('stock_transfer_notifications').update({ is_read: true }).eq('id', n.id);
-      } catch (e) {
-        console.warn('[POS] mark notif read failed:', e.message);
-      }
-      this._showTransferNotif(notifs, index + 1);
-      if (this.currentMainTab === 'stock') this.loadInventorySummary();
+  _renderTransferHistoryCard(t) {
+    const statusConfig = {
+      pending:   { label: 'Menunggu',   bg: '#fff7ed', color: '#c05621' },
+      confirmed: { label: 'Selesai',    bg: '#f0fdf4', color: '#166534' },
+      rejected:  { label: 'Ditolak',    bg: '#fef2f2', color: '#991b1b' },
+      cancelled: { label: 'Dibatalkan', bg: '#f9fafb', color: '#6b7280' }
     };
-    btn.addEventListener('click', closeHandler);
+    const sc = statusConfig[t.status] || { label: t.status, bg: '#f9fafb', color: '#6b7280' };
+    const isSender   = t.from_branch_id === this.branch?.id;
+    const dirLabel   = isSender
+      ? `Ke: <strong>${escapeHtml(t.to_branch_name)}</strong>`
+      : `Dari: <strong>${escapeHtml(t.from_branch_name)}</strong>`;
+    const dateStr = new Date(t.created_at).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    const items = (t.items || []).map(it =>
+      `<span style="font-size:11px;">${escapeHtml(it.ingredient_name)}: ${parseFloat(it.qty).toLocaleString('id-ID')} ${escapeHtml(it.unit)}</span>`
+    ).join(' &middot; ');
+    const rejNote = t.rejection_reason
+      ? `<div style="font-size:11px;color:var(--danger);margin-top:4px;">Alasan: ${escapeHtml(t.rejection_reason)}</div>` : '';
+    const cancelBtn = (t.status === 'pending' && isSender)
+      ? `<button class="btn btn-sm" style="margin-top:8px;color:var(--danger);font-size:11px;border:1px solid var(--border);background:transparent;" data-action="cancel-transfer" data-id="${t.id}">Batalkan Transfer</button>`
+      : '';
+    return `
+      <div style="border:1.5px solid var(--border);border-radius:var(--r-lg);padding:12px;background:#fff;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--primary);">${escapeHtml(t.transfer_code)}</div>
+            <div style="font-size:12px;margin-top:2px;">${dirLabel}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${dateStr}</div>
+          </div>
+          <span style="flex-shrink:0;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};">${sc.label}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${items}</div>
+        ${rejNote}
+        ${cancelBtn}
+      </div>`;
+  },
+
+  async cancelTransfer(transferId) {
+    const ok = await showConfirm({
+      title:       'Batalkan Transfer?',
+      message:     'Batalkan transfer ini? Stok akan dikembalikan ke outlet Anda.',
+      confirmText: 'Ya, Batalkan',
+    });
+    if (!ok) return;
+    try {
+      const code = await inventoryService.cancelTransfer({ transferId, userId: this.user.id });
+      showToast(`Transfer ${code} dibatalkan. Stok sudah dikembalikan.`, 'success');
+      this.openTransferHistoryModal();
+      this.loadInventorySummary();
+      this.refreshStockCache();
+    } catch (e) {
+      showToast('Gagal membatalkan: ' + e.message, 'error');
+    }
   },
 
   // ── Harga Custom per Item ────────────────────────────────────

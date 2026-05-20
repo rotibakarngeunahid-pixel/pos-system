@@ -348,7 +348,21 @@
           <input type="date" id="stock-filter-date" class="form-control"
             style="width:130px;height:32px;font-size:12px;padding:4px 8px;"
             data-action-change="load-inventory-summary" />
-          <button class="btn btn-primary btn-sm" data-action="open-stock-adjust-modal">
+          <button class="btn btn-primary btn-sm" data-action="open-send-transfer-modal"
+            title="Kirim stok ke outlet lain">
+            <i data-lucide="send" class="icon-sm"></i> Kirim Stok
+          </button>
+          <button class="btn btn-outline btn-sm" id="btn-pending-transfers"
+            data-action="open-pending-transfers-modal"
+            title="Terima stok dari outlet lain" style="position:relative;">
+            <i data-lucide="inbox" class="icon-sm"></i> Terima Stok
+            <span id="pending-transfer-badge" style="display:none;position:absolute;top:-6px;right:-6px;background:var(--danger,#e53e3e);color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:800;display:none;align-items:center;justify-content:center;line-height:1;">0</span>
+          </button>
+          <button class="btn btn-ghost btn-sm" data-action="open-transfer-history-modal"
+            title="Riwayat transfer">
+            <i data-lucide="history" class="icon-sm"></i>
+          </button>
+          <button class="btn btn-outline btn-sm" data-action="open-stock-adjust-modal">
             <i data-lucide="package" class="icon-sm"></i> Ubah Stok
           </button>
           <button class="btn btn-outline btn-sm" data-action="load-inventory-summary" title="Refresh">
@@ -832,18 +846,14 @@
         </div>
         <div class="form-group" style="margin:0;">
           <label class="form-label">Jenis Penyesuaian</label>
-          <select class="form-control" id="stock-adj-type" data-action-change="toggle-stock-adj-type">
+          <select class="form-control" id="stock-adj-type">
             <option value="in">Stok Masuk (Pembelian / Tambah)</option>
             <option value="out">Stok Keluar (Koreksi / Susut)</option>
-            <option value="transfer_in">Transfer Masuk (Ambil dari Outlet Lain)</option>
-            <option value="transfer_out">Transfer Keluar (Kirim ke Outlet Lain)</option>
+            <option value="opname">Opname (Hitung Fisik)</option>
           </select>
-        </div>
-        <div id="stock-adj-transfer-target" class="form-group" style="margin:0;display:none;">
-          <label class="form-label" id="stock-adj-branch-label">Outlet Tujuan</label>
-          <select id="stock-adj-target-branch" class="form-control">
-            <!-- populated dynamically -->
-          </select>
+          <div style="margin-top:6px;padding:8px 10px;background:var(--bg-alt);border-radius:var(--r-sm);font-size:11px;color:var(--text-muted);border-left:3px solid var(--primary);">
+            <strong>Kirim stok ke outlet lain?</strong> Gunakan tombol <strong>Kirim Stok</strong> di atas. Untuk menerima kiriman, gunakan tombol <strong>Terima Stok</strong>.
+          </div>
         </div>
         <div class="form-group" style="margin:0;">
           <label class="form-label">Jumlah *</label>
@@ -1156,6 +1166,79 @@
         <button class="btn btn-primary btn-full" id="btn-close-transfer-notif" disabled style="height:44px;font-size:14px;font-weight:700;">
           Mengerti (<span id="transfer-notif-countdown">3</span>)
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Kirim Stok ke Outlet Lain
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-send-transfer">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="send" class="icon-sm"></i> Kirim Stok ke Outlet Lain</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-send-transfer">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Kirim ke Outlet *</label>
+          <select class="form-control" id="send-transfer-branch"></select>
+        </div>
+        <div>
+          <label class="form-label">Bahan yang Dikirim *</label>
+          <div id="send-transfer-items" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <button class="btn btn-ghost btn-sm" data-action="add-transfer-item"
+            style="margin-top:8px;width:100%;border:1.5px dashed var(--border);">
+            <i data-lucide="plus" class="icon-sm"></i> Tambah Bahan
+          </button>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Catatan <span style="font-weight:400;color:var(--text-muted);">(opsional)</span></label>
+          <input type="text" class="form-control" id="send-transfer-notes"
+            placeholder="Contoh: Kiriman pagi, restock mingguan..." />
+        </div>
+        <div style="padding:8px 12px;background:#fff7ed;border-radius:var(--r-sm);border-left:3px solid #f59e0b;font-size:12px;color:#92400e;">
+          Stok akan langsung berkurang dari outlet Anda saat dikirim. Outlet tujuan perlu klik <strong>Terima</strong> agar stoknya bertambah.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-action="close-modal" data-modal-id="modal-send-transfer">Batal</button>
+        <button class="btn btn-primary" id="btn-submit-send-transfer" data-action="submit-send-transfer">
+          <i data-lucide="send" class="icon-sm"></i> Kirim Stok
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Terima Stok dari Outlet Lain
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-pending-transfers">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="inbox" class="icon-sm"></i> Terima Stok dari Outlet Lain</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-pending-transfers">✕</button>
+      </div>
+      <div class="modal-body" style="padding:0;">
+        <div style="padding:10px 16px 0;font-size:12px;color:var(--text-muted);">
+          Jika outlet lain mengirim barang ke outlet Anda, daftarnya muncul di sini. Klik <strong>Terima</strong> untuk menambah stok.
+        </div>
+        <div id="pending-transfers-list" style="padding:8px 16px 16px;display:flex;flex-direction:column;gap:12px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Riwayat Transfer
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-transfer-history">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="history" class="icon-sm"></i> Riwayat Transfer</span>
+        <button class="modal-close" data-action="close-modal" data-modal-id="modal-transfer-history">✕</button>
+      </div>
+      <div class="modal-body" style="padding:0;">
+        <div id="transfer-history-list" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto;"></div>
       </div>
     </div>
   </div>

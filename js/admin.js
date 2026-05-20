@@ -108,6 +108,9 @@ const ADMIN = {
         case 'close-copy-menu-modal': this.resetCopyMenuModal(); closeModal('modal-copy-branch-menu'); break;
         case 'preview-copy-menu': this.loadCopyMenuPreview(); break;
         case 'confirm-copy-menu': this.confirmCopyMenu(); break;
+        case 'refresh-transfer-monitoring': this.loadTransferMonitoring(); break;
+        case 'admin-confirm-transfer': this.adminConfirmTransfer(Number(btn.dataset.id)); break;
+        case 'admin-reject-transfer': this.adminRejectTransfer(Number(btn.dataset.id)); break;
       }
     });
     document.addEventListener('change', (e) => {
@@ -130,6 +133,7 @@ const ADMIN = {
         case 'import-menu-file': this.handleImportMenuFile(node); break;
         case 'load-topping-mapping': this.loadToppingMapping(node.value); break;
         case 'toggle-report-void': this.runReport(this.currentReportTab || 'sales'); break;
+        case 'load-transfer-monitoring': this.loadTransferMonitoring(); break;
       }
     });
     document.addEventListener('input', (e) => {
@@ -377,7 +381,8 @@ const ADMIN = {
       'staff-cash-position': 'Kas Aktif & Posisi Staff',
       'branch-cash': 'Kas Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
-      'finance-integration': 'Integrasi Sistem Keuangan'
+      'finance-integration': 'Integrasi Sistem Keuangan',
+      'transfer-monitoring': 'Monitoring Transfer Stok'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
     this.currentSection = section;
@@ -407,6 +412,7 @@ const ADMIN = {
       case 'staff-cash-position':   this.loadStaffCashPosition(); break;
       case 'branch-cash':           this.loadBranchCash();        break;
       case 'finance-integration':   this.loadFinanceIntegration(); break;
+      case 'transfer-monitoring':   this.loadTransferMonitoring(); break;
     }
   },
 
@@ -1564,12 +1570,10 @@ const ADMIN = {
   },
 
   toggleInventoryModalType() {
-    const type       = document.getElementById('inv-adj-type').value;
-    const labels     = { stock_in:'Jumlah Masuk', stock_out:'Jumlah Keluar', opname:'Stok Aktual (Fisik)', transfer:'Jumlah Transfer' };
-    const qtyLabel   = document.getElementById('inv-adj-qty-label');
-    const transferRow = document.getElementById('inv-transfer-row');
-    if (qtyLabel)    qtyLabel.textContent  = labels[type] || 'Jumlah';
-    if (transferRow) transferRow.style.display = type === 'transfer' ? 'block' : 'none';
+    const type    = document.getElementById('inv-adj-type').value;
+    const labels  = { stock_in:'Jumlah Masuk', stock_out:'Jumlah Keluar', opname:'Stok Aktual (Fisik)' };
+    const qtyLabel = document.getElementById('inv-adj-qty-label');
+    if (qtyLabel) qtyLabel.textContent = labels[type] || 'Jumlah';
   },
 
   async saveInventoryAdjust() {
@@ -1581,20 +1585,11 @@ const ADMIN = {
     if (!branchId || !ingredientId || isNaN(qty) || qty < 0) { showToast('Lengkapi semua field', 'error'); return; }
 
     try {
-      if (type === 'transfer') {
-        const toBranchId = document.getElementById('inv-transfer-to').value;
-        if (!toBranchId || parseInt(toBranchId, 10) === parseInt(branchId, 10)) { showToast('Pilih cabang tujuan yang berbeda', 'error'); return; }
-        await inventoryService.transferStock({
-          fromBranchId: parseInt(branchId), toBranchId: parseInt(toBranchId),
-          ingredientId: parseInt(ingredientId), qty, notes, userId: this.user.id
-        });
-      } else {
-        const invType = { stock_in:'in', stock_out:'out', opname:'opname' }[type] || 'in';
-        await inventoryService.adjustStock({
-          branchId: parseInt(branchId), ingredientId: parseInt(ingredientId),
-          qty, type: invType, referenceType: 'manual', notes, createdBy: this.user.id
-        });
-      }
+      const invType = { stock_in:'in', stock_out:'out', opname:'opname' }[type] || 'in';
+      await inventoryService.adjustStock({
+        branchId: parseInt(branchId), ingredientId: parseInt(ingredientId),
+        qty, type: invType, referenceType: 'manual', notes, createdBy: this.user.id
+      });
       this.closeModal('modal-inventory');
       await this.loadInventory();
       showToast('Stok berhasil diperbarui', 'success');
@@ -3121,6 +3116,82 @@ const ADMIN = {
     if (window.adminFinanceIntegrationUi) {
       adminFinanceIntegrationUi.populateBranchSelect(this.branches);
       adminFinanceIntegrationUi.load();
+    }
+  },
+
+  // ── Transfer Monitoring (Admin: lihat semua transfer) ─────────
+  async loadTransferMonitoring() {
+    const tbody  = document.getElementById('transfer-monitoring-body');
+    const status = document.getElementById('transfer-status-filter')?.value || null;
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-td">Memuat...</td></tr>';
+    try {
+      const transfers = await inventoryService.getAllTransfersAdmin(100, 0, status || null);
+      if (!transfers.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-td">Tidak ada data transfer.</td></tr>';
+        return;
+      }
+      const statusCfg = {
+        pending:   { label: 'Menunggu',   cls: 'badge-orange' },
+        confirmed: { label: 'Selesai',    cls: 'badge-green'  },
+        rejected:  { label: 'Ditolak',    cls: 'badge-red'    },
+        cancelled: { label: 'Dibatalkan', cls: 'badge-default' }
+      };
+      tbody.innerHTML = transfers.map(t => {
+        const sc      = statusCfg[t.status] || { label: t.status, cls: 'badge-default' };
+        const dateStr = new Date(t.created_at).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        const items   = (t.items || []).map(i => `${escHtml(i.ingredient_name)}: ${parseFloat(i.qty).toLocaleString('id-ID')} ${escHtml(i.unit)}`).join('; ');
+        const actions = t.status === 'pending'
+          ? `<button class="btn btn-primary btn-sm" style="font-size:11px;" data-admin-action="admin-confirm-transfer" data-id="${t.id}">Terima</button>
+             <button class="btn btn-sm" style="font-size:11px;border:1px solid var(--danger);color:var(--danger);background:transparent;margin-left:4px;" data-admin-action="admin-reject-transfer" data-id="${t.id}">Tolak</button>`
+          : '—';
+        return `<tr>
+          <td><span style="font-weight:700;color:var(--primary);font-size:12px;">${escHtml(t.transfer_code)}</span></td>
+          <td style="font-size:12px;">${dateStr}</td>
+          <td style="font-size:12px;">${escHtml(t.from_branch_name)}</td>
+          <td style="font-size:12px;">${escHtml(t.to_branch_name)}</td>
+          <td style="font-size:11px;max-width:200px;">${escHtml(items)}</td>
+          <td><span class="badge ${sc.cls}" style="font-size:11px;">${sc.label}</span></td>
+          <td style="font-size:12px;">${escHtml(t.created_by_name || '—')}</td>
+          <td style="font-size:12px;">${escHtml(t.confirmed_by_name || t.rejected_by_name || '—')}</td>
+        </tr>`;
+      }).join('');
+      if (window.lucide) lucide.createIcons();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-td" style="color:var(--danger);">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
+    }
+  },
+
+  async adminConfirmTransfer(transferId) {
+    const ok = await showConfirm({
+      title:       'Konfirmasi Transfer?',
+      message:     'Konfirmasi penerimaan transfer ini atas nama outlet tujuan? Stok outlet tujuan akan bertambah.',
+      confirmText: 'Ya, Konfirmasi',
+    });
+    if (!ok) return;
+    try {
+      const code = await inventoryService.confirmTransfer({ transferId, userId: this.user.id });
+      showToast(`Transfer ${code} dikonfirmasi.`, 'success');
+      this.loadTransferMonitoring();
+    } catch (e) {
+      showToast('Gagal konfirmasi: ' + e.message, 'error');
+    }
+  },
+
+  async adminRejectTransfer(transferId) {
+    const reason = await showPrompt({
+      title:       'Tolak Transfer',
+      message:     'Alasan penolakan (opsional):',
+      placeholder: 'Contoh: Barang tidak sesuai',
+      confirmText: 'Tolak',
+    });
+    if (reason === null) return;
+    try {
+      const code = await inventoryService.rejectTransfer({ transferId, userId: this.user.id, reason });
+      showToast(`Transfer ${code} ditolak. Stok pengirim dikembalikan.`, 'success');
+      this.loadTransferMonitoring();
+    } catch (e) {
+      showToast('Gagal menolak: ' + e.message, 'error');
     }
   },
 
