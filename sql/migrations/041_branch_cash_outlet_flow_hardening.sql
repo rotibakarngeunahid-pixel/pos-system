@@ -72,7 +72,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cashier_sessions_one_open_per_branch
   WHERE status = 'open';
 
 -- Helper internal: estimasi kas sistem untuk satu session.
--- Menggunakan compute_cash_session_system_amount jika ada; fallback tetap tersedia.
+-- Formula disamakan dengan cashService.getSummary().
 CREATE OR REPLACE FUNCTION public.compute_cash_session_system_amount_outlet(
   p_session_id bigint
 ) RETURNS numeric
@@ -84,13 +84,6 @@ AS $$
 DECLARE
   v_amount numeric;
 BEGIN
-  BEGIN
-    SELECT public.compute_cash_session_system_amount(p_session_id) INTO v_amount;
-    RETURN COALESCE(v_amount, 0);
-  EXCEPTION WHEN OTHERS THEN
-    NULL;
-  END;
-
   WITH sess AS (
     SELECT id, opening_cash
     FROM public.cashier_sessions
@@ -101,7 +94,19 @@ BEGIN
       SUM(CASE WHEN cl.type = 'in' AND cl.reference_type = 'manual' AND NOT COALESCE(cl.is_void, false) THEN cl.amount ELSE 0 END) AS manual_in,
       SUM(CASE WHEN cl.type = 'out' AND cl.reference_type = 'manual' AND NOT COALESCE(cl.is_void, false) THEN cl.amount ELSE 0 END) AS manual_out,
       SUM(CASE WHEN cl.type = 'out' AND cl.reference_type = 'refund' AND NOT COALESCE(cl.is_void, false) THEN cl.amount ELSE 0 END) AS refund_out,
-      SUM(CASE WHEN cl.type = 'out' AND cl.reference_type = 'void' AND NOT COALESCE(cl.is_void, false) THEN cl.amount ELSE 0 END) AS void_out,
+      SUM(CASE
+        WHEN cl.type = 'out'
+         AND cl.reference_type = 'void'
+         AND NOT COALESCE(cl.is_void, false)
+         AND NOT EXISTS (
+           SELECT 1
+           FROM public.transactions tx
+           WHERE tx.session_id = cl.session_id
+             AND tx.payment_method = 'cash'
+             AND tx.id::text = cl.reference_id::text
+         )
+        THEN cl.amount ELSE 0
+      END) AS void_out,
       SUM(CASE WHEN cl.type = 'out' AND cl.reference_type = 'deposit' AND NOT COALESCE(cl.is_void, false) THEN cl.amount ELSE 0 END) AS deposit_out,
       SUM(CASE WHEN cl.type = 'in' AND cl.reference_type = 'sale' AND NOT COALESCE(cl.is_void, false) THEN cl.amount ELSE 0 END) AS sales_from_logs
     FROM public.cash_logs cl
@@ -283,9 +288,9 @@ AS $$
 DECLARE
   v_admin record;
 BEGIN
-  SELECT id, role INTO v_admin
-  FROM public.users
-  WHERE id = p_admin_id;
+  SELECT u.id, u.role INTO v_admin
+  FROM public.users u
+  WHERE u.id = p_admin_id;
 
   IF NOT FOUND OR v_admin.role NOT IN ('admin', 'owner') THEN
     RAISE EXCEPTION 'Hanya admin/owner yang dapat mengakses data ini';
@@ -994,9 +999,9 @@ AS $$
 DECLARE
   v_admin record;
 BEGIN
-  SELECT id, role INTO v_admin
-  FROM public.users
-  WHERE id = p_admin_id;
+  SELECT u.id, u.role INTO v_admin
+  FROM public.users u
+  WHERE u.id = p_admin_id;
 
   IF NOT FOUND OR v_admin.role NOT IN ('admin', 'owner') THEN
     RAISE EXCEPTION 'Hanya admin/owner yang dapat mengakses riwayat ini';
@@ -1090,12 +1095,29 @@ BEGIN
           AND existing.source_id = cd.id::text
       )
   )
-  SELECT *
-  FROM ledger_rows
-  WHERE (p_date_from IS NULL OR ledger_rows.created_at >= p_date_from)
-    AND (p_date_to IS NULL OR ledger_rows.created_at <= p_date_to)
-    AND (p_movement_type IS NULL OR ledger_rows.movement_type = p_movement_type)
-  ORDER BY ledger_rows.created_at DESC
+  SELECT
+    lr.id,
+    lr.movement_type,
+    lr.direction,
+    lr.amount,
+    lr.balance_before,
+    lr.balance_after,
+    lr.expected_balance,
+    lr.variance_amount,
+    lr.reason,
+    lr.staff_name,
+    lr.admin_name,
+    lr.cash_session_id,
+    lr.deposit_id,
+    lr.source_table,
+    lr.source_id,
+    lr.created_at,
+    lr.metadata
+  FROM ledger_rows lr
+  WHERE (p_date_from IS NULL OR lr.created_at >= p_date_from)
+    AND (p_date_to IS NULL OR lr.created_at <= p_date_to)
+    AND (p_movement_type IS NULL OR lr.movement_type = p_movement_type)
+  ORDER BY lr.created_at DESC
   LIMIT COALESCE(p_limit, 50);
 END;
 $$;

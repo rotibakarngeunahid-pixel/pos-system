@@ -156,41 +156,20 @@ const transactionService = {
   },
 
   // ── Close cashier shift ───────────────────────────────────────
-  async closeShift({ sessionId, closingCash }) {
+  async closeShift({ sessionId, closingCash, staffId = null }) {
     const { data: sess } = await db.from('cashier_sessions')
-      .select('*').eq('id', sessionId).single();
+      .select('id, staff_id, status').eq('id', sessionId).single();
     if (!sess) throw new Error('Sesi tidak ditemukan');
     if (sess.status === 'closed') throw new Error('Shift sudah ditutup');
 
-    // Compute expected cash using cashService if available
-    let expectedCash = safeNum(sess.opening_cash || 0, 'Opening Cash') + safeNum(sess.total_sales || 0, 'Total Sales');
-    if (typeof cashService !== 'undefined') {
-      try {
-        const summary = await cashService.getSummary({ branchId: sess.branch_id, sessionId });
-        expectedCash  = summary.expectedCash;
-      } catch (e) {
-        // fallback to simple calc
-      }
-    }
+    const effectiveStaffId = staffId || sess.staff_id;
+    if (!effectiveStaffId) throw new Error('Staff sesi tidak ditemukan. Tutup shift harus lewat RPC kas outlet.');
 
-    // Update dan refetch row closed agar current_cash_amount terisi dan status = 'closed'
-    const updatePayload = {
-      status:               'closed',
-      closing_cash:         closingCash,
-      expected_cash:        expectedCash,
-      current_cash_amount:  closingCash,
-      closed_at:            new Date().toISOString()
-    };
-
-    const { data: updated, error } = await db.from('cashier_sessions')
-      .update(updatePayload)
-      .eq('id', sessionId)
-      .select()
-      .single();
-    if (error) throw error;
-
-    // Fallback jika select gagal (kolom current_cash_amount belum ada di schema lama)
-    return updated || { ...sess, ...updatePayload };
+    return this.closeShiftApplyBalance({
+      sessionId,
+      closingCash,
+      staffId: effectiveStaffId
+    });
   },
 
   // ── Process refund (ATOMIC) ───────────────────────────────────

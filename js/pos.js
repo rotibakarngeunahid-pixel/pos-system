@@ -326,6 +326,10 @@ const POS = {
     return `Shift sebelumnya atas nama ${staffName} belum menutup kas. Silakan tutup kas terlebih dahulu.`;
   },
 
+  getPendingDepositBlockerMessage() {
+    return 'Masih ada setoran tunai yang menunggu persetujuan owner/admin. Selesaikan setoran terlebih dahulu sebelum membuka shift baru.';
+  },
+
   setOpenShiftBlocker(session = null) {
     this._openShiftBlocker = session || null;
     const blocked = !!this._openShiftBlocker;
@@ -457,11 +461,18 @@ const POS = {
 
     if (pendWrap && pendText) {
       if (b.pendingDeposit > 0) {
-        pendText.textContent = `Ada setoran pending ${formatRupiah(b.pendingDeposit)} menunggu approval admin. Posisi kas belum berkurang.`;
+        pendText.textContent = `${this.getPendingDepositBlockerMessage()} Nominal pending: ${formatRupiah(b.pendingDeposit)}. Posisi kas belum berkurang sampai disetujui.`;
         pendWrap.style.display = '';
       } else {
         pendWrap.style.display = 'none';
       }
+    }
+
+    const openBtn = g('btn-open-shift');
+    if (openBtn && !this._openShiftBlocker) {
+      const pendingBlocked = Number(b.pendingDeposit || 0) > 0;
+      openBtn.disabled = pendingBlocked;
+      openBtn.textContent = pendingBlocked ? 'Setoran Menunggu Approval' : 'Buka Shift & Mulai Berjualan';
     }
 
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
@@ -528,6 +539,9 @@ const POS = {
       if (this._branchCashPosition.error) {
         throw new Error('Gagal memuat posisi kas outlet. Coba lagi sebelum membuka shift.');
       }
+      if (Number(this._branchCashPosition.pendingDeposit || 0) > 0) {
+        throw new Error(this.getPendingDepositBlockerMessage());
+      }
 
       // Proses setoran opsional dari shift sebelumnya
       const depAmount = parseFloat(document.getElementById('shift-open-dep-amount')?.value) || 0;
@@ -570,8 +584,13 @@ const POS = {
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
-      btn.disabled = !!this._openShiftBlocker;
-      btn.textContent = this._openShiftBlocker ? 'Kas Belum Ditutup' : 'Buka Shift & Mulai Berjualan';
+      const pendingBlocked = Number(this._branchCashPosition?.pendingDeposit || 0) > 0;
+      btn.disabled = !!this._openShiftBlocker || pendingBlocked;
+      btn.textContent = this._openShiftBlocker
+        ? 'Kas Belum Ditutup'
+        : pendingBlocked
+          ? 'Setoran Menunggu Approval'
+          : 'Buka Shift & Mulai Berjualan';
     }
   },
 
@@ -736,7 +755,7 @@ const POS = {
             <span class="text-danger">−${formatRupiah(refundOut)}</span>
           </div>
           ${depositOut > 0 ? `<div class="shift-detail-row">
-            <span><i data-lucide="landmark" class="icon-sm text-danger" style="margin-right:6px"></i>Setoran Terkonfirmasi</span>
+            <span><i data-lucide="landmark" class="icon-sm text-danger" style="margin-right:6px"></i>Setoran Terkonfirmasi (di luar shift)</span>
             <span class="text-danger">−${formatRupiah(depositOut)}</span>
           </div>` : ''}
         </div>
@@ -2462,7 +2481,7 @@ const POS = {
     const refundOut    = summary?.refundOut    ?? 0;
     const voidOut      = summary?.voidOut      ?? 0;
     const depositOut   = summary?.depositOut   ?? 0;
-    const totalCashOut = manualOut + refundOut + voidOut + depositOut;
+    const totalCashOut = manualOut + refundOut + voidOut;
     const expectedCash = summary?.expectedCash ?? (openingCash + salesIn + manualIn - totalCashOut);
 
     if (!this._cashCategories?.length) {

@@ -288,6 +288,11 @@ const adminBranchCashUi = {
 
   // ── Correction Modal ──────────────────────────────────────────
   _openCorrection(row) {
+    if (row.shift_status === 'open') {
+      showToast('Saldo kas outlet tidak bisa diubah karena masih ada shift aktif. Tutup shift terlebih dahulu.', 'error');
+      return;
+    }
+
     this._corrTarget = {
       branchId:       row.branch_id,
       branchName:     row.branch_name,

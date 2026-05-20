@@ -172,7 +172,7 @@ const cashService = {
     const manualIn  = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'manual'));
     const manualOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'manual'));
     const refundOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'refund'));
-    const depositOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'deposit'));
+    let depositOut = sum(validRows.filter(r => r.type === 'out' && r.reference_type === 'deposit'));
     const openingIn = sum(validRows.filter(r => r.type === 'in'  && r.reference_type === 'opening'));
     const voidRows  = validRows.filter(r => r.type === 'out' && r.reference_type === 'void');
     let voidOut     = sum(voidRows);
@@ -200,7 +200,21 @@ const cashService = {
       console.warn('cashService.getSummary: fallback to cash_logs sales total', e);
     }
 
-    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut - depositOut;
+    try {
+      if (sessionId) {
+        const { data: deps, error: depErr } = await db.from('cash_deposits')
+          .select('amount')
+          .eq('session_id', sessionId)
+          .eq('status', 'confirmed');
+        if (!depErr) depositOut = sum(deps || []);
+      }
+    } catch (e) {
+      console.warn('cashService.getSummary: fallback to cash_logs deposit total', e);
+    }
+
+    // Setoran approved adalah mutasi saldo outlet setelah shift closed.
+    // Jangan kurangi expected cash shift lama dari setoran tersebut.
+    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut;
 
     return {
       openingCash,
@@ -214,7 +228,7 @@ const cashService = {
       depositOut,
       expectedCash,
       totalIn:  openingCash + salesIn + manualIn,
-      totalOut: manualOut + refundOut + voidOut + depositOut
+      totalOut: manualOut + refundOut + voidOut
     };
   },
 
@@ -355,8 +369,7 @@ const cashService = {
     const staffId = session.staff_id;
     const depositsQuery = db.from('cash_deposits')
       .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id, deposit_account_id, deposit_account_name_snapshot, proof_url, proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at')
-      .eq('staff_id', staffId)
-      .eq('branch_id', branchId)
+      .eq('session_id', sessionId)
       .order('created_at', { ascending: false })
       .limit(30);
 

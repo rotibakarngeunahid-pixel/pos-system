@@ -192,7 +192,6 @@ const depositService = {
       .from('cashier_sessions')
       .select('id, branch_id, staff_id, status, opened_at, closed_at, closing_cash, expected_cash, current_cash_amount')
       .eq('branch_id', branchId)
-      .eq('staff_id', staffId)
       .eq('status', 'closed')
       .order('closed_at', { ascending: false, nullsFirst: false })
       .limit(limit);
