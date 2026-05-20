@@ -745,7 +745,9 @@ const adminDepositUi = {
       this.removeManualProofFile();
       showToast(`Setoran manual tersimpan. Ref: ${String(depositId || '').slice(0, 8).toUpperCase()}`, 'success');
       await this.loadDeposits();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-manual-deposit' });
       if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
+      if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
     } catch (e) {
       console.error('saveManualDeposit', e);
       if (window.showDbError) showDbError(e, { action: 'menyimpan setoran manual', entity: 'Setoran manual' });
@@ -772,7 +774,9 @@ const adminDepositUi = {
       await depositService.confirmDeposit({ depositId, adminId, action: 'confirmed' });
       showToast('Setoran berhasil dikonfirmasi', 'success');
       await this.loadDeposits();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-deposit-confirm' });
       if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
+      if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
     } catch (err) {
       console.error('doConfirm', err);
       this.showDepositActionError(err, {
@@ -790,7 +794,9 @@ const adminDepositUi = {
       await depositService.confirmDeposit({ depositId, adminId, action: 'rejected', rejectReason: reason || null });
       showToast('Setoran ditolak', 'success');
       await this.loadDeposits();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-deposit-reject' });
       if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
+      if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
     } catch (err) {
       console.error('doReject', err);
       this.showDepositActionError(err, {
