@@ -440,16 +440,15 @@ const cashService = {
     const amount = safeNum(actualCashAmount, 'Nominal kas aktual');
     if (amount < 0) throw new Error('Nominal kas aktual tidak boleh negatif');
 
-    const { data, error } = await db.rpc('admin_manual_close_cash_session', {
+    const { data, error } = await db.rpc('admin_force_close_branch_cash_session', {
       p_admin_id: adminId,
       p_session_id: sessionId,
-      p_actual_cash_amount: amount,
-      p_reason: reason.trim(),
-      p_expected_updated_at: expectedUpdatedAt || null
+      p_closing_cash: amount,
+      p_reason: reason.trim()
     });
     if (error) {
       if (isMissingRpcError(error)) {
-        throw new Error('Fitur tutup kas manual perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
+        throw new Error('Fitur tutup kas outlet perlu migrasi terbaru. Jalankan migrasi 041 lalu coba lagi.');
       }
       throw error;
     }
@@ -457,26 +456,7 @@ const cashService = {
   },
 
   async adjustCashSessionActual({ sessionId, adminId, newCashAmount, reason, expectedUpdatedAt = null }) {
-    if (!adminId) throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
-    if (!sessionId) throw new Error('Session kas wajib dipilih');
-    if (!reason?.trim()) throw new Error('Alasan wajib diisi');
-    const amount = safeNum(newCashAmount, 'Nominal kas aktual');
-    if (amount < 0) throw new Error('Nominal kas aktual tidak boleh negatif');
-
-    const { data, error } = await db.rpc('admin_adjust_cash_session_actual', {
-      p_admin_id: adminId,
-      p_session_id: sessionId,
-      p_new_cash_amount: amount,
-      p_reason: reason.trim(),
-      p_expected_updated_at: expectedUpdatedAt || null
-    });
-    if (error) {
-      if (isMissingRpcError(error)) {
-        throw new Error('Fitur edit posisi kas perlu migrasi terbaru. Jalankan migrasi 028 lalu coba lagi.');
-      }
-      throw error;
-    }
-    return data;
+    throw new Error('Edit posisi kas per sesi sudah dinonaktifkan. Koreksi saldo dilakukan dari menu Kas Outlet.');
   },
 
   // ── Save a cash category (create or update) ───────────────────
@@ -495,114 +475,38 @@ const cashService = {
     if (error) throw error;
   },
 
-  // ── Staff Cash Balance Methods (migration 034) ────────────────
+  // ── Legacy Staff Balance Methods (disabled) ───────────────────
 
-  // Ambil saldo aktif staff + pending deposit + info sesi terbuka
+  // Legacy staff-balance methods. Kas outlet is the active source of truth.
   async getStaffBalance(branchId, staffId) {
-    if (!branchId || !staffId) throw new Error('branchId dan staffId wajib diisi');
-    const { data, error } = await db.rpc('get_staff_cash_balance', {
-      p_branch_id: branchId,
-      p_staff_id:  staffId
-    });
-    if (error) {
-      if (isMissingRpcError(error)) throw new Error('Fitur saldo aktif perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
-      throw error;
-    }
-    return data;
+    throw new Error('Saldo kas per staff sudah dinonaktifkan. Gunakan posisi Kas Outlet.');
   },
 
   // Daftar saldo aktif semua staff (untuk UI admin)
   async getAdminStaffBalances({ adminId, branchId = null, staffId = null } = {}) {
-    if (!adminId) throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
-    const { data, error } = await db.rpc('get_admin_staff_cash_balances', {
-      p_admin_id:  adminId,
-      p_branch_id: branchId || null,
-      p_staff_id:  staffId  || null
-    });
-    if (error) {
-      if (isMissingRpcError(error)) throw new Error('Fitur saldo aktif perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
-      throw error;
-    }
-    return data || [];
+    throw new Error('Saldo kas per staff sudah dinonaktifkan. Gunakan menu Kas Outlet.');
   },
 
-  // Set/koreksi saldo aktif staff (admin only) — alasan wajib
+  // Disabled: set/koreksi saldo staff.
   async adminSetStaffBalance({ adminId, branchId, staffId, newBalance, reason, version = null }) {
-    if (!adminId)  throw new Error('Session admin tidak valid. Login ulang lalu coba lagi.');
-    if (!branchId) throw new Error('branchId wajib diisi');
-    if (!staffId)  throw new Error('staffId wajib diisi');
-    if (!reason?.trim()) throw new Error('Alasan koreksi saldo wajib diisi');
-    const amount = safeNum(newBalance, 'Nominal saldo baru');
-    if (amount < 0) throw new Error('Nominal saldo tidak boleh negatif');
-    const { data, error } = await db.rpc('admin_set_staff_cash_balance', {
-      p_admin_id:    adminId,
-      p_branch_id:   branchId,
-      p_staff_id:    staffId,
-      p_new_balance: amount,
-      p_reason:      reason.trim(),
-      p_version:     version !== null ? Number(version) : null
-    });
-    if (error) {
-      if (isMissingRpcError(error)) throw new Error('Fitur saldo aktif perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
-      throw error;
-    }
-    return data;
+    throw new Error('Koreksi kas per staff sudah dinonaktifkan. Koreksi dilakukan dari menu Kas Outlet.');
   },
 
-  // Riwayat perubahan saldo aktif staff (ledger)
+  // Disabled: riwayat saldo staff.
   async getStaffCashLedger({ branchId, staffId, limit = 30 } = {}) {
-    if (!branchId || !staffId) throw new Error('branchId dan staffId wajib diisi');
-    const { data, error } = await db.rpc('get_staff_cash_ledger', {
-      p_branch_id: branchId,
-      p_staff_id:  staffId,
-      p_limit:     limit
-    });
-    if (error) {
-      if (isMissingRpcError(error)) throw new Error('Fitur ledger saldo perlu migrasi 034. Jalankan migrasi lalu coba lagi.');
-      throw error;
-    }
-    return data || [];
+    throw new Error('Ledger kas per staff sudah dinonaktifkan. Gunakan riwayat Kas Outlet.');
   },
 
   // ── Get cash positions for all active staff (admin dashboard) ─
-  // Calls the get_staff_cash_positions RPC which is a single aggregated query.
-  // Do NOT replace this with a loop of getSummary() calls — that would be N+1.
+  // Kept only so old callers fail with a clear message.
   async getStaffCashPositions({ branchId = null, status = 'all' } = {}) {
-    const { data, error } = await db.rpc('get_staff_cash_positions', {
-      p_branch_id: branchId || null,
-      p_status:    status   || 'all'
-    });
-    if (error) throw error;
-    return data || [];
+    throw new Error('Posisi kas per staff sudah dinonaktifkan. Gunakan posisi Kas Outlet.');
   },
 
   // ── Get detail breakdown for a single staff/session ──────────
   // Returns { summary, logs, deposits } using existing methods.
   async getStaffCashPositionDetail({ staffId, branchId, sessionId = null }) {
-    if (!branchId) throw new Error('branchId wajib diisi untuk detail posisi kas');
-
-    const [summary, logs, depositsResult] = await Promise.all([
-      sessionId
-        ? this.getSummary({ branchId, sessionId })
-        : Promise.resolve(null),
-      sessionId
-        ? this.getLogs({ branchId, sessionId, limit: 20 })
-        : Promise.resolve([]),
-      db.from('cash_deposits')
-        .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id, deposit_account_id, deposit_account_name_snapshot, proof_url, proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at')
-        .eq('staff_id', staffId)
-        .order('created_at', { ascending: false })
-        .limit(20)
-    ]);
-
-    const { data: depositsData, error: depErr } = depositsResult;
-    if (depErr) throw depErr;
-
-    return {
-      summary,
-      logs,
-      deposits: depositsData || []
-    };
+    throw new Error('Detail posisi kas per staff sudah dinonaktifkan. Gunakan detail Sesi Kas atau Kas Outlet.');
   },
 
   // ── Branch Cash Balance (Posisi Kas Outlet) ───────────────────

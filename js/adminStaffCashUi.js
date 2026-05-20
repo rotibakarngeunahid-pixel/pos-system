@@ -1,8 +1,8 @@
 'use strict';
 
 // Admin cash session UI.
-// Extends the existing staff cash position page with admin-only manual close,
-// actual cash input/edit, and audit log visibility.
+// Staff is only the actor recorded on each shift; the cash position itself is
+// owned by the outlet and corrected from the Kas Outlet page.
 
 const adminStaffCashUi = {
   _sessions: [],
@@ -14,10 +14,10 @@ const adminStaffCashUi = {
   _activeAction: null,
   _savingAction: false,
 
-  // Saldo aktif staff
+  // Legacy staff-balance tab state. The tab is intentionally disabled.
   _balances: [],
   _balancesLoading: false,
-  _activeTab: 'sessions',   // 'sessions' | 'balances'
+  _activeTab: 'sessions',
 
   // Balance correction modal state
   _bcTarget: null,          // { staffId, staffName, branchId, branchName, currentBalance, version }
@@ -35,8 +35,6 @@ const adminStaffCashUi = {
         this._bindRefreshBtn();
         this._bindDetailModalControls();
         this._bindTabEvents();
-        this._bindBalanceModalEvents();
-        this._bindLedgerModalEvents();
       } catch (e) {
         console.error('adminStaffCashUi.init', e);
       }
@@ -44,22 +42,15 @@ const adminStaffCashUi = {
   },
 
   async load() {
+    this._activeTab = 'sessions';
     await this._loadBranches();
     await this._loadStaff();
-    if (this._activeTab === 'balances') {
-      await this._loadBalances();
-    } else {
-      await this._loadSessions();
-    }
+    await this._loadSessions();
   },
 
   markDirty() {
     if (window.ADMIN && ADMIN.currentSection === 'staff-cash-position') {
-      if (this._activeTab === 'balances') {
-        this._loadBalances();
-      } else {
-        this._loadSessions();
-      }
+      this._loadSessions();
     }
     if (this._activeDetail?.session?.id) {
       this._refreshActiveDetail(this._activeDetail.session.id).catch(err => {
@@ -462,9 +453,8 @@ const adminStaffCashUi = {
       closeBtn.disabled = !canManualAction || status !== 'open' || this._savingAction;
     }
     if (editBtn) {
-      editBtn.style.display = canManualAction ? '' : 'none';
-      editBtn.disabled = !canManualAction || this._savingAction;
-      editBtn.innerHTML = `<i data-lucide="pencil" class="icon-sm"></i> ${session.current_cash_amount == null ? 'Input Posisi Kas Aktual' : 'Edit Posisi Kas'}`;
+      editBtn.style.display = 'none';
+      editBtn.disabled = true;
     }
   },
 
@@ -559,6 +549,10 @@ const adminStaffCashUi = {
     if (!this._activeDetail?.session?.id) return;
     if (!this._canManualAction()) {
       showToast('Hanya owner/admin yang dapat melakukan aksi ini', 'error');
+      return;
+    }
+    if (type !== 'manual_close') {
+      showToast('Koreksi posisi kas dilakukan dari menu Kas Outlet.', 'info');
       return;
     }
 
@@ -658,23 +652,15 @@ const adminStaffCashUi = {
 
     try {
       const adminId = auth.getSession()?.id || null;
-      const expectedUpdatedAt = this._activeDetail.session.updated_at || null;
       if (isClose) {
-        await cashService.manualCloseCashSession({
+        await transactionService.adminForceCloseBranchSession({
           sessionId: this._activeDetail.session.id,
           adminId,
-          actualCashAmount: amount,
-          reason,
-          expectedUpdatedAt
+          closingCash: amount,
+          reason
         });
       } else {
-        await cashService.adjustCashSessionActual({
-          sessionId: this._activeDetail.session.id,
-          adminId,
-          newCashAmount: amount,
-          reason,
-          expectedUpdatedAt
-        });
+        throw new Error('Koreksi posisi kas dilakukan dari menu Kas Outlet.');
       }
 
       showToast(isClose ? 'Kas berhasil ditutup manual' : 'Posisi kas berhasil disimpan', 'success');
@@ -733,7 +719,7 @@ const adminStaffCashUi = {
       return;
     }
 
-    // Prefill branch, staff, dan session_id dari row Posisi Kas Staff
+    // Prefill branch, staff, dan session_id dari row Sesi Kas.
     depositUi.openManualDepositModal({
       prefillBranchId: row.branch_id,
       prefillStaffId: row.staff_id,
@@ -794,7 +780,7 @@ const adminStaffCashUi = {
   },
 
   // ─────────────────────────────────────────────────────────────
-  // TAB: Saldo Aktif Staff
+  // Legacy staff-balance tab: disabled. Kas Outlet is the source of truth.
   // ─────────────────────────────────────────────────────────────
 
   _bindTabEvents() {
@@ -804,17 +790,17 @@ const adminStaffCashUi = {
   },
 
   _switchTab(tab) {
-    this._activeTab = tab || 'sessions';
+    if (tab && tab !== 'sessions') {
+      showToast('Saldo staff sudah dinonaktifkan. Gunakan menu Kas Outlet.', 'info');
+    }
+    this._activeTab = 'sessions';
     document.querySelectorAll('.scp-tab-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.tab === this._activeTab);
     });
     const sessTab = document.getElementById('scp-tab-sessions');
     const balTab  = document.getElementById('scp-tab-balances');
-    if (sessTab) sessTab.style.display = this._activeTab === 'sessions' ? '' : 'none';
-    if (balTab)  balTab.style.display  = this._activeTab === 'balances' ? '' : 'none';
-    if (this._activeTab === 'balances' && !this._balances.length) {
-      this._loadBalances();
-    }
+    if (sessTab) sessTab.style.display = '';
+    if (balTab)  balTab.style.display  = 'none';
   },
 
   async _loadBalances() {
@@ -822,12 +808,7 @@ const adminStaffCashUi = {
     this._balancesLoading = true;
     this._renderBalancesLoading();
     try {
-      const session   = auth.getSession();
-      const branchId  = Number(document.getElementById('scp-filter-branch')?.value || 0) || null;
-      this._balances  = await cashService.getAdminStaffBalances({
-        adminId:  session?.id,
-        branchId
-      });
+      this._balances = [];
       this._renderBalancesTable();
     } catch (e) {
       console.error('adminStaffCashUi._loadBalances', e);
@@ -840,7 +821,7 @@ const adminStaffCashUi = {
 
   _renderBalancesLoading() {
     const tbody = document.getElementById('scp-balances-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat saldo aktif staff...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Saldo staff sudah dinonaktifkan. Gunakan Kas Outlet.</td></tr>';
   },
 
   _renderBalancesTable() {
@@ -956,6 +937,8 @@ const adminStaffCashUi = {
 
   async _saveBalanceCorrection() {
     if (this._bcSaving || !this._bcTarget) return;
+    this._setText('bc-error', 'Saldo staff sudah dinonaktifkan. Gunakan menu Kas Outlet.');
+    return;
     const digits  = String(document.getElementById('bc-new-balance')?.value || '').replace(/[^\d]/g, '');
     const newBal  = digits ? Number(digits) : NaN;
     const reason  = document.getElementById('bc-reason')?.value?.trim() || '';
@@ -989,19 +972,7 @@ const adminStaffCashUi = {
     if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="btn-spinner"></span> Menyimpan...'; }
 
     try {
-      const adminId = auth.getSession()?.id;
-      await cashService.adminSetStaffBalance({
-        adminId,
-        branchId:   this._bcTarget.branchId,
-        staffId:    this._bcTarget.staffId,
-        newBalance: newBal,
-        reason,
-        version:    this._bcTarget.version || null
-      });
-      showToast(`Saldo ${this._bcTarget.staffName} berhasil dikoreksi ke ${fRp(newBal)}`, 'success');
-      closeModal('modal-balance-correction');
-      await this._loadBalances();
-      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-balance-correction' });
+      throw new Error('Saldo staff sudah dinonaktifkan. Gunakan menu Kas Outlet.');
     } catch (e) {
       console.error('adminStaffCashUi._saveBalanceCorrection', e);
       this._setText('bc-error', e.message || 'Gagal menyimpan koreksi saldo');
@@ -1027,6 +998,8 @@ const adminStaffCashUi = {
   },
 
   async _openStaffLedger(row) {
+    showToast('Ledger saldo staff sudah dinonaktifkan. Gunakan riwayat Kas Outlet.', 'info');
+    return;
     this._slTarget = {
       staffId:   row.staff_id,
       staffName: row.staff_name || '-',
@@ -1037,12 +1010,7 @@ const adminStaffCashUi = {
     if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat riwayat...</td></tr>';
     openModal('modal-staff-ledger');
     try {
-      this._slData = await cashService.getStaffCashLedger({
-        branchId: this._slTarget.branchId,
-        staffId:  this._slTarget.staffId,
-        limit:    50
-      });
-      this._renderLedgerTable();
+      throw new Error('Ledger saldo staff sudah dinonaktifkan. Gunakan riwayat Kas Outlet.');
     } catch (e) {
       console.error('adminStaffCashUi._openStaffLedger', e);
       if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-td text-danger">${escHtml(e.message || 'Gagal memuat riwayat')}</td></tr>`;

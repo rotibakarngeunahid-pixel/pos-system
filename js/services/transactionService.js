@@ -76,67 +76,13 @@ const transactionService = {
 
   formatOpenShiftBlocker(session, currentStaffName = null) {
     const staffName = session?.staff_name || 'Staff lain';
-    const currentName = currentStaffName || 'akun ini';
-    return `${staffName} belum tutup kas. Minta ${staffName} tutup kas dulu sebelum ${currentName} membuka kas.`;
+    return `Shift sebelumnya atas nama ${staffName} belum menutup kas. Silakan tutup kas terlebih dahulu.`;
   },
 
   async openShift({ branchId, staffId, openingCash }) {
-    // Basic param checks
-    if (!branchId) throw new Error('branchId wajib diisi');
-    if (!staffId) throw new Error('staffId wajib diisi — silakan login ulang');
-
-    // Verify branch exists
-    try {
-      const { data: branch } = await db.from('branches').select('id').eq('id', branchId).maybeSingle();
-      if (!branch) throw new Error('Cabang tidak ditemukan di database');
-    } catch (e) {
-      // surface DB errors
-      throw new Error('Gagal memverifikasi cabang: ' + (e.message || e));
-    }
-
-    // Verify staff/user exists (prevent FK violation)
-    let staff = null;
-    try {
-      const { data: user } = await db.from('users').select('id, name').eq('id', staffId).maybeSingle();
-      staff = user || null;
-      if (!user) throw new Error('Staff tidak ditemukan di database — silakan login ulang atau hubungi admin');
-    } catch (e) {
-      throw new Error('Gagal memverifikasi staff: ' + (e.message || e));
-    }
-
-    const activeShift = await this.getOpenShiftForBranch({ branchId });
-    if (activeShift) {
-      if (Number(activeShift.staff_id) === Number(staffId)) {
-        throw new Error('Shift sudah dibuka. Tutup shift sebelumnya dulu.');
-      }
-      throw new Error(this.formatOpenShiftBlocker(activeShift, staff?.name || null));
-    }
-
-    // Insert session with guarded error handling for FK violations
-    try {
-      const { data, error } = await db.from('cashier_sessions').insert({
-        branch_id:    branchId,
-        staff_id:     staffId,
-        opening_cash: openingCash || 0,
-        status:       'open'
-      }).select().single();
-      if (error) throw error;
-      return data;
-    } catch (err) {
-      // Postgres foreign-key violation code is 23503 — provide clearer message
-      const msg = (err && err.message) ? String(err.message) : '';
-      if (msg.toLowerCase().includes('violates foreign key') || (err && err.code === '23503')) {
-        throw new Error('Gagal membuka shift: referensi staff atau cabang tidak valid. Silakan periksa data akun dan cabang.');
-      }
-      if ((err && err.code === '23505') || msg.toLowerCase().includes('duplicate key')) {
-        const activeShift = await this.getOpenShiftForBranch({ branchId });
-        if (activeShift && Number(activeShift.staff_id) !== Number(staffId)) {
-          throw new Error(this.formatOpenShiftBlocker(activeShift, staff?.name || null));
-        }
-        throw new Error('Masih ada kas yang belum ditutup. Tutup kas aktif dulu sebelum membuka kas baru.');
-      }
-      throw err;
-    }
+    // Opening cash is owned by the outlet balance, not by a staff input.
+    // Keep this wrapper for older callers, but force the branch-based RPC.
+    return this.openShiftFromBalance({ branchId, staffId });
   },
 
   // ── Ambil posisi kas outlet saat ini (branch-based) ──────────
@@ -164,7 +110,7 @@ const transactionService = {
 
     if (error) {
       if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
-        throw new Error('Fitur kas awal otomatis perlu migrasi terbaru. Jalankan migrasi 038 lalu coba lagi.');
+        throw new Error('Fitur kas awal otomatis perlu migrasi terbaru. Jalankan migrasi 041 lalu coba lagi.');
       }
       throw new Error(error.message);
     }
@@ -186,8 +132,7 @@ const transactionService = {
 
     if (error) {
       if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
-        console.warn('closeShiftApplyBalance: RPC branch belum tersedia, fallback ke closeShift lama');
-        return this.closeShift({ sessionId, closingCash });
+        throw new Error('Fitur tutup kas outlet perlu migrasi terbaru. Jalankan migrasi 041 lalu coba lagi.');
       }
       throw new Error(error.message);
     }

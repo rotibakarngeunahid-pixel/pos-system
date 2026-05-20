@@ -25,7 +25,7 @@ const POS = {
   _pendingProduct:   null,
   _openShiftDeposit: { sessions: [], accounts: [], session: null, depositableCash: 0, file: null },
   _openShiftBlocker: null,
-  _staffBalance: { currentBalance: 0, pendingDeposit: 0, version: 0, hasBalanceRow: false, loaded: false, error: false,
+  _branchCashPosition: { currentBalance: 0, pendingDeposit: 0, version: 0, hasBalanceRow: false, loaded: false, error: false,
     source: null, lastClosedBy: null, lastClosedAt: null, openSession: null },
   _ingredientLogId:     null,
   _ingredientLogName:   null,
@@ -107,7 +107,7 @@ const POS = {
         case 'start-new-transaction': POS.startNewTransaction(); break;
         case 'close-receipt': POS.closeReceipt(); break;
         case 'open-shift-modal': POS.openShiftModal(); break;
-        case 'reload-staff-balance': POS.loadStaffBalance(); break;
+        case 'reload-branch-cash-position': POS.loadBranchCashPosition(); break;
         case 'void-cash-log': POS.voidCashLogFromPOS(Number(btn.dataset.id)); break;
         case 'switch-cash-subtab': POS.switchCashSubTab(btn.dataset.type); break;
         case 'submit-cash-entry': POS.submitCashEntry(); break;
@@ -169,7 +169,7 @@ const POS = {
 
     window.addEventListener('rbn:modal:opened', e => {
       if (e.detail?.id === 'modal-shift') {
-        POS.loadStaffBalance();
+        POS.loadBranchCashPosition();
         if (!POS._openShiftBlocker) POS.loadOpenShiftDeposit();
       }
     });
@@ -323,8 +323,7 @@ const POS = {
       return transactionService.formatOpenShiftBlocker(session, this.user?.name || null);
     }
     const staffName = session?.staff_name || 'Staff lain';
-    const currentName = this.user?.name || 'akun ini';
-    return `${staffName} belum tutup kas. Minta ${staffName} tutup kas dulu sebelum ${currentName} membuka kas.`;
+    return `Shift sebelumnya atas nama ${staffName} belum menutup kas. Silakan tutup kas terlebih dahulu.`;
   },
 
   setOpenShiftBlocker(session = null) {
@@ -383,9 +382,9 @@ const POS = {
   },
 
   // ── Branch Cash Position (Posisi Kas Outlet) ─────────────────
-  async loadStaffBalance() {
+  async loadBranchCashPosition() {
     if (!this.branch || !this.user) return;
-    const b = this._staffBalance;
+    const b = this._branchCashPosition;
     b.loaded = false; b.error = false;
     this._renderShiftBalance('loading');
     try {
@@ -404,7 +403,7 @@ const POS = {
       b.loaded         = true;
       this._renderShiftBalance('display');
     } catch (e) {
-      console.error('loadStaffBalance (branch)', e);
+      console.error('loadBranchCashPosition', e);
       b.error = true;
       this._renderShiftBalance('error');
     }
@@ -418,10 +417,10 @@ const POS = {
     if (state === 'loading') { show('shift-balance-loading'); return; }
     if (state === 'error')   { show('shift-balance-error');   return; }
 
-    const b = this._staffBalance;
+    const b = this._branchCashPosition;
 
     // Jika ada shift aktif di outlet (dari staff lain), sinkron dgn blocker
-    if (b.openSession && b.openSession.staff_id !== this.user?.id) {
+    if (b.openSession && Number(b.openSession.staff_id) !== Number(this.user?.id)) {
       this.setOpenShiftBlocker(b.openSession);
       return;
     }
@@ -483,7 +482,7 @@ const POS = {
 
   updateShiftVariance(val) {
     const physical  = parseFloat(val) || 0;
-    const system    = this._staffBalance.currentBalance;
+    const system    = this._branchCashPosition.currentBalance;
     const diff      = physical - system;
     const diffEl    = document.getElementById('shift-variance-diff');
     if (!diffEl) return;
@@ -523,10 +522,10 @@ const POS = {
       const blocker = await this.refreshOpenShiftBlocker();
       if (blocker) throw new Error(this.getOpenShiftBlockerMessage(blocker));
 
-      if (!this._staffBalance.loaded) {
-        await this.loadStaffBalance();
+      if (!this._branchCashPosition.loaded) {
+        await this.loadBranchCashPosition();
       }
-      if (this._staffBalance.error) {
+      if (this._branchCashPosition.error) {
         throw new Error('Gagal memuat posisi kas outlet. Coba lagi sebelum membuka shift.');
       }
 
@@ -558,7 +557,7 @@ const POS = {
         btn.textContent = 'Membuka...';
       }
 
-      // Buka shift dari saldo aktif (RPC baru)
+      // Buka shift dari posisi kas outlet terkini.
       this.session = await transactionService.openShiftFromBalance({
         branchId:       this.branch.id,
         staffId:        this.user.id
@@ -817,8 +816,8 @@ const POS = {
         toastType
       );
       // Update cached balance state
-      this._staffBalance.currentBalance = balanceAfter;
-      this._staffBalance.hasBalanceRow  = true;
+      this._branchCashPosition.currentBalance = balanceAfter;
+      this._branchCashPosition.hasBalanceRow  = true;
 
       if (window.depositUi) {
         depositUi.refreshWhenReady({ preferSessionId: result.id });

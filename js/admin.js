@@ -378,7 +378,7 @@ const ADMIN = {
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
-      'staff-cash-position': 'Kas Aktif & Posisi Staff',
+      'staff-cash-position': 'Sesi Kas Outlet',
       'branch-cash': 'Kas Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
       'finance-integration': 'Integrasi Sistem Keuangan',

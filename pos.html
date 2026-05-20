@@ -711,11 +711,11 @@
           Shift harus dibuka sebelum mulai berjualan.
         </div>
 
-        <!-- Saldo aktif otomatis — menggantikan input kas awal manual -->
+        <!-- Posisi kas outlet otomatis — menggantikan input kas awal manual -->
         <div id="shift-balance-wrap">
           <!-- Loading state -->
           <div id="shift-balance-loading" style="text-align:center;padding:14px 0;color:var(--text-muted);font-size:13px">
-            <span style="opacity:.6">Memuat saldo aktif…</span>
+            <span style="opacity:.6">Memuat posisi kas outlet…</span>
           </div>
           <!-- Display saldo -->
           <div id="shift-balance-display" style="display:none">
@@ -742,9 +742,9 @@
           <div id="shift-balance-error" style="display:none;padding:8px 0">
             <div class="alert-warning" style="padding:8px 10px;font-size:12px">
               <i data-lucide="alert-circle" class="icon-sm"></i>
-              Gagal memuat saldo aktif.
+              Gagal memuat posisi kas outlet.
               <button type="button" class="btn-link" style="font-size:12px;margin-left:4px"
-                data-action="reload-staff-balance">Coba lagi</button>
+                data-action="reload-branch-cash-position">Coba lagi</button>
             </div>
           </div>
         </div>
@@ -1088,12 +1088,12 @@
   <script src="js/utils/validator.js"></script>
   <script src="js/ui.js?v=20260516-crud-friendly-1"></script>
   <script src="js/services/inventoryService.js"></script>
-  <script src="js/services/cashService.js?v=20260520-saldo-aktif-1"></script>
-  <script src="js/services/transactionService.js?v=20260520-locked-opening-cash-1"></script>
+  <script src="js/services/cashService.js?v=20260520-branch-cash-outlet-1"></script>
+  <script src="js/services/transactionService.js?v=20260520-branch-cash-outlet-1"></script>
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260517-manual-deposit-3"></script>
   <script src="js/depositUi.js?v=20260517-manual-deposit-2"></script>
-  <script src="js/pos.js?v=20260520-locked-opening-cash-1"></script>
+  <script src="js/pos.js?v=20260520-branch-cash-outlet-1"></script>
 
   <!-- ══════════════════════════════════════════
        MODAL: Pilih Topping
