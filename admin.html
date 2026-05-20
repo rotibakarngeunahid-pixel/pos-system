@@ -1404,29 +1404,22 @@
               <div style="display:flex;gap:12px;align-items:flex-start;">
                 <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">1</div>
                 <div>
-                  <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Pilih Rentang Tanggal</div>
-                  <div class="text-muted text-xs">Tentukan periode data kas keluar yang ingin disiapkan untuk sistem keuangan.</div>
-                </div>
-              </div>
-              <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">2</div>
-                <div>
                   <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Pilih Kunci Akses (API Key)</div>
                   <div class="text-muted text-xs">Pilih kunci akses yang sudah dibuat di menu <strong>API Keys</strong>. Kunci ini menjaga keamanan data.</div>
                 </div>
               </div>
               <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">3</div>
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">2</div>
                 <div>
                   <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Salin Link Integrasi</div>
-                  <div class="text-muted text-xs">Klik tombol <strong>Salin Link</strong> untuk menyalin link yang sudah berisi tanggal dan kunci akses.</div>
+                  <div class="text-muted text-xs">Klik tombol <strong>Salin Link</strong> untuk menyalin link yang berisi kunci akses.</div>
                 </div>
               </div>
               <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">4</div>
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">3</div>
                 <div>
                   <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Masukkan ke Sistem Keuangan</div>
-                  <div class="text-muted text-xs">Tempelkan link tersebut ke pengaturan integrasi di sistem keuangan Anda. Data akan ditarik otomatis.</div>
+                  <div class="text-muted text-xs">Tempelkan link ke sistem keuangan. Sistem keuangan yang menentukan tanggal saat mengambil data.</div>
                 </div>
               </div>
             </div>
@@ -1448,22 +1441,8 @@
               lalu kembali ke halaman ini.
             </div>
 
-            <!-- Filter baris 1: tanggal -->
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;" class="fi-filter-grid">
-              <div class="form-group" style="margin:0">
-                <label class="form-label" for="fi-date-from">
-                  <i data-lucide="calendar" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                  Tanggal Mulai <span style="color:var(--danger)">*</span>
-                </label>
-                <input type="date" class="form-control" id="fi-date-from" />
-              </div>
-              <div class="form-group" style="margin:0">
-                <label class="form-label" for="fi-date-to">
-                  <i data-lucide="calendar" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                  Tanggal Akhir <span style="color:var(--danger)">*</span>
-                </label>
-                <input type="date" class="form-control" id="fi-date-to" />
-              </div>
+            <!-- Filter: cabang + API key -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;" class="fi-filter-grid">
               <div class="form-group" style="margin:0">
                 <label class="form-label" for="fi-branch">
                   <i data-lucide="store" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
@@ -1473,22 +1452,16 @@
                   <option value="">Semua Cabang</option>
                 </select>
               </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label" for="fi-api-key-select">
+                  <i data-lucide="key" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
+                  Kunci Akses (API Key) <span style="color:var(--danger)">*</span>
+                </label>
+                <select class="form-control" id="fi-api-key-select">
+                  <option value="">— Pilih API Key —</option>
+                </select>
+              </div>
             </div>
-
-            <!-- Filter baris 2: API key -->
-            <div class="form-group" style="margin-bottom:14px">
-              <label class="form-label" for="fi-api-key-select">
-                <i data-lucide="key" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                Kunci Akses (API Key) <span style="color:var(--danger)">*</span>
-                <span class="text-muted" style="font-weight:400;font-size:11px;margin-left:6px;">— pilih kunci yang ingin digunakan</span>
-              </label>
-              <select class="form-control" id="fi-api-key-select" style="max-width:400px">
-                <option value="">— Pilih API Key —</option>
-              </select>
-            </div>
-
-            <!-- Pesan error tanggal -->
-            <div id="fi-date-error" class="form-error mb-3" style="display:none"></div>
 
             <!-- Kotak link integrasi -->
             <div class="form-group" style="margin-bottom:12px">
@@ -1509,11 +1482,11 @@
                   min-height:46px;
                   color:var(--text-muted);
                   user-select:all;
-                ">← Isi semua field di atas untuk melihat link</div>
+                ">← Pilih API Key untuk melihat link</div>
               </div>
               <div class="text-xs text-muted mt-2" style="line-height:1.6">
                 <i data-lucide="info" style="width:12px;height:12px;vertical-align:middle;margin-right:3px;"></i>
-                Link ini berisi semua informasi yang dibutuhkan. Sistem keuangan Anda cukup membuka link ini untuk mendapatkan data dalam format JSON.
+                Link ini berisi kunci akses Anda. Saat menggunakan link, sistem keuangan menambahkan tanggal yang diinginkan sebagai parameter <code>p_date_from</code> dan <code>p_date_to</code>.
               </div>
             </div>
 
@@ -1522,17 +1495,44 @@
               <button class="btn btn-primary" id="fi-copy-link-btn" disabled>
                 <i data-lucide="copy" class="icon-sm"></i> Salin Link Integrasi
               </button>
-              <button class="btn btn-outline" id="fi-preview-btn" disabled>
-                <i data-lucide="eye" class="icon-sm"></i> Lihat Data
-              </button>
             </div>
           </div>
         </div>
 
         <!-- ── Preview data ───────────────────────────────── -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <span class="card-title"><i data-lucide="eye" class="icon-sm"></i> Lihat Data (Preview)</span>
+          </div>
+          <div class="p-4 pb-0">
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:flex-end;margin-bottom:14px;" class="fi-filter-grid">
+              <div class="form-group" style="margin:0">
+                <label class="form-label" for="fi-prev-date-from">
+                  <i data-lucide="calendar" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
+                  Tanggal Mulai
+                </label>
+                <input type="date" class="form-control" id="fi-prev-date-from" />
+              </div>
+              <div class="form-group" style="margin:0">
+                <label class="form-label" for="fi-prev-date-to">
+                  <i data-lucide="calendar" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
+                  Tanggal Akhir
+                </label>
+                <input type="date" class="form-control" id="fi-prev-date-to" />
+              </div>
+              <div>
+                <button class="btn btn-outline" id="fi-preview-btn" style="white-space:nowrap">
+                  <i data-lucide="eye" class="icon-sm"></i> Lihat Data
+                </button>
+              </div>
+            </div>
+            <div id="fi-date-error" class="form-error mb-3" style="display:none"></div>
+          </div>
+        </div>
+
         <div id="fi-preview-section" class="card mb-4" style="display:none">
           <div class="card-header" style="flex-wrap:wrap;gap:10px;align-items:center;">
-            <span class="card-title"><i data-lucide="table" class="icon-sm"></i> Preview Data Kas Keluar</span>
+            <span class="card-title"><i data-lucide="table" class="icon-sm"></i> Hasil Preview Kas Keluar</span>
             <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-left:auto;">
               <div style="font-size:13px;">
                 Total: <strong id="fi-preview-total" style="color:var(--danger)">—</strong>
@@ -2780,7 +2780,7 @@
   <script src="js/adminDepositUi.js?v=20260520-branch-cash-deposit-1"></script>
   <script src="js/adminStaffCashUi.js?v=20260520-saldo-aktif-1"></script>
   <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-7"></script>
-  <script src="js/adminFinanceIntegrationUi.js?v=20260520-finance-integration-1"></script>
+  <script src="js/adminFinanceIntegrationUi.js?v=20260520-finance-integration-2"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260518-admin-cash-ui-2"></script>

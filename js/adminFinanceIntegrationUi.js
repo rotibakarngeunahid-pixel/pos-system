@@ -35,8 +35,6 @@ const adminFinanceIntegrationUi = {
       if (el) el.addEventListener(ev, fn);
     };
 
-    on('fi-date-from',       'change', () => this._onFilterChange());
-    on('fi-date-to',         'change', () => this._onFilterChange());
     on('fi-branch',          'change', () => this._onFilterChange());
     on('fi-api-key-select',  'change', () => this._onFilterChange());
     on('fi-copy-link-btn',   'click',  () => this._copyLink());
@@ -54,8 +52,8 @@ const adminFinanceIntegrationUi = {
 
   _setDefaults() {
     const today = new Date().toISOString().slice(0, 10);
-    const fromEl = document.getElementById('fi-date-from');
-    const toEl   = document.getElementById('fi-date-to');
+    const fromEl = document.getElementById('fi-prev-date-from');
+    const toEl   = document.getElementById('fi-prev-date-to');
     if (fromEl && !fromEl.value) fromEl.value = today;
     if (toEl   && !toEl.value)   toEl.value   = today;
   },
@@ -104,30 +102,20 @@ const adminFinanceIntegrationUi = {
 
   // ── Saat filter berubah ───────────────────────────────────────
   _onFilterChange() {
-    const err = this._validateDates();
     const linkBox = document.getElementById('fi-link-box');
     const copyBtn = document.getElementById('fi-copy-link-btn');
-    const prevBtn = document.getElementById('fi-preview-btn');
 
-    if (err) {
-      this._showError(err);
-      if (linkBox) linkBox.textContent = '';
-      if (copyBtn) copyBtn.disabled = true;
-      if (prevBtn) prevBtn.disabled = true;
-      return;
-    }
-    this._hideError();
     this._buildLink();
 
     const hasKey = !!document.getElementById('fi-api-key-select')?.value;
     if (copyBtn) copyBtn.disabled = !hasKey;
-    if (prevBtn) prevBtn.disabled = !hasKey;
+    if (!hasKey && linkBox) linkBox.textContent = '← Pilih API Key untuk melihat link';
   },
 
-  // ── Validasi tanggal ─────────────────────────────────────────
+  // ── Validasi tanggal preview ─────────────────────────────────
   _validateDates() {
-    const from = document.getElementById('fi-date-from')?.value;
-    const to   = document.getElementById('fi-date-to')?.value;
+    const from = document.getElementById('fi-prev-date-from')?.value;
+    const to   = document.getElementById('fi-prev-date-to')?.value;
     if (!from || !to) return null;
     if (from > to) return 'Tanggal mulai tidak boleh lebih besar dari tanggal akhir.';
     const daysDiff = (new Date(to) - new Date(from)) / (1000 * 60 * 60 * 24);
@@ -146,16 +134,14 @@ const adminFinanceIntegrationUi = {
 
   // ── Bangun link integrasi ─────────────────────────────────────
   _buildLink() {
-    const from     = document.getElementById('fi-date-from')?.value || '';
-    const to       = document.getElementById('fi-date-to')?.value   || '';
     const apiKey   = document.getElementById('fi-api-key-select')?.value || '';
     const branchId = document.getElementById('fi-branch')?.value || '';
 
-    const linkBox  = document.getElementById('fi-link-box');
-    const copyBtn  = document.getElementById('fi-copy-link-btn');
+    const linkBox = document.getElementById('fi-link-box');
+    const copyBtn = document.getElementById('fi-copy-link-btn');
 
     if (!apiKey) {
-      if (linkBox) linkBox.textContent = '← Pilih API Key terlebih dahulu';
+      if (linkBox) linkBox.textContent = '← Pilih API Key untuk melihat link';
       if (copyBtn) copyBtn.disabled = true;
       return;
     }
@@ -164,10 +150,8 @@ const adminFinanceIntegrationUi = {
     const supaKey = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') || '';
 
     const params = new URLSearchParams({
-      apikey:      supaKey,
-      p_api_key:   apiKey,
-      p_date_from: from,
-      p_date_to:   to,
+      apikey:    supaKey,
+      p_api_key: apiKey,
     });
     if (branchId) params.set('p_branch_id', branchId);
 
@@ -201,15 +185,16 @@ const adminFinanceIntegrationUi = {
 
   // ── Preview data ─────────────────────────────────────────────
   async _loadPreview() {
-    const from     = document.getElementById('fi-date-from')?.value;
-    const to       = document.getElementById('fi-date-to')?.value;
+    const from     = document.getElementById('fi-prev-date-from')?.value;
+    const to       = document.getElementById('fi-prev-date-to')?.value;
     const apiKey   = document.getElementById('fi-api-key-select')?.value;
     const branchId = document.getElementById('fi-branch')?.value;
 
-    if (!apiKey) { showToast('Pilih API Key terlebih dahulu', 'warning'); return; }
+    if (!apiKey) { showToast('Pilih API Key terlebih dahulu di bagian Pengaturan Link', 'warning'); return; }
 
     const err = this._validateDates();
-    if (err) { showToast(err, 'error'); return; }
+    if (err) { this._showError(err); showToast(err, 'error'); return; }
+    this._hideError();
 
     const previewSection = document.getElementById('fi-preview-section');
     const previewBody    = document.getElementById('fi-preview-body');
@@ -302,8 +287,8 @@ const adminFinanceIntegrationUi = {
     }
 
     const rows = this._previewData.data;
-    const from = document.getElementById('fi-date-from')?.value || 'semua';
-    const to   = document.getElementById('fi-date-to')?.value   || 'semua';
+    const from = document.getElementById('fi-prev-date-from')?.value || 'semua';
+    const to   = document.getElementById('fi-prev-date-to')?.value   || 'semua';
 
     const headers = ['ID', 'Tanggal', 'Waktu', 'Cabang', 'Nama Pengeluaran', 'Kategori', 'Nominal', 'Keterangan', 'Dicatat Oleh'];
     const csvRows = [headers.join(',')];
