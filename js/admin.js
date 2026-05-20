@@ -331,6 +331,10 @@ const ADMIN = {
     setSelect('po-branch-id',          opts);
     setSelect('inv-log-branch-filter', `<option value="">Semua Cabang</option>${opts}`);
     setSelect('branch-pricing-filter', `<option value="">— Pilih Cabang —</option>${opts}`);
+    // Finance integration portal branch filter
+    if (window.adminFinanceIntegrationUi) {
+      adminFinanceIntegrationUi.populateBranchSelect(this.branches);
+    }
   },
 
   populateProductSelects() {
@@ -372,7 +376,8 @@ const ADMIN = {
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
       'staff-cash-position': 'Kas Aktif & Posisi Staff',
       'branch-cash': 'Kas Outlet',
-      'api-keys': 'API Keys',           'investor-access': 'Investor Access'
+      'api-keys': 'API Keys',           'investor-access': 'Investor Access',
+      'finance-integration': 'Integrasi Sistem Keuangan'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
     this.currentSection = section;
@@ -401,6 +406,7 @@ const ADMIN = {
       case 'investor-access':       this.loadInvestorAccess();    break;
       case 'staff-cash-position':   this.loadStaffCashPosition(); break;
       case 'branch-cash':           this.loadBranchCash();        break;
+      case 'finance-integration':   this.loadFinanceIntegration(); break;
     }
   },
 
@@ -3107,6 +3113,14 @@ const ADMIN = {
   loadBranchCash() {
     if (window.adminBranchCashUi) {
       adminBranchCashUi.load();
+    }
+  },
+
+  // ── Finance Integration (Portal Integrasi Kas Keluar) ─────────
+  loadFinanceIntegration() {
+    if (window.adminFinanceIntegrationUi) {
+      adminFinanceIntegrationUi.populateBranchSelect(this.branches);
+      adminFinanceIntegrationUi.load();
     }
   },
 

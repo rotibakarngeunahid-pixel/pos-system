@@ -151,21 +151,20 @@ const transactionService = {
   },
 
   // ── Buka shift dari posisi kas outlet (branch-based RPC) ─────
-  async openShiftFromBalance({ branchId, staffId, physicalCash = null, varianceReason = null }) {
+  async openShiftFromBalance({ branchId, staffId }) {
     if (!branchId) throw new Error('branchId wajib diisi');
     if (!staffId)  throw new Error('staffId wajib diisi — silakan login ulang');
 
     const { data, error } = await db.rpc('open_cash_session_from_branch_balance', {
       p_branch_id:       branchId,
       p_staff_id:        staffId,
-      p_physical_cash:   physicalCash !== null ? physicalCash : null,
-      p_variance_reason: varianceReason || null
+      p_physical_cash:   null,
+      p_variance_reason: null
     });
 
     if (error) {
       if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
-        console.warn('openShiftFromBalance: RPC branch belum tersedia, fallback ke openShift lama');
-        return this.openShift({ branchId, staffId, openingCash: 0 });
+        throw new Error('Fitur kas awal otomatis perlu migrasi terbaru. Jalankan migrasi 038 lalu coba lagi.');
       }
       throw new Error(error.message);
     }

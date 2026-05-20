@@ -719,31 +719,9 @@
                 <span id="shift-balance-pending-text"></span>
               </div>
             </div>
-            <!-- Toggle jika kas fisik tidak sesuai -->
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:2px">
-              <input type="checkbox" id="shift-variance-toggle" style="width:16px;height:16px" />
-              <span style="font-size:13px;color:var(--text-muted)">Kas fisik berbeda dari saldo di atas</span>
-            </label>
-            <!-- Form selisih (hidden by default) -->
-            <div id="shift-variance-group" style="display:none;margin-top:10px;padding:12px;background:var(--bg-alt);border-radius:var(--r-md);border:1px solid var(--border)">
-              <div class="alert-info" style="padding:7px 10px;font-size:12px;margin-bottom:10px">
-                <i data-lucide="info" class="icon-sm"></i>
-                Kas awal sistem tetap dipakai. Selisih akan dicatat sebagai laporan ke admin.
-              </div>
-              <div class="form-group" style="margin-bottom:8px">
-                <label class="form-label" style="font-size:12px">Kas Fisik yang Dihitung (Rp) *</label>
-                <div class="input-prefix-wrap">
-                  <span class="input-prefix">Rp</span>
-                  <input type="number" class="form-control" id="shift-physical-cash" placeholder="0" min="0"
-                    data-action-input="update-shift-variance" />
-                </div>
-                <div id="shift-variance-diff" style="font-size:11px;margin-top:4px;color:var(--text-muted)"></div>
-              </div>
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label" style="font-size:12px">Alasan Selisih *</label>
-                <input type="text" class="form-control" id="shift-variance-reason"
-                  placeholder="Contoh: Ada kembalian lebih dari shift sebelumnya" />
-              </div>
+            <div class="alert-info" style="padding:7px 10px;font-size:12px;margin-bottom:2px">
+              <i data-lucide="lock" class="icon-sm"></i>
+              Kas awal dikunci dari posisi kas outlet terkini. Jika nominal perlu dikoreksi, minta admin memakai menu Kas Outlet.
             </div>
           </div>
           <!-- Error state -->
@@ -1101,11 +1079,11 @@
   <script src="js/ui.js?v=20260516-crud-friendly-1"></script>
   <script src="js/services/inventoryService.js"></script>
   <script src="js/services/cashService.js?v=20260520-saldo-aktif-1"></script>
-  <script src="js/services/transactionService.js?v=20260520-saldo-aktif-1"></script>
+  <script src="js/services/transactionService.js?v=20260520-locked-opening-cash-1"></script>
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260517-manual-deposit-3"></script>
   <script src="js/depositUi.js?v=20260517-manual-deposit-2"></script>
-  <script src="js/pos.js?v=20260520-saldo-aktif-1"></script>
+  <script src="js/pos.js?v=20260520-locked-opening-cash-1"></script>
 
   <!-- ══════════════════════════════════════════
        MODAL: Pilih Topping

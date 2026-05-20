@@ -149,7 +149,6 @@ const POS = {
       if (action === 'apply-discount-preview') POS.applyDiscountPreview();
       else if (action === 'calc-change') POS.calcChange();
       else if (action === 'update-shift-diff') POS.updateShiftDiff(inputNode.value);
-      else if (action === 'update-shift-variance') POS.updateShiftVariance(inputNode.value);
     });
 
     // Handle Android back button / browser popstate
@@ -169,7 +168,6 @@ const POS = {
     document.addEventListener('change', e => {
       if (e.target.id === 'shift-open-dep-account') POS.onOpenShiftDepositAccountChange();
       if (e.target.id === 'shift-open-dep-proof') POS._openShiftDeposit.file = e.target.files?.[0] || null;
-      if (e.target.id === 'shift-variance-toggle') POS.onVarianceToggle(e.target.checked);
     });
 
     this.user = auth.requireRole('staff');
@@ -428,10 +426,10 @@ const POS = {
     const lastByEl  = g('shift-balance-last-closed-by');
     const pendWrap  = g('shift-balance-pending-warn');
     const pendText  = g('shift-balance-pending-text');
-    const varToggle = g('shift-variance-toggle');
-    const varGroup  = g('shift-variance-group');
+    const openingInput = g('shift-opening-cash');
 
     if (amountEl) amountEl.textContent = formatRupiah(b.currentBalance);
+    if (openingInput) openingInput.value = String(b.currentBalance || 0);
 
     const sourceLabels = {
       'branch_balance':          'Posisi kas terakhir outlet',
@@ -459,14 +457,6 @@ const POS = {
       }
     }
 
-    if (varToggle) varToggle.checked = false;
-    if (varGroup)  varGroup.style.display = 'none';
-    const physInput = g('shift-physical-cash');
-    const varReason = g('shift-variance-reason');
-    const varDiff   = g('shift-variance-diff');
-    if (physInput) physInput.value = '';
-    if (varReason) varReason.value = '';
-    if (varDiff)   varDiff.textContent = '';
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
 
@@ -525,13 +515,11 @@ const POS = {
       const blocker = await this.refreshOpenShiftBlocker();
       if (blocker) throw new Error(this.getOpenShiftBlockerMessage(blocker));
 
-      // Ambil data variance jika aktif
-      const isVariance    = document.getElementById('shift-variance-toggle')?.checked || false;
-      const physicalCash  = isVariance ? (parseFloat(document.getElementById('shift-physical-cash')?.value) || null) : null;
-      const varianceReason = isVariance ? (document.getElementById('shift-variance-reason')?.value?.trim() || '') : null;
-      if (isVariance && physicalCash === null) throw new Error('Masukkan jumlah kas fisik yang dihitung');
-      if (isVariance && physicalCash !== this._staffBalance.currentBalance && !varianceReason) {
-        throw new Error('Alasan selisih kas wajib diisi');
+      if (!this._staffBalance.loaded) {
+        await this.loadStaffBalance();
+      }
+      if (this._staffBalance.error) {
+        throw new Error('Gagal memuat posisi kas outlet. Coba lagi sebelum membuka shift.');
       }
 
       // Proses setoran opsional dari shift sebelumnya
@@ -565,9 +553,7 @@ const POS = {
       // Buka shift dari saldo aktif (RPC baru)
       this.session = await transactionService.openShiftFromBalance({
         branchId:       this.branch.id,
-        staffId:        this.user.id,
-        physicalCash:   physicalCash,
-        varianceReason: varianceReason
+        staffId:        this.user.id
       });
 
       closeModal('modal-shift');
