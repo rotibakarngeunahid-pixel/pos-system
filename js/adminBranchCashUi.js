@@ -18,13 +18,30 @@ const adminBranchCashUi = {
   // Ledger modal
   _ledgerTarget: null, // { branchId, branchName }
   _ledgerData:   [],
+  _bound:        false,
+  _eventsBound:  false,
 
   // ── Init ─────────────────────────────────────────────────────
   init() {
-    document.addEventListener('DOMContentLoaded', () => this._bindEvents());
+    const boot = () => {
+      try {
+        this._bindEvents();
+      } catch (e) {
+        console.error('adminBranchCashUi.init', e);
+      }
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot, { once: true });
+    } else {
+      boot();
+    }
   },
 
   _bindEvents() {
+    if (this._bound) return;
+    this._bound = true;
+
     const on = (id, ev, fn) => {
       const el = document.getElementById(id);
       if (el) el.addEventListener(ev, fn);
@@ -56,6 +73,7 @@ const adminBranchCashUi = {
       tbodyEl.addEventListener('click', e => {
         const btn = e.target.closest('[data-bc-action]');
         if (!btn) return;
+        e.preventDefault();
         const action   = btn.dataset.bcAction;
         const branchId = Number(btn.dataset.branchId);
         const row = this._rows.find(r => Number(r.branch_id) === branchId);
@@ -63,6 +81,14 @@ const adminBranchCashUi = {
         if (action === 'correct')      this._openCorrection(row);
         else if (action === 'ledger')  this._openLedger(row);
         else if (action === 'force-close') this._openForceClose(row);
+      });
+    }
+
+    if (window.RBNDataEvents && !this._eventsBound) {
+      this._eventsBound = true;
+      RBNDataEvents.subscribe('cash:changed', payload => {
+        if (payload?.source === 'admin-branch-cash') return;
+        this.markDirty();
       });
     }
   },
@@ -106,6 +132,7 @@ const adminBranchCashUi = {
   },
 
   markDirty() {
+    if (window.ADMIN && ADMIN.currentSection !== 'branch-cash') return;
     this.load();
   },
 
@@ -316,6 +343,7 @@ const adminBranchCashUi = {
         version:    this._corrTarget.version
       });
       showToast(`Posisi kas ${this._corrTarget.branchName} diset ke ${formatRupiah(newBalance)}. Shift berikutnya akan mulai dari nilai ini.`, 'success');
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-branch-cash' });
       this._closeModal('modal-branch-cash-correction');
       this.load();
     } catch (e) {
@@ -382,6 +410,7 @@ const adminBranchCashUi = {
         reason
       });
       showToast(`Shift ${this._fcTarget.branchName} berhasil ditutup secara paksa.`, 'success');
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-branch-cash' });
       this._closeModal('modal-branch-force-close');
       this.load();
     } catch (e) {
@@ -459,13 +488,28 @@ const adminBranchCashUi = {
   // ── Modal Helpers ─────────────────────────────────────────────
   _openModal(id) {
     const el = document.getElementById(id);
-    if (el) el.style.display = 'flex';
+    if (!el) return;
+    el.style.display = 'flex';
+    if (typeof openModal === 'function') {
+      openModal(id);
+    } else {
+      el.classList.add('active');
+    }
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
   _closeModal(id) {
     const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
+    if (!el) return;
+    if (typeof closeModal === 'function') {
+      closeModal(id);
+    } else {
+      el.classList.remove('active');
+    }
+    setTimeout(() => {
+      if (!el.classList.contains('active')) el.style.display = 'none';
+    }, 300);
   }
 };
 
+window.adminBranchCashUi = adminBranchCashUi;
 adminBranchCashUi.init();
