@@ -360,13 +360,13 @@ BEGIN
     WHERE COALESCE(b.is_active, true) = true
       AND (p_branch_id IS NULL OR b.id = p_branch_id)
   )
-  SELECT *
-  FROM rows
+  SELECT r.*
+  FROM rows r
   WHERE COALESCE(p_status, 'all') = 'all'
-     OR shift_status = p_status
-     OR (p_status = 'adjusted' AND has_variance)
+     OR r.shift_status = p_status
+     OR (p_status = 'adjusted' AND r.has_variance)
      OR (p_status = 'manual_closed' AND false)
-  ORDER BY branch_name;
+  ORDER BY r.branch_name;
 END;
 $$;
 
