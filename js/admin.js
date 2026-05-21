@@ -378,7 +378,6 @@ const ADMIN = {
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
-      'staff-cash-position': 'Sesi Kas Outlet',
       'branch-cash': 'Kas Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
       'finance-integration': 'Integrasi Sistem Keuangan',
@@ -409,7 +408,6 @@ const ADMIN = {
       case 'toppings':              this.loadToppingSection();    break;
       case 'api-keys':              this.loadApiKeysSection();    break;
       case 'investor-access':       this.loadInvestorAccess();    break;
-      case 'staff-cash-position':   this.loadStaffCashPosition(); break;
       case 'branch-cash':           this.loadBranchCash();        break;
       case 'finance-integration':   this.loadFinanceIntegration(); break;
       case 'transfer-monitoring':   this.loadTransferMonitoring(); break;
@@ -3095,13 +3093,6 @@ const ADMIN = {
       await this.loadCashCategories();
       showToast('Kategori dihapus', 'success');
     } catch (e) { showDbError(e, { action: 'menghapus kategori kas', entity: 'Kategori kas' }); }
-  },
-
-  // ── Staff Cash Position ───────────────────────────────────────
-  loadStaffCashPosition() {
-    if (window.adminStaffCashUi) {
-      adminStaffCashUi.load();
-    }
   },
 
   // ── Branch Cash (Kas Outlet) ──────────────────────────────────

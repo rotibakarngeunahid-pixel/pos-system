@@ -222,6 +222,7 @@ const adminBranchCashUi = {
           ${statusBadge}
         </div>
         <div class="bc-card-balance">${formatRupiah(r.current_balance)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin:-8px 0 8px;text-align:center">Kas awal shift berikutnya</div>
         <div class="bc-card-meta">
           <div>
             <div class="bc-meta-label">Kas Awal Terakhir</div>
@@ -347,7 +348,7 @@ const adminBranchCashUi = {
         reason,
         version:    this._corrTarget.version
       });
-      showToast(`Posisi kas ${this._corrTarget.branchName} diset ke ${formatRupiah(newBalance)}. Shift berikutnya akan mulai dari nilai ini.`, 'success');
+      showToast(`Posisi kas ${this._corrTarget.branchName} diset ke ${formatRupiah(newBalance)}. Staff yang buka shift berikutnya akan melihat nilai ini.`, 'success');
       if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-branch-cash' });
       this._closeModal('modal-branch-cash-correction');
       this.load();

@@ -746,7 +746,6 @@ const adminDepositUi = {
       showToast(`Setoran manual tersimpan. Ref: ${String(depositId || '').slice(0, 8).toUpperCase()}`, 'success');
       await this.loadDeposits();
       if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-manual-deposit' });
-      if (window.adminStaffCashUi) adminStaffCashUi.markDirty();
       if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
     } catch (e) {
       console.error('saveManualDeposit', e);
