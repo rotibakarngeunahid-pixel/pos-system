@@ -544,7 +544,9 @@ const POS = {
       }
 
       // Proses setoran opsional dari shift sebelumnya
-      const depAmount = parseFloat(document.getElementById('shift-open-dep-amount')?.value) || 0;
+      // Gunakan digit-only parsing agar "200.000" (format Android) → 200000, bukan 200.
+      const depAmountRaw = String(document.getElementById('shift-open-dep-amount')?.value || '');
+      const depAmount = depAmountRaw ? (Number(depAmountRaw.replace(/[^\d]/g, '')) || 0) : 0;
       if (depAmount > 0) {
         const d         = this._openShiftDeposit;
         const accountId = document.getElementById('shift-open-dep-account')?.value || '';
