@@ -16,6 +16,7 @@ const POS = {
   loading:     false,
   _clickTs:    {},
   _checkoutLock: false,
+  _openShiftLock: false,
   _pendingTxIds: null,
   bomData:     null,   // { recipeMap: {variantId→recipeId}, recipeItemsMap: {recipeId→[items]} }
   stockCache:  null,   // Map<ingredientId, stock> — refreshed after each transaction
@@ -526,10 +527,29 @@ const POS = {
   },
 
   async confirmOpenShift() {
+    if (this._openShiftLock) return;
+    if (this.session) {
+      closeModal('modal-shift');
+      showToast('Shift sudah terbuka. Silakan lanjut berjualan.', 'success');
+      return;
+    }
+
+    this._openShiftLock = true;
     const btn = document.getElementById('btn-open-shift');
-    btn.disabled = true;
-    btn.textContent = 'Membuka...';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Membuka...';
+    }
     try {
+      const existingOwnSession = await this.getOwnOpenShift();
+      if (existingOwnSession) {
+        this.session = existingOwnSession;
+        closeModal('modal-shift');
+        this.updateShiftUI();
+        showToast('Shift sudah terbuka. Status kas disinkronkan.', 'success');
+        return;
+      }
+
       const blocker = await this.refreshOpenShiftBlocker();
       if (blocker) throw new Error(this.getOpenShiftBlockerMessage(blocker));
 
@@ -557,7 +577,7 @@ const POS = {
         const requireProof = acc && !depositService.isCashDepositMethod(acc);
         if (requireProof && !d.file) throw new Error('Bukti setoran wajib dilampirkan');
         if (!d.session?.session_id) throw new Error('Shift tertutup tidak ditemukan untuk setoran');
-        btn.textContent = 'Menyetor...';
+        if (btn) btn.textContent = 'Menyetor...';
         await depositService.submitDeposit({
           branchId:    this.branch.id,
           sessionId:   d.session.session_id,
@@ -570,7 +590,7 @@ const POS = {
           requireProof
         });
         showToast('Setoran berhasil dikirim', 'success');
-        btn.textContent = 'Membuka...';
+        if (btn) btn.textContent = 'Membuka...';
       }
 
       // Buka shift dari posisi kas outlet terkini.
@@ -582,10 +602,20 @@ const POS = {
       closeModal('modal-shift');
       this.updateShiftUI();
       const openingCash = this.session.opening_cash || 0;
-      showToast(`Shift dibuka — Kas awal: ${formatRupiah(openingCash)}. Selamat berjualan!`, 'success');
+      const openedMsg = this.session.already_open
+        ? `Shift sudah terbuka. Kas awal: ${formatRupiah(openingCash)}.`
+        : `Shift dibuka — Kas awal: ${formatRupiah(openingCash)}. Selamat berjualan!`;
+      showToast(openedMsg, 'success');
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
+      this._openShiftLock = false;
+      if (!btn) return;
+      if (this.session) {
+        btn.disabled = true;
+        btn.textContent = 'Shift Sudah Terbuka';
+        return;
+      }
       const pendingBlocked = Number(this._branchCashPosition?.pendingDeposit || 0) > 0;
       btn.disabled = !!this._openShiftBlocker || pendingBlocked;
       btn.textContent = this._openShiftBlocker

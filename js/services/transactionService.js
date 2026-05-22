@@ -79,6 +79,38 @@ const transactionService = {
     return `Shift sebelumnya atas nama ${staffName} belum menutup kas. Silakan tutup kas terlebih dahulu.`;
   },
 
+  isOneOpenShiftConflict(error) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || '');
+    return code === '23505'
+      || msg.includes('idx_cashier_sessions_one_open_per_branch')
+      || (msg.includes('duplicate key value') && msg.includes('cashier_sessions'))
+      || (msg.includes('unique constraint') && msg.includes('one_open_per_branch'));
+  },
+
+  async getOwnOpenShiftForBranch({ branchId, staffId }) {
+    if (!branchId || !staffId) return null;
+    const { data, error } = await db.from('cashier_sessions')
+      .select('*')
+      .eq('branch_id', branchId)
+      .eq('staff_id', staffId)
+      .eq('status', 'open')
+      .order('opened_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (data || [])[0] || null;
+  },
+
+  async recoverOpenShiftConflict({ branchId, staffId }) {
+    const ownSession = await this.getOwnOpenShiftForBranch({ branchId, staffId });
+    if (ownSession) return { ...ownSession, already_open: true };
+
+    const activeSession = await this.getOpenShiftForBranch({ branchId });
+    if (activeSession) throw new Error(this.formatOpenShiftBlocker(activeSession));
+
+    throw new Error('Shift outlet sudah terbuka. Muat ulang halaman untuk menyinkronkan status shift.');
+  },
+
   async openShift({ branchId, staffId, openingCash }) {
     // Opening cash is owned by the outlet balance, not by a staff input.
     // Keep this wrapper for older callers, but force the branch-based RPC.
@@ -111,6 +143,9 @@ const transactionService = {
     if (error) {
       if (error.code === '42883' || String(error.message || '').toLowerCase().includes('could not find the function')) {
         throw new Error('Fitur kas awal otomatis perlu migrasi terbaru. Jalankan migrasi 041 lalu coba lagi.');
+      }
+      if (this.isOneOpenShiftConflict(error)) {
+        return this.recoverOpenShiftConflict({ branchId, staffId });
       }
       throw new Error(error.message);
     }
