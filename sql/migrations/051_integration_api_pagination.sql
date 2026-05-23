@@ -17,6 +17,11 @@
 
 BEGIN;
 
+-- ── Drop versi lama (4 parameter) agar tidak ada overload ambigu ──────────
+DROP FUNCTION IF EXISTS public.get_sales_integration(text, date, date, integer);
+DROP FUNCTION IF EXISTS public.get_kas_keluar_integration(text, date, date, integer);
+DROP FUNCTION IF EXISTS public.get_integration_summary(text, date, date, integer);
+
 -- ── 1. get_sales_integration — dengan pagination ──────────────────────────
 
 CREATE OR REPLACE FUNCTION get_sales_integration(
@@ -120,7 +125,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION get_sales_integration TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_sales_integration(text, date, date, integer, integer, integer) TO anon, authenticated;
 
 
 -- ── 2. get_kas_keluar_integration — dengan pagination ─────────────────────
@@ -224,7 +229,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION get_kas_keluar_integration TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_kas_keluar_integration(text, date, date, integer, integer, integer) TO anon, authenticated;
 
 
 -- ── 3. get_integration_summary — dengan pagination (per tanggal) ──────────
@@ -400,7 +405,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION get_integration_summary TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_integration_summary(text, date, date, integer, integer, integer) TO anon, authenticated;
 
 
 -- ── Reload schema cache ───────────────────────────────────────────────────
