@@ -73,10 +73,51 @@
     .bc-cards-empty { padding:32px; text-align:center; color:var(--text-muted); font-size:14px; }
     @media (max-width:480px) { .bc-cards-grid { grid-template-columns:1fr; } }
 
-    /* ── Finance Integration ────────────────── */
+    /* ── Finance Integration (legacy) ──────────────────────────── */
     .fi-filter-grid { grid-template-columns: 1fr 1fr 1fr !important; }
     @media (max-width:700px) { .fi-filter-grid { grid-template-columns: 1fr 1fr !important; } }
     @media (max-width:480px) { .fi-filter-grid { grid-template-columns: 1fr !important; } }
+
+    /* ── Portal Integrasi Data ──────────────────────────────────── */
+    .dip-tab-btn {
+      padding: 10px 20px;
+      background: none; border: none;
+      border-bottom: 3px solid transparent;
+      cursor: pointer;
+      font-weight: 600; font-size: 14px;
+      color: var(--text-muted);
+      transition: color .15s, border-color .15s;
+      white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .dip-tab-btn:hover  { color: var(--text); }
+    .dip-tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    /* Simple loading dots */
+    .dip-loading-dots { display:flex; gap:5px; justify-content:center; }
+    .dip-loading-dots span {
+      width:8px; height:8px; border-radius:50%;
+      background:var(--primary); opacity:.4;
+      animation: dip-dot-pulse 1.2s infinite;
+    }
+    .dip-loading-dots span:nth-child(2) { animation-delay:.2s; }
+    .dip-loading-dots span:nth-child(3) { animation-delay:.4s; }
+    @keyframes dip-dot-pulse { 0%,80%,100%{opacity:.4;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
+
+    /* Spin utility */
+    .dip-spin { animation: dip-spin-anim .8s linear infinite; }
+    @keyframes dip-spin-anim { to { transform:rotate(360deg); } }
+
+    /* Doc block */
+    .dip-doc-block { background:var(--bg-alt); border:1px solid var(--border); border-radius:var(--r-md); padding:16px; font-size:12px; line-height:1.8; }
+    .dip-doc-endpoint { display:block; background:#f3f4f6; border:1px solid var(--border); padding:8px 12px; border-radius:6px; font-family:monospace; font-size:10.5px; word-break:break-all; margin:4px 0 10px; color:var(--text); }
+    .dip-json-block { background:#1e293b; color:#e2e8f0; padding:14px; border-radius:8px; font-size:10.5px; line-height:1.7; overflow-x:auto; font-family:monospace; margin:4px 0 12px; }
+
+    /* Summary stat cards alignment */
+    #dip-sum-total-sales, #dip-sum-total-cashout, #dip-sum-selisih { font-size:1.5rem; }
+
+    /* Text alignment helpers for portal tables */
+    .text-right { text-align:right !important; }
   </style>
 </head>
 <body class="admin-page">
@@ -166,8 +207,8 @@
       <button class="nav-item" data-admin-action="navigate" data-section="branch-cash" title="Kas Outlet / Posisi Kas Cabang">
         <i data-lucide="building-2"></i><span class="nav-text">Kas Outlet</span>
       </button>
-      <button class="nav-item" data-admin-action="navigate" data-section="finance-integration" title="Integrasi Sistem Keuangan">
-        <i data-lucide="link-2"></i><span class="nav-text">Integrasi Keuangan</span>
+      <button class="nav-item" data-admin-action="navigate" data-section="finance-integration" title="Portal Integrasi Data">
+        <i data-lucide="network"></i><span class="nav-text">Portal Integrasi</span>
       </button>
     </nav>
 
@@ -1219,245 +1260,480 @@
         </div>
       </section>
 
-      <!-- ══════════ INTEGRASI KEUANGAN ══════════ -->
+      <!-- ══════════ PORTAL INTEGRASI DATA ══════════ -->
       <section class="admin-section" id="section-finance-integration">
         <div class="section-header">
-          <h2 class="section-title">Integrasi Sistem Keuangan</h2>
+          <h2 class="section-title">Portal Integrasi Data</h2>
           <div class="section-actions">
-            <button class="btn btn-outline btn-sm" id="fi-refresh-btn" title="Refresh API Key">
+            <button class="btn btn-outline btn-sm" id="dip-refresh-btn">
               <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
             </button>
           </div>
         </div>
 
-        <!-- ── Banner penjelasan ───────────────────────────── -->
+        <!-- ── Hero Banner ──────────────────────────────────────────────────── -->
         <div class="card mb-4" style="border-left:4px solid var(--primary);background:linear-gradient(135deg,#fff8f5 0%,#fff 100%)">
           <div class="p-4">
-            <div style="display:flex;align-items:flex-start;gap:14px;">
-              <div style="font-size:2rem;line-height:1;flex-shrink:0;">🔗</div>
-              <div>
-                <div style="font-size:16px;font-weight:800;color:var(--text);margin-bottom:6px;">Portal Integrasi Kas Keluar</div>
-                <p class="text-muted text-sm" style="line-height:1.7;margin:0">
-                  Halaman ini membantu Anda menghubungkan <strong>data kas keluar</strong> dari sistem kasir
-                  ke sistem keuangan Anda secara otomatis.<br>
-                  Sistem keuangan cukup mengakses <strong>link integrasi</strong> yang dibuat di sini,
-                  dan data kas keluar akan tersedia dalam format yang langsung bisa diproses.
+            <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
+              <div style="font-size:2.4rem;line-height:1;flex-shrink:0">🔗</div>
+              <div style="flex:1;min-width:220px">
+                <div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:6px">Portal Integrasi Data Keuangan</div>
+                <p class="text-muted text-sm" style="line-height:1.75;margin:0 0 10px">
+                  Halaman ini adalah <strong>jembatan data</strong> antara sistem kasir dan sistem keuangan Anda.
+                  Tanpa perlu memahami database, sistem keuangan cukup mengakses <strong>link endpoint</strong>
+                  yang dibuat di sini untuk mendapatkan data <strong>penjualan</strong>,
+                  <strong>kas keluar</strong>, atau <strong>ringkasan gabungan</strong> dalam format JSON siap pakai.
                 </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <span style="background:rgba(22,163,74,.1);color:#16a34a;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700">✓ Aman dengan API Key</span>
+                  <span style="background:rgba(59,130,246,.1);color:#2563eb;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700">✓ Format JSON standar</span>
+                  <span style="background:rgba(249,115,22,.1);color:#ea580c;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700">✓ Filter tanggal &amp; cabang</span>
+                  <span style="background:rgba(139,92,246,.1);color:#7c3aed;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700">✓ Export CSV</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- ── Panduan langkah demi langkah ──────────────── -->
+        <!-- ── Panduan Langkah ──────────────────────────────────────────────── -->
         <div class="card mb-4">
           <div class="card-header">
-            <span class="card-title"><i data-lucide="list-ordered" class="icon-sm"></i> Cara Menggunakan</span>
+            <span class="card-title"><i data-lucide="list-ordered" class="icon-sm"></i> Cara Menggunakan Portal Ini</span>
           </div>
           <div class="p-4">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
-              <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">1</div>
-                <div>
-                  <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Pilih Kunci Akses (API Key)</div>
-                  <div class="text-muted text-xs">Pilih kunci akses yang sudah dibuat di menu <strong>API Keys</strong>. Kunci ini menjaga keamanan data.</div>
-                </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px">
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
+                <div><div style="font-weight:700;font-size:13px;margin-bottom:2px">Pilih Jenis Data</div><div class="text-muted text-xs">Pilih tab: Penjualan, Kas Keluar, atau Ringkasan Gabungan</div></div>
               </div>
-              <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">2</div>
-                <div>
-                  <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Salin Link Integrasi</div>
-                  <div class="text-muted text-xs">Klik tombol <strong>Salin Link</strong> untuk menyalin link yang berisi kunci akses.</div>
-                </div>
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
+                <div><div style="font-weight:700;font-size:13px;margin-bottom:2px">Atur Filter</div><div class="text-muted text-xs">Pilih cabang dan rentang tanggal yang diinginkan</div></div>
               </div>
-              <div style="display:flex;gap:12px;align-items:flex-start;">
-                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">3</div>
-                <div>
-                  <div style="font-weight:700;font-size:13px;margin-bottom:3px;">Masukkan ke Sistem Keuangan</div>
-                  <div class="text-muted text-xs">Tempelkan link ke sistem keuangan. Sistem keuangan yang menentukan tanggal saat mengambil data.</div>
-                </div>
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
+                <div><div style="font-weight:700;font-size:13px;margin-bottom:2px">Pilih API Key</div><div class="text-muted text-xs">Pilih kunci akses untuk mengamankan data</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">4</div>
+                <div><div style="font-weight:700;font-size:13px;margin-bottom:2px">Salin Link / Preview</div><div class="text-muted text-xs">Salin link endpoint atau lihat preview data langsung</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">5</div>
+                <div><div style="font-weight:700;font-size:13px;margin-bottom:2px">Pasang ke Sistem Lain</div><div class="text-muted text-xs">Tempelkan link ke sistem keuangan atau AI builder</div></div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- ── Form pengaturan link ───────────────────────── -->
-        <div class="card mb-4">
-          <div class="card-header">
-            <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Pengaturan Link Integrasi</span>
-          </div>
-          <div class="p-4">
-
-            <!-- Peringatan jika belum ada API key -->
-            <div id="fi-apikey-warning" class="alert-warning mb-4" style="display:none;padding:10px 14px;font-size:13px;">
-              <i data-lucide="alert-triangle" class="icon-sm"></i>
-              Belum ada API Key aktif. Buat API Key terlebih dahulu di menu
-              <strong><button type="button" class="btn-link" style="font-size:13px" data-admin-action="navigate" data-section="api-keys">API Keys</button></strong>,
-              lalu kembali ke halaman ini.
-            </div>
-
-            <!-- Filter: cabang + API key -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;" class="fi-filter-grid">
-              <div class="form-group" style="margin:0">
-                <label class="form-label" for="fi-branch">
-                  <i data-lucide="store" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                  Cabang <span class="text-muted" style="font-weight:400">(opsional)</span>
-                </label>
-                <select class="form-control" id="fi-branch">
-                  <option value="">Semua Cabang</option>
-                </select>
-              </div>
-              <div class="form-group" style="margin:0">
-                <label class="form-label" for="fi-api-key-select">
-                  <i data-lucide="key" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                  Kunci Akses (API Key) <span style="color:var(--danger)">*</span>
-                </label>
-                <select class="form-control" id="fi-api-key-select">
-                  <option value="">— Pilih API Key —</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Kotak link integrasi -->
-            <div class="form-group" style="margin-bottom:12px">
-              <label class="form-label">
-                <i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                Link Integrasi (salin dan tempelkan ke sistem keuangan)
-              </label>
-              <div style="position:relative;">
-                <div id="fi-link-box" style="
-                  background:var(--bg-alt);
-                  border:1.5px solid var(--border);
-                  border-radius:var(--r-md);
-                  padding:10px 14px;
-                  font-size:11px;
-                  font-family:monospace;
-                  word-break:break-all;
-                  line-height:1.7;
-                  min-height:46px;
-                  color:var(--text-muted);
-                  user-select:all;
-                ">← Pilih API Key untuk melihat link</div>
-              </div>
-              <div class="text-xs text-muted mt-2" style="line-height:1.6">
-                <i data-lucide="info" style="width:12px;height:12px;vertical-align:middle;margin-right:3px;"></i>
-                Link ini berisi kunci akses Anda. Saat menggunakan link, sistem keuangan menambahkan tanggal yang diinginkan sebagai parameter <code>p_date_from</code> dan <code>p_date_to</code>.
-              </div>
-            </div>
-
-            <!-- Tombol aksi -->
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-              <button class="btn btn-primary" id="fi-copy-link-btn" disabled>
-                <i data-lucide="copy" class="icon-sm"></i> Salin Link Integrasi
-              </button>
-            </div>
-          </div>
+        <!-- ── Alert: Belum Ada API Key ─────────────────────────────────────── -->
+        <div id="dip-apikey-warning" class="alert-warning mb-4" style="display:none;padding:10px 14px;font-size:13px;border-radius:var(--r-md)">
+          <i data-lucide="alert-triangle" class="icon-sm"></i>
+          Belum ada API Key aktif. Buat API Key terlebih dahulu di menu
+          <strong><button type="button" class="btn-link" style="font-size:13px" data-admin-action="navigate" data-section="api-keys">API Keys</button></strong>,
+          lalu kembali ke halaman ini.
         </div>
 
-        <!-- ── Preview data ───────────────────────────────── -->
-        <div class="card mb-4">
-          <div class="card-header">
-            <span class="card-title"><i data-lucide="eye" class="icon-sm"></i> Lihat Data (Preview)</span>
-          </div>
-          <div class="p-4 pb-0">
-            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:flex-end;margin-bottom:14px;" class="fi-filter-grid">
-              <div class="form-group" style="margin:0">
-                <label class="form-label" for="fi-prev-date-from">
-                  <i data-lucide="calendar" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                  Tanggal Mulai
-                </label>
-                <input type="date" class="form-control" id="fi-prev-date-from" />
+        <!-- ── Tab Navigation ───────────────────────────────────────────────── -->
+        <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px;overflow-x:auto">
+          <button class="dip-tab-btn active" id="dip-tab-sales" data-dip-tab="sales">
+            <i data-lucide="trending-up" style="width:15px;height:15px"></i> Penjualan
+          </button>
+          <button class="dip-tab-btn" id="dip-tab-cashout" data-dip-tab="cashout">
+            <i data-lucide="arrow-down-circle" style="width:15px;height:15px"></i> Kas Keluar
+          </button>
+          <button class="dip-tab-btn" id="dip-tab-summary" data-dip-tab="summary">
+            <i data-lucide="layers" style="width:15px;height:15px"></i> Ringkasan Gabungan
+          </button>
+        </div>
+
+        <!-- ════════════ TAB: PENJUALAN ════════════ -->
+        <div id="dip-content-sales" class="dip-tab-content">
+
+          <div class="card mb-4">
+            <div class="card-header">
+              <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Generator Link — Data Penjualan</span>
+            </div>
+            <div class="p-4">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Cabang <span class="text-muted fw-400">(opsional)</span></label>
+                  <select class="form-control" id="dip-sales-branch"><option value="">Semua Cabang</option></select>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Tanggal Mulai</label>
+                  <input type="date" class="form-control" id="dip-sales-date-from" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Tanggal Akhir</label>
+                  <input type="date" class="form-control" id="dip-sales-date-to" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">API Key <span style="color:var(--danger)">*</span></label>
+                  <select class="form-control" id="dip-sales-apikey"><option value="">— Pilih API Key —</option></select>
+                </div>
               </div>
-              <div class="form-group" style="margin:0">
-                <label class="form-label" for="fi-prev-date-to">
-                  <i data-lucide="calendar" style="width:13px;height:13px;vertical-align:middle;margin-right:3px;"></i>
-                  Tanggal Akhir
-                </label>
-                <input type="date" class="form-control" id="fi-prev-date-to" />
+
+              <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label"><i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px"></i> Link Endpoint Penjualan</label>
+                <div id="dip-sales-link-box" style="background:var(--bg-alt);border:1.5px solid var(--border);border-radius:var(--r-md);padding:10px 14px;font-size:11px;font-family:monospace;word-break:break-all;line-height:1.7;min-height:46px;color:var(--text-muted);user-select:all">
+                  ← Pilih API Key untuk melihat link
+                </div>
+                <div class="text-xs text-muted mt-2">
+                  <i data-lucide="info" style="width:12px;height:12px;vertical-align:middle;margin-right:3px"></i>
+                  Link ini berisi API key Anda. Sistem keuangan dapat mengakses link ini kapan saja untuk mendapatkan data terbaru.
+                </div>
               </div>
-              <div>
-                <button class="btn btn-outline" id="fi-preview-btn" style="white-space:nowrap">
-                  <i data-lucide="eye" class="icon-sm"></i> Lihat Data
+
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                <button class="btn btn-primary" id="dip-sales-copy-btn" disabled>
+                  <i data-lucide="copy" class="icon-sm"></i> Salin Link
+                </button>
+                <button class="btn btn-outline" id="dip-sales-preview-btn">
+                  <i data-lucide="eye" class="icon-sm"></i> Lihat Preview Data
+                </button>
+                <button class="btn btn-outline btn-sm" id="dip-sales-export-btn" disabled>
+                  <i data-lucide="download" class="icon-sm"></i> Unduh CSV
                 </button>
               </div>
-            </div>
-            <div id="fi-date-error" class="form-error mb-3" style="display:none"></div>
-          </div>
-        </div>
-
-        <div id="fi-preview-section" class="card mb-4" style="display:none">
-          <div class="card-header" style="flex-wrap:wrap;gap:10px;align-items:center;">
-            <span class="card-title"><i data-lucide="table" class="icon-sm"></i> Hasil Preview Kas Keluar</span>
-            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-left:auto;">
-              <div style="font-size:13px;">
-                Total: <strong id="fi-preview-total" style="color:var(--danger)">—</strong>
-              </div>
-              <div style="font-size:13px;">
-                Jumlah: <strong id="fi-preview-count">—</strong>
-              </div>
-              <button class="btn btn-outline btn-sm" id="fi-export-csv-btn" disabled>
-                <i data-lucide="download" class="icon-sm"></i> Unduh CSV
-              </button>
+              <div id="dip-sales-date-error" class="form-error mt-2" style="display:none"></div>
             </div>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Tanggal</th>
-                  <th>Cabang</th>
-                  <th>Nama Pengeluaran</th>
-                  <th>Kategori</th>
-                  <th>Nominal</th>
-                  <th>Keterangan</th>
-                </tr>
-              </thead>
-              <tbody id="fi-preview-body">
-                <tr><td colspan="6" class="empty-td">Klik "Lihat Data" untuk menampilkan preview</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
 
-        <!-- ── Dokumentasi format JSON ────────────────────── -->
+          <!-- Preview Penjualan -->
+          <div id="dip-sales-preview-wrap" style="display:none">
+            <div class="card mb-4">
+              <div class="card-header" style="flex-wrap:wrap;gap:10px">
+                <span class="card-title"><i data-lucide="table" class="icon-sm"></i> Preview Data Penjualan</span>
+                <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-left:auto;font-size:13px">
+                  <div>Total Penjualan: <strong id="dip-sales-total" style="color:var(--success)">—</strong></div>
+                  <div>Transaksi: <strong id="dip-sales-count">—</strong></div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Tanggal / Waktu</th><th>Cabang</th><th>Kasir</th><th>Metode Bayar</th><th style="text-align:right">Total Penjualan</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="dip-sales-tbody">
+                    <tr><td colspan="6" class="empty-td">Klik "Lihat Preview Data" untuk menampilkan</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-sales -->
+
+        <!-- ════════════ TAB: KAS KELUAR ════════════ -->
+        <div id="dip-content-cashout" class="dip-tab-content" style="display:none">
+
+          <div class="card mb-4">
+            <div class="card-header">
+              <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Generator Link — Data Kas Keluar</span>
+            </div>
+            <div class="p-4">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Cabang <span class="text-muted fw-400">(opsional)</span></label>
+                  <select class="form-control" id="dip-cashout-branch"><option value="">Semua Cabang</option></select>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Tanggal Mulai</label>
+                  <input type="date" class="form-control" id="dip-cashout-date-from" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Tanggal Akhir</label>
+                  <input type="date" class="form-control" id="dip-cashout-date-to" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">API Key <span style="color:var(--danger)">*</span></label>
+                  <select class="form-control" id="dip-cashout-apikey"><option value="">— Pilih API Key —</option></select>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label"><i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px"></i> Link Endpoint Kas Keluar</label>
+                <div id="dip-cashout-link-box" style="background:var(--bg-alt);border:1.5px solid var(--border);border-radius:var(--r-md);padding:10px 14px;font-size:11px;font-family:monospace;word-break:break-all;line-height:1.7;min-height:46px;color:var(--text-muted);user-select:all">
+                  ← Pilih API Key untuk melihat link
+                </div>
+              </div>
+
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                <button class="btn btn-primary" id="dip-cashout-copy-btn" disabled>
+                  <i data-lucide="copy" class="icon-sm"></i> Salin Link
+                </button>
+                <button class="btn btn-outline" id="dip-cashout-preview-btn">
+                  <i data-lucide="eye" class="icon-sm"></i> Lihat Preview Data
+                </button>
+                <button class="btn btn-outline btn-sm" id="dip-cashout-export-btn" disabled>
+                  <i data-lucide="download" class="icon-sm"></i> Unduh CSV
+                </button>
+              </div>
+              <div id="dip-cashout-date-error" class="form-error mt-2" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Preview Kas Keluar -->
+          <div id="dip-cashout-preview-wrap" style="display:none">
+            <div class="card mb-4">
+              <div class="card-header" style="flex-wrap:wrap;gap:10px">
+                <span class="card-title"><i data-lucide="table" class="icon-sm"></i> Preview Data Kas Keluar</span>
+                <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-left:auto;font-size:13px">
+                  <div>Total Pengeluaran: <strong id="dip-cashout-total" style="color:var(--danger)">—</strong></div>
+                  <div>Jumlah: <strong id="dip-cashout-count">—</strong></div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Tanggal / Waktu</th><th>Cabang</th><th>Nama Pengeluaran</th><th>Kategori</th><th style="text-align:right">Nominal</th><th>Keterangan</th><th>Dicatat Oleh</th></tr>
+                  </thead>
+                  <tbody id="dip-cashout-tbody">
+                    <tr><td colspan="7" class="empty-td">Klik "Lihat Preview Data" untuk menampilkan</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-cashout -->
+
+        <!-- ════════════ TAB: RINGKASAN ════════════ -->
+        <div id="dip-content-summary" class="dip-tab-content" style="display:none">
+
+          <div class="card mb-4">
+            <div class="card-header">
+              <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Generator Link — Ringkasan Gabungan</span>
+            </div>
+            <div class="p-4">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Cabang <span class="text-muted fw-400">(opsional)</span></label>
+                  <select class="form-control" id="dip-summary-branch"><option value="">Semua Cabang</option></select>
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Tanggal Mulai</label>
+                  <input type="date" class="form-control" id="dip-summary-date-from" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Tanggal Akhir</label>
+                  <input type="date" class="form-control" id="dip-summary-date-to" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">API Key <span style="color:var(--danger)">*</span></label>
+                  <select class="form-control" id="dip-summary-apikey"><option value="">— Pilih API Key —</option></select>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label"><i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px"></i> Link Endpoint Ringkasan Gabungan</label>
+                <div id="dip-summary-link-box" style="background:var(--bg-alt);border:1.5px solid var(--border);border-radius:var(--r-md);padding:10px 14px;font-size:11px;font-family:monospace;word-break:break-all;line-height:1.7;min-height:46px;color:var(--text-muted);user-select:all">
+                  ← Pilih API Key untuk melihat link
+                </div>
+                <div class="text-xs text-muted mt-2">
+                  <i data-lucide="info" style="width:12px;height:12px;vertical-align:middle;margin-right:3px"></i>
+                  Endpoint ini mengembalikan total penjualan, total kas keluar, selisih, serta ringkasan per cabang dan per tanggal sekaligus.
+                </div>
+              </div>
+
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                <button class="btn btn-primary" id="dip-summary-copy-btn" disabled>
+                  <i data-lucide="copy" class="icon-sm"></i> Salin Link
+                </button>
+                <button class="btn btn-outline" id="dip-summary-preview-btn">
+                  <i data-lucide="eye" class="icon-sm"></i> Lihat Preview Data
+                </button>
+              </div>
+              <div id="dip-summary-date-error" class="form-error mt-2" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Preview Ringkasan -->
+          <div id="dip-summary-preview-wrap" style="display:none">
+            <!-- Stat cards -->
+            <div class="stats-grid mb-4">
+              <div class="stat-card stat-card-hero">
+                <div class="stat-label">Total Penjualan</div>
+                <div class="stat-value" id="dip-sum-total-sales" style="color:var(--success)">—</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Total Kas Keluar</div>
+                <div class="stat-value" id="dip-sum-total-cashout" style="color:var(--danger)">—</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Selisih (Profit Kasar)</div>
+                <div class="stat-value" id="dip-sum-selisih">—</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Jumlah Transaksi</div>
+                <div class="stat-value" id="dip-sum-count">—</div>
+              </div>
+            </div>
+
+            <!-- Per cabang -->
+            <div class="card mb-4">
+              <div class="card-header">
+                <span class="card-title"><i data-lucide="store" class="icon-sm"></i> Ringkasan Per Cabang</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Cabang</th><th style="text-align:right">Total Penjualan</th><th style="text-align:right">Jml Transaksi</th><th style="text-align:right">Total Kas Keluar</th><th style="text-align:right">Selisih</th></tr>
+                  </thead>
+                  <tbody id="dip-summary-branch-tbody">
+                    <tr><td colspan="5" class="empty-td">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Per tanggal -->
+            <div class="card mb-4">
+              <div class="card-header">
+                <span class="card-title"><i data-lucide="calendar" class="icon-sm"></i> Ringkasan Per Tanggal</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Tanggal</th><th style="text-align:right">Total Penjualan</th><th style="text-align:right">Total Kas Keluar</th><th style="text-align:right">Selisih</th></tr>
+                  </thead>
+                  <tbody id="dip-summary-date-tbody">
+                    <tr><td colspan="4" class="empty-td">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-summary -->
+
+        <!-- ════════════ DOKUMENTASI UNTUK AI BUILDER / DEVELOPER ════════════ -->
         <div class="card">
-          <div class="card-header">
-            <span class="card-title"><i data-lucide="file-json" class="icon-sm"></i> Format Data yang Diterima Sistem Keuangan</span>
+          <div class="card-header" style="flex-wrap:wrap;gap:10px">
+            <span class="card-title"><i data-lucide="book-open" class="icon-sm"></i> Panduan Integrasi untuk Sistem Lain</span>
+            <button class="btn btn-outline btn-sm" id="dip-copy-docs-btn" style="margin-left:auto">
+              <i data-lucide="clipboard-copy" class="icon-sm"></i> Salin Semua Dokumentasi
+            </button>
           </div>
           <div class="p-4">
-            <p class="text-muted text-sm mb-3" style="line-height:1.7">
-              Ketika sistem keuangan Anda mengakses link integrasi, data akan dikirim dalam format JSON seperti berikut.
-              Format ini bisa langsung dibaca oleh sebagian besar aplikasi keuangan modern.
+            <p class="text-muted text-sm mb-4" style="line-height:1.7">
+              Klik tombol <strong>Salin Semua Dokumentasi</strong> di atas untuk menyalin panduan lengkap ini.
+              Tempelkan ke AI builder atau developer yang membangun sistem keuangan Anda — mereka bisa langsung memahami cara mengambil data tanpa perlu bertanya lebih lanjut.
             </p>
-            <pre class="text-xs" style="background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--r-md);padding:16px;overflow-x:auto;line-height:1.8;font-family:monospace"><code>{
+
+            <!-- Bagian 1: Endpoint -->
+            <div class="dip-doc-block mb-4">
+              <p style="font-weight:800;font-size:14px;margin:0 0 10px">📌 Tiga Endpoint yang Tersedia</p>
+
+              <p style="font-weight:700;margin:0 0 3px;font-size:13px">1. Data Penjualan</p>
+              <code id="dip-doc-sales-ep" class="dip-doc-endpoint">Memuat...</code>
+              <p style="font-size:12px;margin:0 0 2px">Parameter: <code>p_api_key</code> (wajib), <code>p_date_from</code>, <code>p_date_to</code>, <code>p_branch_id</code> (semua opsional kecuali p_api_key)</p>
+              <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Mengembalikan semua transaksi completed. Void tidak disertakan.</p>
+
+              <p style="font-weight:700;margin:0 0 3px;font-size:13px">2. Data Kas Keluar</p>
+              <code id="dip-doc-cashout-ep" class="dip-doc-endpoint">Memuat...</code>
+              <p style="font-size:12px;margin:0 0 2px">Parameter: sama seperti endpoint penjualan.</p>
+              <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Mengembalikan semua kas keluar yang sudah tercatat (non-void).</p>
+
+              <p style="font-weight:700;margin:0 0 3px;font-size:13px">3. Ringkasan Gabungan</p>
+              <code id="dip-doc-summary-ep" class="dip-doc-endpoint">Memuat...</code>
+              <p style="font-size:12px;margin:0 0 2px">Parameter: sama seperti endpoint penjualan.</p>
+              <p style="font-size:12px;color:var(--text-muted);margin:0">Mengembalikan total, selisih, per-cabang, dan per-tanggal sekaligus.</p>
+            </div>
+
+            <!-- Bagian 2: Response JSON -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px">
+              <!-- Penjualan -->
+              <div>
+                <p style="font-weight:700;margin:0 0 6px;font-size:13px">📦 Response — Penjualan</p>
+                <pre class="dip-json-block"><code>{
   "success": true,
-  "diambil_pada": "2026-05-20 09:30:00 WIB",
+  "type": "sales",
   "periode": {
-    "tanggal_mulai": "2026-05-20",
-    "tanggal_akhir": "2026-05-20"
+    "tanggal_mulai": "2026-05-01",
+    "tanggal_akhir": "2026-05-31"
   },
-  "total_pengeluaran": 25000,
-  "jumlah_data": 1,
-  "data": [
-    {
-      "id": 42,
-      "tanggal": "2026-05-20",
-      "waktu": "08:45:00",
-      "cabang": "Cabang A",
-      "nama_pengeluaran": "Pembelian Sunlight",
-      "kategori": "Bahan / Operasional",
-      "nominal": 25000,
-      "keterangan": "Pembelian sunlight untuk outlet",
-      "dicatat_oleh": "Staff A"
-    }
-  ]
+  "summary": {
+    "total_penjualan": 2500000,
+    "jumlah_transaksi": 120
+  },
+  "data": [{
+    "tanggal": "2026-05-23",
+    "cabang": "Dalung",
+    "total_penjualan": 25000,
+    "metode_pembayaran": "Tunai",
+    "kasir": "Budi",
+    "status": "completed"
+  }]
 }</code></pre>
-            <div class="text-xs text-muted mt-3" style="background:var(--bg-alt);border-radius:var(--r-md);padding:10px 14px;border:1px solid var(--border);line-height:1.7">
-              <strong>Catatan:</strong>
-              <ul style="margin:6px 0 0 16px;padding:0;">
-                <li>Data yang ditampilkan hanya kas keluar yang sudah tercatat (tidak termasuk yang dibatalkan/void).</li>
-                <li>Nama supplier tidak disertakan karena tidak diperlukan oleh sistem keuangan.</li>
-                <li>Jika tidak ada data, <code>"data"</code> akan berisi array kosong <code>[]</code>.</li>
-                <li>Jika API key salah, <code>"success"</code> akan bernilai <code>false</code> disertai pesan error.</li>
+              </div>
+              <!-- Kas Keluar -->
+              <div>
+                <p style="font-weight:700;margin:0 0 6px;font-size:13px">📦 Response — Kas Keluar</p>
+                <pre class="dip-json-block"><code>{
+  "success": true,
+  "total_pengeluaran": 750000,
+  "jumlah_data": 25,
+  "data": [{
+    "tanggal": "2026-05-23",
+    "cabang": "Dalung",
+    "nama_pengeluaran": "Bahan baku",
+    "kategori": "Bahan / Operasional",
+    "nominal": 50000,
+    "keterangan": "Pembelian mentega",
+    "dicatat_oleh": "Budi"
+  }]
+}</code></pre>
+              </div>
+              <!-- Ringkasan -->
+              <div>
+                <p style="font-weight:700;margin:0 0 6px;font-size:13px">📦 Response — Ringkasan</p>
+                <pre class="dip-json-block"><code>{
+  "success": true,
+  "type": "summary",
+  "summary": {
+    "total_penjualan": 2500000,
+    "jumlah_transaksi": 120,
+    "total_kas_keluar": 750000,
+    "jumlah_kas_keluar": 25,
+    "selisih": 1750000
+  },
+  "per_cabang": [{
+    "cabang": "Dalung",
+    "total_penjualan": 1500000,
+    "total_kas_keluar": 400000
+  }],
+  "per_tanggal": [{
+    "tanggal": "2026-05-23",
+    "total_penjualan": 150000,
+    "total_kas_keluar": 30000
+  }]
+}</code></pre>
+              </div>
+              <!-- Error -->
+              <div>
+                <p style="font-weight:700;margin:0 0 6px;font-size:13px">⚠️ Response — Error</p>
+                <pre class="dip-json-block"><code>{
+  "success": false,
+  "error": "API key tidak valid
+atau tidak aktif."
+}</code></pre>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">
+                  Terjadi jika API key salah, kosong, atau sudah dinonaktifkan admin.
+                </div>
+              </div>
+            </div>
+
+            <!-- Bagian 3: Catatan penting -->
+            <div class="dip-doc-block">
+              <p style="font-weight:700;margin:0 0 8px;font-size:13px">💡 Catatan Penting untuk AI Builder &amp; Developer</p>
+              <ul style="margin:0 0 0 16px;padding:0;font-size:12px;line-height:1.9;color:var(--text)">
+                <li>Semua waktu menggunakan timezone <strong>Asia/Jakarta (WIB, UTC+7)</strong></li>
+                <li>Data penjualan hanya <strong>status "completed"</strong> — transaksi void tidak disertakan</li>
+                <li>Data kas keluar hanya yang <strong>belum di-void</strong> (<code>is_void = false</code>)</li>
+                <li>Jika tidak ada data, field <code>data</code> berisi array kosong <code>[]</code></li>
+                <li>Parameter tanggal bersifat <strong>opsional</strong> — jika kosong, semua data dikembalikan</li>
+                <li>Rentang tanggal <strong>maksimal 365 hari</strong> per request (untuk per_tanggal di summary)</li>
+                <li>Gunakan <code>selisih</code> di endpoint ringkasan untuk kalkulasi profit kasar langsung</li>
+                <li>API key bersifat <strong>rahasia</strong> — jangan ekspose di frontend publik</li>
               </ul>
             </div>
           </div>
@@ -2472,7 +2748,7 @@
   <script src="js/depositService.js?v=20260519-deposit-confirm-fix-1"></script>
   <script src="js/adminDepositUi.js?v=20260520-branch-cash-deposit-1"></script>
   <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-outlet-1"></script>
-  <script src="js/adminFinanceIntegrationUi.js?v=20260520-finance-integration-2"></script>
+  <script src="js/adminFinanceIntegrationUi.js?v=20260523-portal-integrasi-data-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260518-admin-cash-ui-2"></script>

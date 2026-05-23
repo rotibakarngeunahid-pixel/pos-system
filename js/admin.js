@@ -380,7 +380,7 @@ const ADMIN = {
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
       'branch-cash': 'Kas Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
-      'finance-integration': 'Integrasi Sistem Keuangan',
+      'finance-integration': 'Portal Integrasi Data',
       'transfer-monitoring': 'Monitoring Transfer Stok'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
