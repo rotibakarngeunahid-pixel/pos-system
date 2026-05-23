@@ -1180,25 +1180,29 @@
 
       <!-- MODAL: Ledger Riwayat Kas Outlet -->
       <div class="modal-overlay" id="modal-branch-cash-ledger" style="display:none">
-        <div class="modal" style="max-width:820px;width:95vw">
+        <div class="modal" style="max-width:900px;width:95vw">
           <div class="modal-header">
             <span class="modal-title"><i data-lucide="scroll-text" class="icon-sm"></i> Riwayat Kas Outlet: <span id="bc-ledger-branch-name"></span></span>
             <button class="modal-close" id="bc-ledger-close-btn">&times;</button>
           </div>
           <div class="modal-body" style="padding:0">
+            <div style="padding:6px 16px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-muted)">
+              <i data-lucide="clock" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>
+              Semua waktu ditampilkan dalam <strong>WITA (UTC+8)</strong>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Waktu</th>
-                    <th>Jenis</th>
+                    <th>Waktu (WITA)</th>
+                    <th>Tipe Transaksi</th>
                     <th>Arah</th>
-                    <th>Nominal</th>
-                    <th>Sebelum</th>
-                    <th>Sesudah</th>
+                    <th style="text-align:right">Nominal</th>
+                    <th style="text-align:right">Saldo Sebelum</th>
+                    <th style="text-align:right">Saldo Sesudah</th>
                     <th>Selisih</th>
-                    <th>Staff/Admin</th>
-                    <th>Alasan</th>
+                    <th>Oleh</th>
+                    <th>Keterangan</th>
                   </tr>
                 </thead>
                 <tbody id="bc-ledger-table-body">
@@ -1726,7 +1730,7 @@ atau tidak aktif."
             <div class="dip-doc-block">
               <p style="font-weight:700;margin:0 0 8px;font-size:13px">💡 Catatan Penting untuk AI Builder &amp; Developer</p>
               <ul style="margin:0 0 0 16px;padding:0;font-size:12px;line-height:1.9;color:var(--text)">
-                <li>Semua waktu menggunakan timezone <strong>Asia/Jakarta (WIB, UTC+7)</strong></li>
+                <li>Semua waktu menggunakan timezone <strong>WITA — Asia/Makassar (UTC+8)</strong></li>
                 <li>Data penjualan hanya <strong>status "completed"</strong> — transaksi void tidak disertakan</li>
                 <li>Data kas keluar hanya yang <strong>belum di-void</strong> (<code>is_void = false</code>)</li>
                 <li>Jika tidak ada data, field <code>data</code> berisi array kosong <code>[]</code></li>

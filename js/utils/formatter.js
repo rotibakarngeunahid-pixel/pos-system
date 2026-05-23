@@ -1,5 +1,10 @@
 'use strict';
 
+// ── Timezone standar sistem: WITA (Waktu Indonesia Tengah, UTC+8) ─────────
+// Semua tanggal dan jam di seluruh sistem menggunakan timezone ini.
+// Asia/Makassar = WITA = UTC+8 (Bali, Sulawesi, Kalimantan Tengah & Timur, dll.)
+const SYSTEM_TZ = 'Asia/Makassar';
+
 const fmt = {
   rupiah(n) {
     return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
@@ -8,18 +13,29 @@ const fmt = {
   date(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
-    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
-      + ' ' + d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString('id-ID', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      timeZone: SYSTEM_TZ
+    }) + ' ' + d.toLocaleTimeString('id-ID', {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: SYSTEM_TZ
+    });
   },
 
   dateOnly(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+    return new Date(iso).toLocaleDateString('id-ID', {
+      day: '2-digit', month: 'long', year: 'numeric',
+      timeZone: SYSTEM_TZ
+    });
   },
 
   timeOnly(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return new Date(iso).toLocaleTimeString('id-ID', {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: SYSTEM_TZ
+    });
   },
 
   num(n, dec = 2) {
@@ -51,11 +67,16 @@ const fmt = {
   BUSINESS_DAY_CUTOFF_HOUR: 3,
 
   getBusinessDate(dateInput = null) {
+    // Hitung jam dalam WITA untuk business date cutoff
     const now = dateInput ? new Date(dateInput) : new Date();
-    if (now.getHours() < this.BUSINESS_DAY_CUTOFF_HOUR) {
-      now.setDate(now.getDate() - 1);
+    const witaOffset = 8 * 60; // WITA = UTC+8
+    const localOffset = now.getTimezoneOffset(); // menit, negatif untuk positif offset
+    const witaMs = now.getTime() + (witaOffset + localOffset) * 60000;
+    const witaDate = new Date(witaMs);
+    if (witaDate.getHours() < this.BUSINESS_DAY_CUTOFF_HOUR) {
+      witaDate.setDate(witaDate.getDate() - 1);
     }
-    return now.toISOString().slice(0, 10);
+    return witaDate.toISOString().slice(0, 10);
   },
 
   // BUG 5A FIX: use padStart(2,'0') for both startHour and endHour

@@ -675,8 +675,8 @@ Contoh Response:
 
 ### Penjualan
   id               : ID unik transaksi (integer)
-  tanggal          : Tanggal transaksi (YYYY-MM-DD), timezone WIB
-  waktu            : Jam transaksi (HH:MM:SS), timezone WIB
+  tanggal          : Tanggal transaksi (YYYY-MM-DD), timezone WITA (UTC+8)
+  waktu            : Jam transaksi (HH:MM:SS), timezone WITA (UTC+8)
   cabang           : Nama cabang/outlet
   total_penjualan  : Total yang dibayar pelanggan (rupiah, sudah termasuk semua biaya)
   subtotal         : Total sebelum diskon
@@ -687,8 +687,8 @@ Contoh Response:
 
 ### Kas Keluar
   id               : ID unik entri kas keluar (integer)
-  tanggal          : Tanggal pengeluaran (YYYY-MM-DD), timezone WIB
-  waktu            : Jam pengeluaran (HH:MM:SS), timezone WIB
+  tanggal          : Tanggal pengeluaran (YYYY-MM-DD), timezone WITA (UTC+8)
+  waktu            : Jam pengeluaran (HH:MM:SS), timezone WITA (UTC+8)
   cabang           : Nama cabang/outlet
   nama_pengeluaran : Nama atau deskripsi singkat pengeluaran
   kategori         : Kategori pengeluaran (dari master kategori kas)
@@ -711,7 +711,7 @@ Contoh Response:
   (satu baris per hari dalam rentang yang diminta)
 
 ## ─── Catatan Penting ──────────────────────────────────────────────────────
-1. Semua waktu menggunakan timezone Asia/Jakarta (WIB, UTC+7)
+1. Semua waktu menggunakan timezone WITA — Asia/Makassar (UTC+8, Waktu Indonesia Tengah)
 2. Data penjualan HANYA mencakup transaksi status "completed" — void tidak dimasukkan
 3. Data kas keluar HANYA mencakup yang belum di-void (is_void = false)
 4. Jika tidak ada data, field "data" berisi array kosong []

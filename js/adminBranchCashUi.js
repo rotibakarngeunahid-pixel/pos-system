@@ -453,21 +453,36 @@ const adminBranchCashUi = {
     const tbody = document.getElementById('bc-ledger-table-body');
     if (!tbody) return;
     if (!this._ledgerData.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Belum ada riwayat.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-td">Belum ada riwayat.</td></tr>';
       return;
     }
 
+    // ── Label tipe gerakan kas ──────────────────────────────────────────
     const typeLabels = {
-      default_seed:         'Inisialisasi',
-      session_open_confirm: 'Buka Shift',
-      opening_variance:     'Selisih Buka',
-      session_close:        'Tutup Shift',
-      deposit_approved:     'Setoran Approved',
-      deposit_rejected:     'Setoran Ditolak',
-      admin_adjustment:     'Koreksi Admin',
-      force_close:          'Paksa Tutup',
-      system_repair:        'Perbaikan Sistem'
+      // Shift
+      default_seed:          'Inisialisasi',
+      session_open_confirm:  'Buka Shift',
+      opening_variance:      'Selisih Buka',
+      session_close:         'Tutup Shift',
+      force_close:           'Paksa Tutup',
+      system_repair:         'Perbaikan Sistem',
+      // Penjualan tunai (real-time sync — migration 050)
+      sale_cash_in:          'Penjualan Tunai',
+      sale_cash_void:        'Void Penjualan',
+      // Kas masuk/keluar manual staff (real-time sync — migration 050)
+      manual_cash_in:        'Kas Masuk Manual',
+      manual_cash_out:       'Kas Keluar Manual',
+      manual_cash_in_void:   'Void Kas Masuk',
+      manual_cash_out_void:  'Void Kas Keluar',
+      // Setoran
+      deposit_approved:      'Setoran Approved',
+      deposit_rejected:      'Setoran Ditolak',
+      // Admin
+      admin_adjustment:      'Koreksi Admin',
+      sale_cash_backfill:    'Backfill Penjualan'
     };
+
+    // ── Badge arah ──────────────────────────────────────────────────────
     const dirBadge = dir => {
       if (dir === 'in')     return '<span class="badge badge-success">Masuk</span>';
       if (dir === 'out')    return '<span class="badge badge-danger">Keluar</span>';
@@ -475,19 +490,41 @@ const adminBranchCashUi = {
       return '<span class="badge badge-default">—</span>';
     };
 
-    tbody.innerHTML = this._ledgerData.map(row => `<tr>
-      <td style="font-size:11px;white-space:nowrap">${fDate(row.created_at)}</td>
-      <td><span class="badge badge-default" style="font-size:10px">${typeLabels[row.movement_type] || row.movement_type}</span></td>
-      <td>${dirBadge(row.direction)}</td>
-      <td style="font-weight:700">${formatRupiah(row.amount)}</td>
-      <td>${formatRupiah(row.balance_before)}</td>
-      <td style="font-weight:700;color:var(--primary)">${formatRupiah(row.balance_after)}</td>
-      <td>${row.variance_amount != null && row.variance_amount !== 0
+    // ── Badge tipe ──────────────────────────────────────────────────────
+    const typeBadgeClass = mt => {
+      if (['sale_cash_in', 'manual_cash_in'].includes(mt))   return 'badge-success';
+      if (['sale_cash_void', 'manual_cash_in_void',
+           'manual_cash_out', 'manual_cash_out_void',
+           'deposit_approved'].includes(mt))                  return 'badge-danger';
+      if (['deposit_rejected', 'admin_adjustment',
+           'opening_variance'].includes(mt))                  return 'badge-warning';
+      return 'badge-default';
+    };
+
+    tbody.innerHTML = this._ledgerData.map(row => {
+      const label    = typeLabels[row.movement_type] || row.movement_type;
+      const cls      = typeBadgeClass(row.movement_type);
+      const saldoBefore = formatRupiah(row.balance_before);
+      const saldoAfter  = formatRupiah(row.balance_after);
+      const actor    = escHtml(row.staff_name || row.admin_name || '—');
+      const reason   = escHtml(row.reason || '—');
+      const variance = row.variance_amount != null && row.variance_amount !== 0
         ? `<span style="color:${Number(row.variance_amount) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Number(row.variance_amount) >= 0 ? '+' : ''}${formatRupiah(row.variance_amount)}</span>`
-        : '<span class="text-muted">—</span>'}</td>
-      <td style="font-size:12px">${escHtml(row.staff_name || row.admin_name || '—')}</td>
-      <td style="font-size:11px;max-width:180px;word-break:break-word">${escHtml(row.reason || '—')}</td>
-    </tr>`).join('');
+        : '<span class="text-muted">—</span>';
+
+      return `<tr>
+        <td style="font-size:11px;white-space:nowrap">${fDate(row.created_at)}</td>
+        <td><span class="badge ${cls}" style="font-size:10px;white-space:nowrap">${label}</span></td>
+        <td>${dirBadge(row.direction)}</td>
+        <td style="font-weight:700;text-align:right">${formatRupiah(row.amount)}</td>
+        <td style="text-align:right;color:var(--text-muted)">${saldoBefore}</td>
+        <td style="font-weight:700;color:var(--primary);text-align:right">${saldoAfter}</td>
+        <td>${variance}</td>
+        <td style="font-size:12px">${actor}</td>
+        <td style="font-size:11px;max-width:180px;word-break:break-word">${reason}</td>
+      </tr>`;
+    }).join('');
+
     if (window.lucide) lucide.createIcons();
   },
 
