@@ -1359,24 +1359,50 @@
               <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Generator Link — Data Penjualan</span>
             </div>
             <div class="p-4">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+              <!-- Info banner -->
+              <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text)">
+                <i data-lucide="info" style="width:13px;height:13px;vertical-align:middle;margin-right:5px;color:#2563eb"></i>
+                <strong>Tanpa filter tanggal</strong> — Link di bawah mengembalikan <strong>semua data</strong>.
+                Filter tanggal, pagination, dan sortir dilakukan di <strong>sistem keuangan Anda</strong>.
+                Gunakan parameter <code>p_limit</code> &amp; <code>p_offset</code> untuk paginasi.
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px">
                 <div class="form-group" style="margin:0">
                   <label class="form-label">Cabang <span class="text-muted fw-400">(opsional)</span></label>
                   <select class="form-control" id="dip-sales-branch"><option value="">Semua Cabang</option></select>
                 </div>
                 <div class="form-group" style="margin:0">
-                  <label class="form-label">Tanggal Mulai</label>
-                  <input type="date" class="form-control" id="dip-sales-date-from" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">Tanggal Akhir</label>
-                  <input type="date" class="form-control" id="dip-sales-date-to" />
-                </div>
-                <div class="form-group" style="margin:0">
                   <label class="form-label">API Key <span style="color:var(--danger)">*</span></label>
                   <select class="form-control" id="dip-sales-apikey"><option value="">— Pilih API Key —</option></select>
                 </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Maks. Record <span class="text-muted fw-400">(p_limit)</span></label>
+                  <input type="number" class="form-control" id="dip-sales-limit" value="1000" min="1" max="5000" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Mulai Dari <span class="text-muted fw-400">(p_offset)</span></label>
+                  <input type="number" class="form-control" id="dip-sales-offset" value="0" min="0" />
+                </div>
               </div>
+
+              <!-- Filter tanggal — hanya untuk preview, tidak masuk link utama -->
+              <details style="margin-bottom:14px">
+                <summary style="font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;padding:4px 0">
+                  <i data-lucide="filter" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>
+                  Filter tanggal untuk Preview (opsional — tidak dimasukkan ke link API)
+                </summary>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;padding:12px;background:var(--bg-alt);border-radius:var(--r-md);border:1px solid var(--border)">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label text-xs">Tanggal Mulai</label>
+                    <input type="date" class="form-control" id="dip-sales-date-from" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label text-xs">Tanggal Akhir</label>
+                    <input type="date" class="form-control" id="dip-sales-date-to" />
+                  </div>
+                </div>
+              </details>
 
               <div class="form-group" style="margin-bottom:12px">
                 <label class="form-label"><i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px"></i> Link Endpoint Penjualan</label>
@@ -1385,7 +1411,7 @@
                 </div>
                 <div class="text-xs text-muted mt-2">
                   <i data-lucide="info" style="width:12px;height:12px;vertical-align:middle;margin-right:3px"></i>
-                  Link ini berisi API key Anda. Sistem keuangan dapat mengakses link ini kapan saja untuk mendapatkan data terbaru.
+                  Link ini mengembalikan semua data penjualan. Tempel langsung ke sistem keuangan Anda — filter tanggal dilakukan di sana.
                 </div>
               </div>
 
@@ -1436,24 +1462,48 @@
               <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Generator Link — Data Kas Keluar</span>
             </div>
             <div class="p-4">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+              <!-- Info banner -->
+              <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text)">
+                <i data-lucide="info" style="width:13px;height:13px;vertical-align:middle;margin-right:5px;color:#2563eb"></i>
+                <strong>Tanpa filter tanggal</strong> — Link di bawah mengembalikan <strong>semua data kas keluar</strong>.
+                Filter tanggal dilakukan di sistem keuangan Anda.
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px">
                 <div class="form-group" style="margin:0">
                   <label class="form-label">Cabang <span class="text-muted fw-400">(opsional)</span></label>
                   <select class="form-control" id="dip-cashout-branch"><option value="">Semua Cabang</option></select>
                 </div>
                 <div class="form-group" style="margin:0">
-                  <label class="form-label">Tanggal Mulai</label>
-                  <input type="date" class="form-control" id="dip-cashout-date-from" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">Tanggal Akhir</label>
-                  <input type="date" class="form-control" id="dip-cashout-date-to" />
-                </div>
-                <div class="form-group" style="margin:0">
                   <label class="form-label">API Key <span style="color:var(--danger)">*</span></label>
                   <select class="form-control" id="dip-cashout-apikey"><option value="">— Pilih API Key —</option></select>
                 </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Maks. Record <span class="text-muted fw-400">(p_limit)</span></label>
+                  <input type="number" class="form-control" id="dip-cashout-limit" value="1000" min="1" max="5000" />
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Mulai Dari <span class="text-muted fw-400">(p_offset)</span></label>
+                  <input type="number" class="form-control" id="dip-cashout-offset" value="0" min="0" />
+                </div>
               </div>
+
+              <details style="margin-bottom:14px">
+                <summary style="font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;padding:4px 0">
+                  <i data-lucide="filter" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>
+                  Filter tanggal untuk Preview (opsional — tidak dimasukkan ke link API)
+                </summary>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;padding:12px;background:var(--bg-alt);border-radius:var(--r-md);border:1px solid var(--border)">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label text-xs">Tanggal Mulai</label>
+                    <input type="date" class="form-control" id="dip-cashout-date-from" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label text-xs">Tanggal Akhir</label>
+                    <input type="date" class="form-control" id="dip-cashout-date-to" />
+                  </div>
+                </div>
+              </details>
 
               <div class="form-group" style="margin-bottom:12px">
                 <label class="form-label"><i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px"></i> Link Endpoint Kas Keluar</label>
@@ -1509,24 +1559,39 @@
               <span class="card-title"><i data-lucide="settings-2" class="icon-sm"></i> Generator Link — Ringkasan Gabungan</span>
             </div>
             <div class="p-4">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px">
+              <!-- Info banner -->
+              <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text)">
+                <i data-lucide="info" style="width:13px;height:13px;vertical-align:middle;margin-right:5px;color:#2563eb"></i>
+                <strong>Ringkasan semua periode</strong> — mengembalikan total penjualan, total kas keluar, selisih, ringkasan per cabang, dan ringkasan per tanggal. Filter tanggal bersifat opsional.
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px">
                 <div class="form-group" style="margin:0">
                   <label class="form-label">Cabang <span class="text-muted fw-400">(opsional)</span></label>
                   <select class="form-control" id="dip-summary-branch"><option value="">Semua Cabang</option></select>
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">Tanggal Mulai</label>
-                  <input type="date" class="form-control" id="dip-summary-date-from" />
-                </div>
-                <div class="form-group" style="margin:0">
-                  <label class="form-label">Tanggal Akhir</label>
-                  <input type="date" class="form-control" id="dip-summary-date-to" />
                 </div>
                 <div class="form-group" style="margin:0">
                   <label class="form-label">API Key <span style="color:var(--danger)">*</span></label>
                   <select class="form-control" id="dip-summary-apikey"><option value="">— Pilih API Key —</option></select>
                 </div>
               </div>
+
+              <details style="margin-bottom:14px">
+                <summary style="font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;padding:4px 0">
+                  <i data-lucide="filter" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"></i>
+                  Filter tanggal untuk Preview (opsional)
+                </summary>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;padding:12px;background:var(--bg-alt);border-radius:var(--r-md);border:1px solid var(--border)">
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label text-xs">Tanggal Mulai</label>
+                    <input type="date" class="form-control" id="dip-summary-date-from" />
+                  </div>
+                  <div class="form-group" style="margin:0">
+                    <label class="form-label text-xs">Tanggal Akhir</label>
+                    <input type="date" class="form-control" id="dip-summary-date-to" />
+                  </div>
+                </div>
+              </details>
 
               <div class="form-group" style="margin-bottom:12px">
                 <label class="form-label"><i data-lucide="link-2" style="width:13px;height:13px;vertical-align:middle;margin-right:3px"></i> Link Endpoint Ringkasan Gabungan</label>
@@ -1535,7 +1600,7 @@
                 </div>
                 <div class="text-xs text-muted mt-2">
                   <i data-lucide="info" style="width:12px;height:12px;vertical-align:middle;margin-right:3px"></i>
-                  Endpoint ini mengembalikan total penjualan, total kas keluar, selisih, serta ringkasan per cabang dan per tanggal sekaligus.
+                  Endpoint ini mengembalikan total penjualan, total kas keluar, selisih, ringkasan per cabang dan per tanggal sekaligus.
                 </div>
               </div>
 

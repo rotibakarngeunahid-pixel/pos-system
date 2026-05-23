@@ -53,27 +53,31 @@ const adminDataIntegrationPortalUi = {
 
     // ── Tab: Penjualan ──────────────────────────────────────────
     on('dip-sales-branch',     'change', () => this._buildLink('sales'));
-    on('dip-sales-date-from',  'change', () => this._buildLink('sales'));
-    on('dip-sales-date-to',    'change', () => this._buildLink('sales'));
     on('dip-sales-apikey',     'change', () => this._buildLink('sales'));
+    on('dip-sales-limit',      'input',  () => this._buildLink('sales'));
+    on('dip-sales-offset',     'input',  () => this._buildLink('sales'));
+    on('dip-sales-date-from',  'change', () => {}); // tanggal hanya untuk preview
+    on('dip-sales-date-to',    'change', () => {});
     on('dip-sales-copy-btn',   'click',  () => this._copyLink('sales'));
     on('dip-sales-preview-btn','click',  () => this._loadPreview('sales'));
     on('dip-sales-export-btn', 'click',  () => this._exportCsv('sales'));
 
     // ── Tab: Kas Keluar ─────────────────────────────────────────
     on('dip-cashout-branch',      'change', () => this._buildLink('cashout'));
-    on('dip-cashout-date-from',   'change', () => this._buildLink('cashout'));
-    on('dip-cashout-date-to',     'change', () => this._buildLink('cashout'));
     on('dip-cashout-apikey',      'change', () => this._buildLink('cashout'));
+    on('dip-cashout-limit',       'input',  () => this._buildLink('cashout'));
+    on('dip-cashout-offset',      'input',  () => this._buildLink('cashout'));
+    on('dip-cashout-date-from',   'change', () => {}); // tanggal hanya untuk preview
+    on('dip-cashout-date-to',     'change', () => {});
     on('dip-cashout-copy-btn',    'click',  () => this._copyLink('cashout'));
     on('dip-cashout-preview-btn', 'click',  () => this._loadPreview('cashout'));
     on('dip-cashout-export-btn',  'click',  () => this._exportCsv('cashout'));
 
     // ── Tab: Ringkasan ──────────────────────────────────────────
     on('dip-summary-branch',      'change', () => this._buildLink('summary'));
-    on('dip-summary-date-from',   'change', () => this._buildLink('summary'));
-    on('dip-summary-date-to',     'change', () => this._buildLink('summary'));
     on('dip-summary-apikey',      'change', () => this._buildLink('summary'));
+    on('dip-summary-date-from',   'change', () => {});
+    on('dip-summary-date-to',     'change', () => {});
     on('dip-summary-copy-btn',    'click',  () => this._copyLink('summary'));
     on('dip-summary-preview-btn', 'click',  () => this._loadPreview('summary'));
 
@@ -92,15 +96,11 @@ const adminDataIntegrationPortalUi = {
     this._updateDocEndpoints();
   },
 
-  // ── Set default tanggal hari ini ──────────────────────────────────────
+  // ── Set defaults (tidak lagi auto-fill tanggal) ───────────────────────
+  // Tanggal dibiarkan kosong — semua data dikembalikan oleh API.
+  // Filter tanggal dilakukan di sistem keuangan eksternal.
   _setDefaults() {
-    const today = new Date().toISOString().slice(0, 10);
-    ['sales', 'cashout', 'summary'].forEach(tab => {
-      const fromEl = document.getElementById(`dip-${tab}-date-from`);
-      const toEl   = document.getElementById(`dip-${tab}-date-to`);
-      if (fromEl && !fromEl.value) fromEl.value = today;
-      if (toEl   && !toEl.value)   toEl.value   = today;
-    });
+    // Tidak set default tanggal. Tanggal opsional untuk preview saja.
   },
 
   // ── Muat daftar API key ke semua dropdown ──────────────────────────────
@@ -168,11 +168,16 @@ const adminDataIntegrationPortalUi = {
   },
 
   // ── Build & display endpoint link ─────────────────────────────────────
+  // Link utama TIDAK menyertakan tanggal — filter dilakukan di sistem keuangan.
+  // Limit & offset disertakan agar sistem keuangan bisa langsung pakai pagination.
   _buildLink(tab) {
     const apiKey   = document.getElementById(`dip-${tab}-apikey`)?.value    || '';
     const branchId = document.getElementById(`dip-${tab}-branch`)?.value    || '';
-    const dateFrom = document.getElementById(`dip-${tab}-date-from`)?.value || '';
-    const dateTo   = document.getElementById(`dip-${tab}-date-to`)?.value   || '';
+    // Limit/offset hanya ada di tab sales & cashout; summary tidak pakai
+    const limitEl  = document.getElementById(`dip-${tab}-limit`);
+    const offsetEl = document.getElementById(`dip-${tab}-offset`);
+    const limit    = limitEl  ? (parseInt(limitEl.value, 10)  || 1000) : null;
+    const offset   = offsetEl ? (parseInt(offsetEl.value, 10) || 0)    : null;
     const linkBox  = document.getElementById(`dip-${tab}-link-box`);
     const copyBtn  = document.getElementById(`dip-${tab}-copy-btn`);
 
@@ -190,9 +195,9 @@ const adminDataIntegrationPortalUi = {
                   :                     'get_integration_summary';
 
     const params = new URLSearchParams({ apikey: supaKey, p_api_key: apiKey });
-    if (branchId) params.set('p_branch_id', branchId);
-    if (dateFrom) params.set('p_date_from', dateFrom);
-    if (dateTo)   params.set('p_date_to',   dateTo);
+    if (branchId)     params.set('p_branch_id', branchId);
+    if (limit  !== null) params.set('p_limit',  limit);
+    if (offset !== null && offset > 0) params.set('p_offset', offset);
 
     const link = `${supaUrl}/rest/v1/rpc/${rpcName}?${params.toString()}`;
     if (linkBox) { linkBox.textContent = link; linkBox.style.color = 'var(--text)'; }
@@ -222,7 +227,8 @@ const adminDataIntegrationPortalUi = {
     }
   },
 
-  // ── Validasi tanggal ───────────────────────────────────────────────────
+  // ── Validasi tanggal (opsional — hanya untuk preview) ─────────────────
+  // Tidak ada batasan 365 hari. Filter tanggal sepenuhnya opsional.
   _validateDates(tab) {
     const from  = document.getElementById(`dip-${tab}-date-from`)?.value;
     const to    = document.getElementById(`dip-${tab}-date-to`)?.value;
@@ -233,10 +239,6 @@ const adminDataIntegrationPortalUi = {
     if (from && to && from > to) {
       show('Tanggal mulai tidak boleh lebih besar dari tanggal akhir.');
       return false;
-    }
-    if (from && to) {
-      const days = (new Date(to) - new Date(from)) / 86400000;
-      if (days > 365) { show('Rentang tanggal maksimal 365 hari dalam satu request.'); return false; }
     }
     hide();
     return true;
@@ -324,11 +326,19 @@ const adminDataIntegrationPortalUi = {
     const totalEl = document.getElementById('dip-sales-total');
     const countEl = document.getElementById('dip-sales-count');
     const expBtn  = document.getElementById('dip-sales-export-btn');
-    const summary = result.summary || {};
+    const summary = result.summary    || {};
+    const page    = result.pagination || {};
 
     if (totalEl) totalEl.textContent = fRp(summary.total_penjualan  || 0);
-    if (countEl) countEl.textContent = (summary.jumlah_transaksi || 0) + ' transaksi';
-    if (expBtn)  expBtn.disabled     = !(result.data?.length > 0);
+    if (countEl) {
+      const returned = page.returned_count ?? (result.data?.length ?? 0);
+      const total    = page.total_count;
+      const hasMore  = page.has_more;
+      countEl.textContent = total != null
+        ? `${returned.toLocaleString('id-ID')} dari ${total.toLocaleString('id-ID')} transaksi${hasMore ? ' (ada halaman berikutnya)' : ''}`
+        : `${returned.toLocaleString('id-ID')} transaksi`;
+    }
+    if (expBtn)  expBtn.disabled = !(result.data?.length > 0);
 
     if (!tbody) return;
     const rows = result.data || [];
@@ -366,10 +376,19 @@ const adminDataIntegrationPortalUi = {
     const totalEl = document.getElementById('dip-cashout-total');
     const countEl = document.getElementById('dip-cashout-count');
     const expBtn  = document.getElementById('dip-cashout-export-btn');
+    const summary = result.summary    || {};
+    const page    = result.pagination || {};
 
-    if (totalEl) totalEl.textContent = fRp(result.total_pengeluaran || 0);
-    if (countEl) countEl.textContent = (result.jumlah_data || 0) + ' transaksi';
-    if (expBtn)  expBtn.disabled     = !(result.data?.length > 0);
+    if (totalEl) totalEl.textContent = fRp(summary.total_kas_keluar || result.total_pengeluaran || 0);
+    if (countEl) {
+      const returned = page.returned_count ?? (result.data?.length ?? 0);
+      const total    = page.total_count;
+      const hasMore  = page.has_more;
+      countEl.textContent = total != null
+        ? `${returned.toLocaleString('id-ID')} dari ${total.toLocaleString('id-ID')} entri${hasMore ? ' (ada halaman berikutnya)' : ''}`
+        : `${returned.toLocaleString('id-ID')} entri`;
+    }
+    if (expBtn)  expBtn.disabled = !(result.data?.length > 0);
 
     if (!tbody) return;
     const rows = result.data || [];
@@ -520,17 +539,17 @@ const adminDataIntegrationPortalUi = {
     showToast('File CSV berhasil diunduh', 'success');
   },
 
-  // ── Update endpoint docs (gunakan nilai aktual dari SUPABASE_URL) ────────
+  // ── Update endpoint docs ──────────────────────────────────────────────
+  // Tampilkan URL tanpa tanggal — filter tanggal dilakukan di sistem keuangan.
   _updateDocEndpoints() {
-    const base  = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '');
-    const anon  = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '');
-    const ph    = '<API_KEY>';
-    const dates = '&p_date_from=YYYY-MM-DD&p_date_to=YYYY-MM-DD';
+    const base = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '');
+    const anon = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '');
+    const ph   = '<API_KEY>';
 
     const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    setEl('dip-doc-sales-ep',    `${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=${ph}${dates}`);
-    setEl('dip-doc-cashout-ep',  `${base}/rest/v1/rpc/get_kas_keluar_integration?apikey=${anon}&p_api_key=${ph}${dates}`);
-    setEl('dip-doc-summary-ep',  `${base}/rest/v1/rpc/get_integration_summary?apikey=${anon}&p_api_key=${ph}${dates}`);
+    setEl('dip-doc-sales-ep',   `${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=${ph}&p_limit=1000&p_offset=0`);
+    setEl('dip-doc-cashout-ep', `${base}/rest/v1/rpc/get_kas_keluar_integration?apikey=${anon}&p_api_key=${ph}&p_limit=1000&p_offset=0`);
+    setEl('dip-doc-summary-ep', `${base}/rest/v1/rpc/get_integration_summary?apikey=${anon}&p_api_key=${ph}`);
   },
 
   // ── Salin semua dokumentasi ke clipboard ───────────────────────────────
@@ -544,55 +563,86 @@ const adminDataIntegrationPortalUi = {
 # Dibuat: ${new Date().toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' })}
 # ====================================================================
 
-## Fungsi Portal
-Portal ini menyediakan akses terstruktur ke data kasir Roti Bakar Ngeunah.
-Sistem keuangan cukup mengirim HTTP GET request ke endpoint di bawah ini
-untuk mendapatkan data dalam format JSON yang siap diproses.
+## Konsep Dasar
+API ini mengembalikan SEMUA data tanpa filter tanggal wajib.
+Filter tanggal, pengelompokan, dan analisis dilakukan di SISTEM KEUANGAN Anda.
+Gunakan p_limit + p_offset untuk mengambil data secara bertahap (pagination).
 
-## Base URL Supabase
+## Base URL
 ${base}/rest/v1/rpc/
 
 ## Autentikasi (WAJIB)
-Setiap request harus menyertakan DUA parameter berikut:
-  1. apikey    : Supabase public anon key (sudah termasuk dalam URL endpoint)
-  2. p_api_key : API key yang dikelola admin di halaman Portal Integrasi Data
+Setiap request harus menyertakan:
+  1. apikey    : Supabase anon key (sudah termasuk dalam URL yang di-generate portal ini)
+  2. p_api_key : API key yang dibuat di menu API Keys
 
-Jika API key tidak valid, response akan berisi:
+Jika API key tidak valid:
   { "success": false, "error": "API key tidak valid atau tidak aktif." }
 
+## ─── PAGINATION ──────────────────────────────────────────────────────────
+Semua endpoint mendukung pagination dengan parameter:
+  - p_limit  : Jumlah record per request (default 1000, maks 5000)
+  - p_offset : Mulai dari record ke-N (default 0)
+
+Setiap response menyertakan field "pagination":
+  {
+    "limit":          1000,
+    "offset":         0,
+    "total_count":    3500,   ← total semua record di database
+    "returned_count": 1000,   ← jumlah record di response ini
+    "has_more":       true    ← masih ada halaman berikutnya
+  }
+
+Cara tarik semua data (loop di sistem keuangan Anda):
+  offset = 0
+  LOOP:
+    GET ...?p_limit=1000&p_offset={offset}
+    proses data[]
+    jika has_more = false → STOP
+    offset += 1000
+
 ## ─── ENDPOINT 1: Data Penjualan ─────────────────────────────────────────
-URL  : ${base}/rest/v1/rpc/get_sales_integration
+URL   : ${base}/rest/v1/rpc/get_sales_integration
 Method: GET
 
 Parameter:
-  - p_api_key   (wajib)  : API key Anda
-  - p_date_from (opsional): Tanggal mulai, format YYYY-MM-DD
-  - p_date_to   (opsional): Tanggal akhir, format YYYY-MM-DD
-  - p_branch_id (opsional): ID integer cabang untuk filter spesifik
+  - p_api_key   (wajib)   : API key Anda
+  - p_limit     (opsional): Jumlah record (default 1000, maks 5000)
+  - p_offset    (opsional): Mulai dari record ke-N (default 0)
+  - p_branch_id (opsional): ID integer cabang untuk filter per outlet
+  - p_date_from (opsional): Filter tanggal mulai YYYY-MM-DD (WITA)
+  - p_date_to   (opsional): Filter tanggal akhir YYYY-MM-DD (WITA)
 
-Contoh URL (bulan Mei 2026):
-${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=<API_KEY>&p_date_from=2026-05-01&p_date_to=2026-05-31
+Contoh — ambil halaman pertama semua data:
+${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=<API_KEY>&p_limit=1000&p_offset=0
+
+Contoh — filter bulan Mei 2026 (dilakukan dari sistem keuangan):
+${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=<API_KEY>&p_limit=1000&p_offset=0&p_date_from=2026-05-01&p_date_to=2026-05-31
 
 Contoh Response:
 {
   "success": true,
   "type": "sales",
-  "diambil_pada": "2026-05-23 09:00:00",
-  "periode": { "tanggal_mulai": "2026-05-01", "tanggal_akhir": "2026-05-31" },
+  "diambil_pada": "2026-05-23 09:00:00 WITA",
+  "periode": { "tanggal_mulai": "semua", "tanggal_akhir": "semua" },
+  "pagination": {
+    "limit": 1000, "offset": 0,
+    "total_count": 3500, "returned_count": 1000, "has_more": true
+  },
   "summary": {
-    "total_penjualan": 2500000,
-    "jumlah_transaksi": 120
+    "total_penjualan": 12500000,
+    "jumlah_transaksi": 1000
   },
   "data": [
     {
       "id": 1001,
       "tanggal": "2026-05-23",
       "waktu": "09:15:00",
-      "cabang": "Dalung",
+      "cabang": "Bundaran Dalung",
       "total_penjualan": 25000,
       "subtotal": 25000,
       "diskon": 0,
-      "metode_pembayaran": "Tunai",
+      "metode_pembayaran": "cash",
       "status": "completed",
       "kasir": "Budi"
     }
@@ -600,28 +650,34 @@ Contoh Response:
 }
 
 ## ─── ENDPOINT 2: Data Kas Keluar ─────────────────────────────────────────
-URL  : ${base}/rest/v1/rpc/get_kas_keluar_integration
+URL   : ${base}/rest/v1/rpc/get_kas_keluar_integration
 Method: GET
 
 Parameter: sama seperti endpoint penjualan.
 
-Contoh URL (bulan Mei 2026):
-${base}/rest/v1/rpc/get_kas_keluar_integration?apikey=${anon}&p_api_key=<API_KEY>&p_date_from=2026-05-01&p_date_to=2026-05-31
+Contoh — ambil halaman pertama semua kas keluar:
+${base}/rest/v1/rpc/get_kas_keluar_integration?apikey=${anon}&p_api_key=<API_KEY>&p_limit=1000&p_offset=0
 
 Contoh Response:
 {
   "success": true,
-  "diambil_pada": "2026-05-23 09:00:00",
-  "periode": { "tanggal_mulai": "2026-05-01", "tanggal_akhir": "2026-05-31" },
-  "total_pengeluaran": 750000,
-  "jumlah_data": 25,
+  "type": "kas_keluar",
+  "diambil_pada": "2026-05-23 09:00:00 WITA",
+  "periode": { "tanggal_mulai": "semua", "tanggal_akhir": "semua" },
+  "pagination": {
+    "limit": 1000, "offset": 0,
+    "total_count": 450, "returned_count": 450, "has_more": false
+  },
+  "summary": {
+    "total_kas_keluar": 3750000,
+    "jumlah_transaksi": 450
+  },
   "data": [
     {
       "id": 42,
       "tanggal": "2026-05-23",
       "waktu": "08:45:00",
-      "cabang": "Dalung",
-      "nama_pengeluaran": "Pembelian bahan baku",
+      "cabang": "Bundaran Dalung",
       "kategori": "Bahan / Operasional",
       "nominal": 50000,
       "keterangan": "Pembelian mentega",
@@ -631,94 +687,76 @@ Contoh Response:
 }
 
 ## ─── ENDPOINT 3: Ringkasan Gabungan ──────────────────────────────────────
-URL  : ${base}/rest/v1/rpc/get_integration_summary
+URL   : ${base}/rest/v1/rpc/get_integration_summary
 Method: GET
 
-Parameter: sama seperti endpoint penjualan.
+Parameter: p_api_key (wajib), p_branch_id / p_date_from / p_date_to (opsional).
 Mengembalikan: total penjualan, total kas keluar, selisih,
                ringkasan per cabang, dan ringkasan per tanggal.
+Catatan: jika tanggal tidak dikirim, per_tanggal dikelompokkan dari data nyata.
 
-Contoh URL (bulan Mei 2026):
-${base}/rest/v1/rpc/get_integration_summary?apikey=${anon}&p_api_key=<API_KEY>&p_date_from=2026-05-01&p_date_to=2026-05-31
+Contoh:
+${base}/rest/v1/rpc/get_integration_summary?apikey=${anon}&p_api_key=<API_KEY>
 
 Contoh Response:
 {
   "success": true,
   "type": "summary",
-  "diambil_pada": "2026-05-23 09:00:00",
-  "periode": { "tanggal_mulai": "2026-05-01", "tanggal_akhir": "2026-05-31" },
+  "diambil_pada": "2026-05-23 09:00:00 WITA",
+  "periode": { "tanggal_mulai": "semua", "tanggal_akhir": "semua" },
   "summary": {
-    "total_penjualan": 2500000,
-    "jumlah_transaksi": 120,
-    "total_kas_keluar": 750000,
-    "jumlah_kas_keluar": 25,
-    "selisih": 1750000
+    "total_penjualan": 87500000,
+    "jumlah_transaksi": 3500,
+    "total_kas_keluar": 22000000,
+    "jumlah_kas_keluar": 450,
+    "selisih": 65500000
   },
   "per_cabang": [
     {
-      "cabang": "Dalung",
-      "total_penjualan": 1500000,
-      "jumlah_transaksi": 75,
-      "total_kas_keluar": 400000
+      "cabang": "Bundaran Dalung",
+      "total_penjualan": 45000000,
+      "jumlah_transaksi": 1800,
+      "total_kas_keluar": 12000000
     }
   ],
   "per_tanggal": [
-    {
-      "tanggal": "2026-05-23",
-      "total_penjualan": 150000,
-      "total_kas_keluar": 30000
-    }
+    { "tanggal": "2026-05-23", "total_penjualan": 850000, "total_kas_keluar": 150000 }
   ]
 }
 
 ## ─── Penjelasan Field Data ────────────────────────────────────────────────
 
-### Penjualan
+### Data Penjualan (field "data")
   id               : ID unik transaksi (integer)
-  tanggal          : Tanggal transaksi (YYYY-MM-DD), timezone WITA (UTC+8)
-  waktu            : Jam transaksi (HH:MM:SS), timezone WITA (UTC+8)
+  tanggal          : Tanggal (YYYY-MM-DD), WITA (UTC+8)
+  waktu            : Jam (HH:MM:SS), WITA (UTC+8)
   cabang           : Nama cabang/outlet
-  total_penjualan  : Total yang dibayar pelanggan (rupiah, sudah termasuk semua biaya)
+  total_penjualan  : Total yang dibayar pelanggan (rupiah)
   subtotal         : Total sebelum diskon
-  diskon           : Jumlah diskon yang diberikan
-  metode_pembayaran: Cara bayar (Tunai, QRIS, Transfer, dsb)
-  status           : Selalu "completed" — transaksi void tidak dimasukkan
-  kasir            : Nama staff yang melayani
+  diskon           : Jumlah diskon
+  metode_pembayaran: cash / qris / transfer / dsb
+  status           : Selalu "completed" — void tidak dimasukkan
+  kasir            : Nama staff kasir
 
-### Kas Keluar
-  id               : ID unik entri kas keluar (integer)
-  tanggal          : Tanggal pengeluaran (YYYY-MM-DD), timezone WITA (UTC+8)
-  waktu            : Jam pengeluaran (HH:MM:SS), timezone WITA (UTC+8)
+### Data Kas Keluar (field "data")
+  id               : ID unik entri (integer)
+  tanggal          : Tanggal (YYYY-MM-DD), WITA (UTC+8)
+  waktu            : Jam (HH:MM:SS), WITA (UTC+8)
   cabang           : Nama cabang/outlet
-  nama_pengeluaran : Nama atau deskripsi singkat pengeluaran
-  kategori         : Kategori pengeluaran (dari master kategori kas)
-  nominal          : Jumlah pengeluaran dalam rupiah
-  keterangan       : Catatan tambahan (bisa kosong)
-  dicatat_oleh     : Nama staff yang mencatat
-
-### Ringkasan (summary field)
-  total_penjualan  : Total semua penjualan dalam periode
-  jumlah_transaksi : Jumlah transaksi completed
-  total_kas_keluar : Total semua kas keluar dalam periode
-  jumlah_kas_keluar: Jumlah entri kas keluar
-  selisih          : total_penjualan - total_kas_keluar (positif = surplus)
-
-### Ringkasan per_cabang
-  Array objek dengan field: cabang, total_penjualan, jumlah_transaksi, total_kas_keluar
-
-### Ringkasan per_tanggal
-  Array objek dengan field: tanggal, total_penjualan, total_kas_keluar
-  (satu baris per hari dalam rentang yang diminta)
+  kategori         : Kategori pengeluaran
+  nominal          : Jumlah pengeluaran (rupiah)
+  keterangan       : Catatan tambahan
+  dicatat_oleh     : Nama staff
 
 ## ─── Catatan Penting ──────────────────────────────────────────────────────
-1. Semua waktu menggunakan timezone WITA — Asia/Makassar (UTC+8, Waktu Indonesia Tengah)
-2. Data penjualan HANYA mencakup transaksi status "completed" — void tidak dimasukkan
-3. Data kas keluar HANYA mencakup yang belum di-void (is_void = false)
-4. Jika tidak ada data, field "data" berisi array kosong []
-5. Parameter tanggal bersifat opsional — jika tidak dikirim, semua data dikembalikan
-6. Rentang tanggal maksimal 365 hari per request
-7. API key bersifat RAHASIA — jangan bagikan ke pihak yang tidak berwenang
-8. Gunakan endpoint summary untuk kalkulasi profit kasar (penjualan - pengeluaran)
+1. Semua waktu: WITA — Asia/Makassar (UTC+8, Waktu Indonesia Tengah)
+2. Data penjualan: hanya status "completed" — void tidak dimasukkan
+3. Data kas keluar: hanya yang belum di-void (is_void = false)
+4. Tidak ada data: field "data" berisi array kosong []
+5. Pagination: gunakan has_more untuk tahu apakah masih ada halaman berikutnya
+6. Maks per request: 5000 record — gunakan pagination untuk data lebih banyak
+7. API key bersifat RAHASIA — jangan bagikan ke pihak tidak berwenang
+8. Filter tanggal bersifat OPSIONAL — lakukan di sistem keuangan Anda
 `;
 
     try {
