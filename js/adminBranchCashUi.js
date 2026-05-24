@@ -230,7 +230,11 @@ const adminBranchCashUi = {
           </div>
           <div>
             <div class="bc-meta-label">Kas Akhir Terakhir</div>
-            <div class="bc-meta-value">${r.last_closing_cash != null ? formatRupiah(r.last_closing_cash) : '—'}</div>
+            <div class="bc-meta-value">${
+              r.shift_status === 'open'
+                ? formatRupiah(r.current_balance)
+                : (r.last_closing_cash != null ? formatRupiah(r.last_closing_cash) : '—')
+            }</div>
           </div>
           <div>
             <div class="bc-meta-label">Staff Buka</div>
