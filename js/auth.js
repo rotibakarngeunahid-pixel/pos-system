@@ -118,26 +118,42 @@ const auth = {
     return s;
   },
 
-  async validateCurrentUser() {
+  async validateCurrentUser(allowedRoles = null) {
     const local = this.getSession();
     if (!local) return null;
     try {
-      const activeRes = await db.from('users')
-        .select('is_active')
+      let { data, error } = await db.from('users')
+        .select('id, name, role, branch_id, is_active')
         .eq('id', local.id)
         .maybeSingle();
-      const activeErrMsg = (activeRes.error?.message || '').toLowerCase();
-      if (activeRes.error && activeRes.error.code !== '42703' && !activeErrMsg.includes('is_active')) {
-        throw activeRes.error;
-      }
-      if (activeRes.data?.is_active === false) {
-        throw new Error('Akun sudah dinonaktifkan');
+
+      const errMsg = String(error?.message || '').toLowerCase();
+      if (error && (error.code === '42703' || errMsg.includes('is_active'))) {
+        ({ data, error } = await db.from('users')
+          .select('id, name, role, branch_id')
+          .eq('id', local.id)
+          .maybeSingle());
       }
 
-      const { data, error } = await db.rpc('get_current_user');
       if (error) throw error;
       if (!data) throw new Error('Session tidak valid');
-      return local;
+      if (data.is_active === false) throw new Error('Akun sudah dinonaktifkan');
+
+      const refreshed = {
+        ...local,
+        id: data.id,
+        name: data.name || local.name,
+        role: data.role || local.role,
+        branch_id: data.branch_id ?? local.branch_id ?? null,
+      };
+      this.setSession(refreshed);
+
+      if (Array.isArray(allowedRoles) && allowedRoles.length && !allowedRoles.includes(refreshed.role)) {
+        window.location.href = this.getDefaultPageByRole(refreshed.role);
+        return null;
+      }
+
+      return refreshed;
     } catch (err) {
       console.error('[AUTH] validateCurrentUser failed:', err);
       this.clearSession();

@@ -181,7 +181,7 @@ const POS = {
 
     this.user = auth.requireRole('staff');
     if (!this.user) return;
-    this.user = await auth.validateCurrentUser();
+    this.user = await auth.validateCurrentUser(['staff']);
     if (!this.user) return;
     const headerStaffEl = document.getElementById('header-staff-name');
     if (headerStaffEl) headerStaffEl.textContent = this.user.name;

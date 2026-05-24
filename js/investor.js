@@ -28,7 +28,7 @@ const INVESTOR = {
   async init() {
     this.user = auth.requireRole('investor');
     if (!this.user) return;
-    this.user = await auth.validateCurrentUser();
+    this.user = await auth.validateCurrentUser(['investor']);
     if (!this.user) return;
 
     document.getElementById('inv-user-name').textContent = this.user.name || '';

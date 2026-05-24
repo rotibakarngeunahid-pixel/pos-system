@@ -19,7 +19,7 @@ const ADMIN = {
   async init() {
     this.user = auth.requireAnyRole(['admin', 'owner']);
     if (!this.user) return;
-    this.user = await auth.validateCurrentUser();
+    this.user = await auth.validateCurrentUser(['admin', 'owner']);
     if (!this.user) return;
 
     document.addEventListener('click', (e) => {
