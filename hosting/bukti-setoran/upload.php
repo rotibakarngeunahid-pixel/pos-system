@@ -31,25 +31,27 @@ define('UPLOAD_DIR', __DIR__ . '/proofs/');
 define('BASE_URL', 'https://bukti-setoran.rotibakarngeunah.my.id/proofs/');
 // ─────────────────────────────────────────────────────────────────────────────
 
-// CORS — izinkan dari domain app Anda saja
+// ── CORS ─────────────────────────────────────────────────────────────────────
 $allowedOrigins = [
     'https://rotibakarngeunah.my.id',
     'https://www.rotibakarngeunah.my.id',
-    // Tambahkan domain lain jika perlu, misal: 'https://pos.rotibakarngeunah.my.id'
+    'https://pos-rbngeunah.vercel.app',
 ];
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if (in_array($origin, $allowedOrigins, true)) {
     header("Access-Control-Allow-Origin: $origin");
 } else {
-    // Fallback untuk development lokal — hapus baris ini di production
-    header('Access-Control-Allow-Origin: *');
+    http_response_code(403);
+    echo json_encode(['error' => 'Origin tidak diizinkan: ' . $origin]);
+    exit;
 }
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Content-Type: application/json; charset=utf-8');
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Preflight
+// Preflight OPTIONS
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
@@ -62,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// ── Verifikasi secret key ────────────────────────────────────────────────────
+// ── Verifikasi sesi login ────────────────────────────────────────────────────
 function getAuthorizationHeader(): string
 {
     if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
@@ -203,7 +205,7 @@ if (!in_array($mimeType, ALLOWED_MIME, true)) {
     exit;
 }
 
-// ── Tentukan ekstensi berdasarkan MIME (aman, bukan dari client) ─────────────
+// ── Tentukan ekstensi berdasarkan MIME ───────────────────────────────────────
 $extMap = [
     'image/jpeg'      => 'jpg',
     'image/png'       => 'png',
@@ -211,7 +213,7 @@ $extMap = [
 ];
 $ext = $extMap[$mimeType];
 
-// ── Ambil branchId dari form (opsional, untuk pengelompokan folder) ──────────
+// ── Ambil branchId dari form ──────────────────────────────────────────────────
 $branchId = preg_replace('/[^a-z0-9_\-]/i', '', $_POST['branch_id'] ?? 'global');
 if ($branchId === '') $branchId = 'global';
 
@@ -239,9 +241,9 @@ if (!move_uploaded_file($file['tmp_name'], $destPath)) {
     exit;
 }
 
-// ── Berhasil — kembalikan data ────────────────────────────────────────────────
-$publicUrl   = BASE_URL . $branchId . '/' . rawurlencode($fileName);
-$uploadedAt  = gmdate('Y-m-d\TH:i:s\Z');
+// ── Berhasil ──────────────────────────────────────────────────────────────────
+$publicUrl    = BASE_URL . $branchId . '/' . rawurlencode($fileName);
+$uploadedAt   = gmdate('Y-m-d\TH:i:s\Z');
 $originalName = basename($file['name'] ?? $fileName);
 
 echo json_encode([
