@@ -12,8 +12,8 @@
 declare(strict_types=1);
 
 // ── Konfigurasi ──────────────────────────────────────────────────────────────
-define('SUPABASE_URL', getenv('SUPABASE_URL') ?: 'https://mcrhlwqmeccighmxmccz.supabase.co');
-define('SUPABASE_ANON_KEY', getenv('SUPABASE_ANON_KEY') ?: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jcmhsd3FtZWNjaWdobXhtY2N6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxODMwNzAsImV4cCI6MjA5Mjc1OTA3MH0.XBe3IxqnI3TLMNF05UyA_kuo0EnQP7zWdQeGKltmXys');
+// Harus sama persis dengan DEPOSIT_UPLOAD_SECRET di depositService.js
+define('UPLOAD_SECRET', '78998219380f85802eb86a9b4f2d3f6f');
 
 // Ukuran maks upload (5 MB)
 define('MAX_FILE_SIZE', 5 * 1024 * 1024);
@@ -47,7 +47,7 @@ if (in_array($origin, $allowedOrigins, true)) {
     exit;
 }
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, X-Upload-Secret');
 header('Content-Type: application/json; charset=utf-8');
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -64,111 +64,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// ── Verifikasi sesi login ────────────────────────────────────────────────────
-function getAuthorizationHeader(): string
-{
-    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
-        return (string) $_SERVER['HTTP_AUTHORIZATION'];
-    }
-    if (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-        return (string) $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-    }
-    if (function_exists('getallheaders')) {
-        foreach (getallheaders() as $name => $value) {
-            if (strtolower((string) $name) === 'authorization') {
-                return (string) $value;
-            }
-        }
-    }
-    return '';
-}
-
-function getBearerToken(): string
-{
-    $header = getAuthorizationHeader();
-    if (preg_match('/^Bearer\s+(.+)$/i', $header, $matches)) {
-        return trim($matches[1]);
-    }
-    return '';
-}
-
-function validateSessionToken(string $sessionToken): ?array
-{
-    if ($sessionToken === '') {
-        return null;
-    }
-
-    $url = rtrim(SUPABASE_URL, '/') . '/rest/v1/rpc/rbn_validate_session';
-    $payload = json_encode(['p_session_token' => $sessionToken], JSON_UNESCAPED_SLASHES);
-    $headers = [
-        'Content-Type: application/json',
-        'apikey: ' . SUPABASE_ANON_KEY,
-        'Authorization: Bearer ' . SUPABASE_ANON_KEY,
-    ];
-
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,
-            CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 10,
-        ]);
-        $body = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
-
-        if ($body === false) {
-            throw new RuntimeException($curlError ?: 'Supabase request failed');
-        }
-    } else {
-        $context = stream_context_create([
-            'http' => [
-                'method'        => 'POST',
-                'header'        => implode("\r\n", $headers),
-                'content'       => $payload,
-                'ignore_errors' => true,
-                'timeout'       => 10,
-            ],
-        ]);
-        $body = file_get_contents($url, false, $context);
-        $status = 0;
-        foreach ($http_response_header ?? [] as $line) {
-            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $matches)) {
-                $status = (int) $matches[1];
-                break;
-            }
-        }
-        if ($body === false) {
-            throw new RuntimeException('Supabase request failed');
-        }
-    }
-
-    if ($status < 200 || $status >= 300) {
-        throw new RuntimeException('Supabase HTTP ' . $status);
-    }
-
-    $data = json_decode((string) $body, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new RuntimeException('Invalid Supabase JSON response');
-    }
-
-    return is_array($data) && !empty($data['id']) ? $data : null;
-}
-
-try {
-    $session = validateSessionToken(getBearerToken());
-} catch (Throwable $err) {
-    http_response_code(502);
-    echo json_encode(['error' => 'Gagal memvalidasi sesi upload']);
-    exit;
-}
-
-if (!$session) {
+// ── Verifikasi secret key ────────────────────────────────────────────────────
+$secret = $_SERVER['HTTP_X_UPLOAD_SECRET'] ?? '';
+if (!hash_equals(UPLOAD_SECRET, $secret)) {
     http_response_code(401);
-    echo json_encode(['error' => 'Sesi login tidak valid atau sudah kedaluwarsa']);
+    echo json_encode(['error' => 'Unauthorized']);
     exit;
 }
 
