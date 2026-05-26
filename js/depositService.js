@@ -5,11 +5,7 @@ const DEPOSIT_PROOF_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
 const DEPOSIT_PROOF_MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 const DEPOSIT_UPLOAD_ENDPOINT = 'https://bukti-setoran.rotibakarngeunah.my.id/upload.php';
-
-function getDepositUploadSessionToken() {
-  if (typeof auth === 'undefined' || !auth?.getSession) return '';
-  return auth.getSession()?.session_token || '';
-}
+const DEPOSIT_UPLOAD_SECRET   = '78998219380f85802eb86a9b4f2d3f6f';
 
 const depositService = {
 
@@ -151,16 +147,11 @@ const depositService = {
     formData.append('file', file);
     formData.append('branch_id', scope);
 
-    const sessionToken = getDepositUploadSessionToken();
-    if (!sessionToken) {
-      throw new Error('Upload bukti gagal: sesi login tidak valid. Silakan login ulang.');
-    }
-
     let res;
     try {
       res = await fetch(DEPOSIT_UPLOAD_ENDPOINT, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: { 'X-Upload-Secret': DEPOSIT_UPLOAD_SECRET },
         body: formData
       });
     } catch (networkErr) {
