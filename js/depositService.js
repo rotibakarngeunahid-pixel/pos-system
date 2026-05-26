@@ -4,6 +4,13 @@ const DEPOSIT_PROOF_ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'
 const DEPOSIT_PROOF_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
 const DEPOSIT_PROOF_MAX_FILE_SIZE = 5 * 1024 * 1024;
 
+const DEPOSIT_UPLOAD_ENDPOINT = 'https://bukti-setoran.rotibakarngeunah.my.id/upload.php';
+
+function getDepositUploadSessionToken() {
+  if (typeof auth === 'undefined' || !auth?.getSession) return '';
+  return auth.getSession()?.session_token || '';
+}
+
 const depositService = {
 
   async withTimeout(promise, ms, message) {
@@ -136,42 +143,50 @@ const depositService = {
   },
 
   async uploadDepositProof({ branchId, file }) {
-    const ext = this.validateProofFile(file);
-    const scope = Number.isFinite(Number(branchId)) ? Number(branchId) : 'global';
-    const path = `${scope}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const contentType = this.getProofContentType(file, ext);
-    const uploadedAt = new Date().toISOString();
+    this.validateProofFile(file);
 
-    const { error: uploadErr } = await db.storage
-      .from('deposit-proofs')
-      .upload(path, file, { contentType, upsert: false });
+    const scope = Number.isFinite(Number(branchId)) ? String(Number(branchId)) : 'global';
 
-    if (uploadErr) {
-      if (this.isStoragePolicyError(uploadErr)) {
-        throw new Error('Upload bukti belum diizinkan oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
-      }
-      throw new Error('Upload bukti gagal: ' + (uploadErr.message || uploadErr));
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('branch_id', scope);
+
+    const sessionToken = getDepositUploadSessionToken();
+    if (!sessionToken) {
+      throw new Error('Upload bukti gagal: sesi login tidak valid. Silakan login ulang.');
     }
 
-    const oneYear = 365 * 24 * 3600;
-    const { data: signed, error: signErr } = await db.storage.from('deposit-proofs').createSignedUrl(path, oneYear);
-    if (signErr) {
-      if (this.isStoragePolicyError(signErr)) {
-        throw new Error('Bukti berhasil diupload, tetapi belum bisa dibaca oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
-      }
-      throw new Error('Gagal membuat URL bukti setoran: ' + (signErr.message || signErr));
+    let res;
+    try {
+      res = await fetch(DEPOSIT_UPLOAD_ENDPOINT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${sessionToken}` },
+        body: formData
+      });
+    } catch (networkErr) {
+      throw new Error('Upload bukti gagal: tidak dapat terhubung ke server. Periksa koneksi internet lalu coba lagi.');
     }
 
-    const proofUrl = signed?.signedUrl || null;
-    if (!proofUrl) throw new Error('Gagal membuat URL bukti setoran');
+    let result;
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error('Upload bukti gagal: respons server tidak valid (HTTP ' + res.status + ')');
+    }
+
+    if (!res.ok || result.error) {
+      throw new Error('Upload bukti gagal: ' + (result.error || 'HTTP ' + res.status));
+    }
+
+    if (!result.url) throw new Error('Upload bukti gagal: server tidak mengembalikan URL');
 
     return {
-      url: proofUrl,
-      path,
-      fileName: file.name || path.split('/').pop(),
-      fileType: contentType,
-      fileSize: file.size || null,
-      uploadedAt
+      url:        result.url,
+      path:       result.path       || scope + '/' + file.name,
+      fileName:   result.fileName   || file.name,
+      fileType:   result.fileType   || file.type,
+      fileSize:   result.fileSize   ?? file.size ?? null,
+      uploadedAt: result.uploadedAt || new Date().toISOString()
     };
   },
 

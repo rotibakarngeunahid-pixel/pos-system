@@ -1,0 +1,15 @@
+# Folder ini hanya boleh berisi file gambar/pdf — tidak ada eksekusi PHP
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+Options -Indexes -ExecCGI
+
+# Tolak semua file selain gambar dan PDF
+<FilesMatch "^(?!.*\.(jpg|jpeg|png|pdf)$)">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>

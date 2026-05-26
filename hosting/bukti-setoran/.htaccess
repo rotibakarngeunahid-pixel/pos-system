@@ -1,0 +1,24 @@
+# ── Keamanan folder proofs ───────────────────────────────────────────────────
+# Larang eksekusi PHP di dalam folder /proofs/ (file di sana hanya boleh dibaca)
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+# Larang akses index directory
+Options -Indexes
+
+# Izinkan akses langsung ke file gambar/pdf di /proofs/
+<FilesMatch "\.(jpg|jpeg|png|pdf)$">
+    Allow from all
+</FilesMatch>
+
+# Larang akses file selain upload.php dan file statis
+<FilesMatch "^(?!upload\.php$|index\.html$).*\.(php|phtml|php3|php4|php5|php7|phps|cgi|pl|py|sh)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+# Keep Authorization header available to PHP under CGI/FastCGI.
+SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1
