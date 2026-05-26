@@ -36,6 +36,15 @@ const auth = {
     localStorage.setItem(BRANCH_KEY, JSON.stringify(branch));
   },
 
+  _isMissingRpcError(error) {
+    const msg  = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || '');
+    return code === '42883'
+      || code === 'PGRST202'
+      || msg.includes('could not find the function')
+      || (msg.includes('function') && msg.includes('does not exist'));
+  },
+
   // ── Login via RPC (SECURITY DEFINER — tidak butuh GRANT tabel) ──
   async login(name, password) {
     let data, error;
@@ -70,8 +79,11 @@ const auth = {
 
     const user = typeof data === 'string' ? JSON.parse(data) : data;
 
-    // BUG 5D FIX: attach expires_at = now + 8 hours to the session object
-    user.expires_at = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+    // Newer databases return expires_at and session_token from pos_login.
+    // Keep the local expiry fallback for older deployments.
+    if (!user.expires_at) {
+      user.expires_at = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+    }
 
     this.setSession(user);
     return user;
@@ -121,6 +133,43 @@ const auth = {
   async validateCurrentUser(allowedRoles = null) {
     const local = this.getSession();
     if (!local) return null;
+
+    if (local.session_token) {
+      try {
+        const { data, error } = await db.rpc('rbn_validate_session', {
+          p_session_token: local.session_token
+        });
+
+        if (error) {
+          if (!this._isMissingRpcError(error)) throw error;
+        } else {
+          if (!data) throw new Error('Session tidak valid atau sudah kedaluwarsa');
+          const serverUser = typeof data === 'string' ? JSON.parse(data) : data;
+
+          const refreshed = {
+            ...local,
+            ...serverUser,
+            session_token: serverUser.session_token || local.session_token
+          };
+          this.setSession(refreshed);
+
+          if (Array.isArray(allowedRoles) && allowedRoles.length && !allowedRoles.includes(refreshed.role)) {
+            window.location.href = this.getDefaultPageByRole(refreshed.role);
+            return null;
+          }
+
+          return refreshed;
+        }
+      } catch (err) {
+        if (!this._isMissingRpcError(err)) {
+          console.error('[AUTH] validateCurrentUser session RPC failed:', err);
+          this.clearSession();
+          window.location.href = 'index.html';
+          return null;
+        }
+      }
+    }
+
     try {
       let { data, error } = await db.from('users')
         .select('id, name, role, branch_id, is_active')

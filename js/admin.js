@@ -3755,6 +3755,32 @@ const ADMIN = {
 
   // End of bulk import helpers (legacy handlers removed)
 
+  _sessionToken() {
+    return auth.getSession()?.session_token || this.user?.session_token || '';
+  },
+
+  _isMissingRpcError(error) {
+    const msg  = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || '');
+    return code === '42883'
+      || code === 'PGRST202'
+      || msg.includes('could not find the function')
+      || (msg.includes('function') && msg.includes('does not exist'));
+  },
+
+  async _rpcWithLegacy(rpcName, params, legacyFn = null) {
+    const { data, error } = await db.rpc(rpcName, params);
+    if (error) {
+      if (legacyFn && this._isMissingRpcError(error)) return legacyFn();
+      throw error;
+    }
+    return data;
+  },
+
+  _firstRpcRow(data) {
+    return Array.isArray(data) ? data[0] : data;
+  },
+
   // ── Toppings ─────────────────────────────────────────────────
   async loadToppingSection() {
     // Populate product select for mapping
@@ -3823,13 +3849,21 @@ const ADMIN = {
     if (price < 0) { showToast('Harga tidak boleh negatif', 'error'); return; }
 
     try {
-      if (id) {
-        const { error } = await db.from('toppings').update({ name, price, is_active: isActive }).eq('id', Number(id));
-        if (error) throw error;
-      } else {
-        const { error } = await db.from('toppings').insert({ name, price, is_active: isActive });
-        if (error) throw error;
-      }
+      await this._rpcWithLegacy('rbn_admin_save_topping', {
+        p_session_token: this._sessionToken() || null,
+        p_id:            id ? Number(id) : null,
+        p_name:          name,
+        p_price:         price,
+        p_is_active:     isActive
+      }, async () => {
+        if (id) {
+          const { error } = await db.from('toppings').update({ name, price, is_active: isActive }).eq('id', Number(id));
+          if (error) throw error;
+        } else {
+          const { error } = await db.from('toppings').insert({ name, price, is_active: isActive });
+          if (error) throw error;
+        }
+      });
       closeModal('modal-topping');
       await this.loadToppings();
       showToast(id ? 'Topping diperbarui' : 'Topping berhasil ditambahkan', 'success');
@@ -3847,15 +3881,36 @@ const ADMIN = {
       danger:      true
     });
     if (!ok) return;
-    const { error } = await db.from('toppings').delete().eq('id', id);
-    if (error) { showDbError(error, { action: 'menghapus topping', entity: 'Topping' }); return; }
+    try {
+      await this._rpcWithLegacy('rbn_admin_delete_topping', {
+        p_session_token: this._sessionToken() || null,
+        p_id:            id
+      }, async () => {
+        const { error } = await db.from('toppings').delete().eq('id', id);
+        if (error) throw error;
+      });
+    } catch (error) {
+      showDbError(error, { action: 'menghapus topping', entity: 'Topping' });
+      return;
+    }
     await this.loadToppings();
     showToast('Topping dihapus', 'success');
   },
 
   async toggleToppingActive(id, currentActive) {
-    const { error } = await db.from('toppings').update({ is_active: !currentActive }).eq('id', id);
-    if (error) { showDbError(error, { action: 'mengubah status topping', entity: 'Topping' }); return; }
+    try {
+      await this._rpcWithLegacy('rbn_admin_set_topping_active', {
+        p_session_token: this._sessionToken() || null,
+        p_id:            id,
+        p_is_active:     !currentActive
+      }, async () => {
+        const { error } = await db.from('toppings').update({ is_active: !currentActive }).eq('id', id);
+        if (error) throw error;
+      });
+    } catch (error) {
+      showDbError(error, { action: 'mengubah status topping', entity: 'Topping' });
+      return;
+    }
     await this.loadToppings();
     showToast(currentActive ? 'Topping dinonaktifkan' : 'Topping diaktifkan', 'success');
   },
@@ -3894,17 +3949,24 @@ const ADMIN = {
 
   async _onToppingMappingChange(productId, toppingId, checked) {
     try {
-      if (checked) {
-        const { error } = await db.from('product_toppings').upsert(
-          { product_id: productId, topping_id: toppingId },
-          { onConflict: 'product_id,topping_id', ignoreDuplicates: true }
-        );
-        if (error) throw error;
-      } else {
-        const { error } = await db.from('product_toppings').delete()
-          .eq('product_id', productId).eq('topping_id', toppingId);
-        if (error) throw error;
-      }
+      await this._rpcWithLegacy('rbn_admin_set_product_topping', {
+        p_session_token: this._sessionToken() || null,
+        p_product_id:    Number(productId),
+        p_topping_id:    Number(toppingId),
+        p_enabled:       !!checked
+      }, async () => {
+        if (checked) {
+          const { error } = await db.from('product_toppings').upsert(
+            { product_id: productId, topping_id: toppingId },
+            { onConflict: 'product_id,topping_id', ignoreDuplicates: true }
+          );
+          if (error) throw error;
+        } else {
+          const { error } = await db.from('product_toppings').delete()
+            .eq('product_id', productId).eq('topping_id', toppingId);
+          if (error) throw error;
+        }
+      });
     } catch (e) {
       showDbError(e, { action: 'menyimpan pilihan topping', entity: 'Mapping topping' });
       // Revert checkbox
@@ -3932,9 +3994,20 @@ const ADMIN = {
     const tbody = document.getElementById('api-keys-list');
     if (!tbody) return;
     tbody.innerHTML = '<tr><td colspan="5" class="empty-td">Memuat...</td></tr>';
-    const { data, error } = await db.from('api_keys').select('*').order('created_at', { ascending: false });
+    let data, error = null;
+    try {
+      data = await this._rpcWithLegacy('rbn_admin_list_api_keys', {
+        p_session_token: this._sessionToken() || null
+      }, async () => {
+        const res = await db.from('api_keys').select('*').order('created_at', { ascending: false });
+        if (res.error) throw res.error;
+        return res.data;
+      });
+    } catch (e) {
+      error = e;
+    }
     if (error) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}. Pastikan sudah menjalankan schema_toppings_apikeys.sql</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}. Jalankan migration 054 dan login ulang.</td></tr>`;
       return;
     }
     if (!data?.length) {
@@ -3979,14 +4052,22 @@ const ADMIN = {
     const keyValue = 'rbn_' + Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
 
     try {
-      const { error } = await db.from('api_keys').insert({ name, key_value: keyValue, is_active: true });
-      if (error) throw error;
+      const created = await this._rpcWithLegacy('rbn_admin_create_api_key', {
+        p_session_token: this._sessionToken() || null,
+        p_name:          name
+      }, async () => {
+        const { error } = await db.from('api_keys').insert({ name, key_value: keyValue, is_active: true });
+        if (error) throw error;
+        return [{ key_value: keyValue }];
+      });
+      const createdRow = this._firstRpcRow(created) || {};
+      const copiedKey = createdRow.key_value || keyValue;
       closeModal('modal-api-key');
       showToast('API key berhasil dibuat', 'success');
       await this.loadApiKeys();
       // Auto copy to clipboard
       try {
-        await navigator.clipboard.writeText(keyValue);
+        await navigator.clipboard.writeText(copiedKey);
         showToast('Key disalin ke clipboard!', 'success');
       } catch(e) { /* clipboard not available */ }
     } catch (e) {
@@ -4002,15 +4083,36 @@ const ADMIN = {
       danger:      true
     });
     if (!ok) return;
-    const { error } = await db.from('api_keys').delete().eq('id', id);
-    if (error) { showDbError(error, { action: 'menghapus API key', entity: 'API key' }); return; }
+    try {
+      await this._rpcWithLegacy('rbn_admin_delete_api_key', {
+        p_session_token: this._sessionToken() || null,
+        p_id:            id
+      }, async () => {
+        const { error } = await db.from('api_keys').delete().eq('id', id);
+        if (error) throw error;
+      });
+    } catch (error) {
+      showDbError(error, { action: 'menghapus API key', entity: 'API key' });
+      return;
+    }
     await this.loadApiKeys();
     showToast('API key dihapus', 'success');
   },
 
   async toggleApiKey(id, currentActive) {
-    const { error } = await db.from('api_keys').update({ is_active: !currentActive }).eq('id', id);
-    if (error) { showDbError(error, { action: 'mengubah status API key', entity: 'API key' }); return; }
+    try {
+      await this._rpcWithLegacy('rbn_admin_set_api_key_active', {
+        p_session_token: this._sessionToken() || null,
+        p_id:            id,
+        p_is_active:     !currentActive
+      }, async () => {
+        const { error } = await db.from('api_keys').update({ is_active: !currentActive }).eq('id', id);
+        if (error) throw error;
+      });
+    } catch (error) {
+      showDbError(error, { action: 'mengubah status API key', entity: 'API key' });
+      return;
+    }
     await this.loadApiKeys();
     showToast(currentActive ? 'API key dinonaktifkan' : 'API key diaktifkan', 'success');
   },

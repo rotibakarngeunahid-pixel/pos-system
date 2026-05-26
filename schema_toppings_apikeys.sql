@@ -90,12 +90,12 @@ $$;
 -- ── Permissions (GRANT) ──────────────────────────────────────
 GRANT SELECT           ON toppings                         TO anon, authenticated;
 GRANT SELECT           ON product_toppings                 TO anon, authenticated;
-GRANT ALL              ON toppings                         TO anon, authenticated;
-GRANT ALL              ON product_toppings                 TO anon, authenticated;
-GRANT ALL              ON api_keys                         TO anon, authenticated;
-GRANT USAGE, SELECT    ON SEQUENCE toppings_id_seq         TO anon, authenticated;
-GRANT USAGE, SELECT    ON SEQUENCE product_toppings_id_seq TO anon, authenticated;
-GRANT USAGE, SELECT    ON SEQUENCE api_keys_id_seq         TO anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON toppings                  FROM PUBLIC, anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON product_toppings          FROM PUBLIC, anon, authenticated;
+REVOKE ALL             ON api_keys                         FROM PUBLIC, anon, authenticated;
+REVOKE ALL             ON SEQUENCE toppings_id_seq         FROM PUBLIC, anon, authenticated;
+REVOKE ALL             ON SEQUENCE product_toppings_id_seq FROM PUBLIC, anon, authenticated;
+REVOKE ALL             ON SEQUENCE api_keys_id_seq         FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_transactions_api             TO anon, authenticated;
 
 -- ── Row Level Security ────────────────────────────────────────
@@ -119,21 +119,14 @@ DROP POLICY IF EXISTS "apikeys_insert" ON api_keys;
 DROP POLICY IF EXISTS "apikeys_update" ON api_keys;
 DROP POLICY IF EXISTS "apikeys_delete" ON api_keys;
 
--- Aplikasi memakai custom session di localStorage dan Supabase anon key.
--- Karena role dicek di app/RPC, policy tambahan ini dibuat permisif.
+-- POS boleh membaca topping, tetapi mutasi topping/API key harus lewat
+-- RPC admin yang ditambahkan di sql/migrations/054_harden_custom_sessions_and_api_keys.sql.
 CREATE POLICY "toppings_select"  ON toppings         FOR SELECT USING (true);
-CREATE POLICY "toppings_insert"  ON toppings         FOR INSERT WITH CHECK (true);
-CREATE POLICY "toppings_update"  ON toppings         FOR UPDATE USING (true) WITH CHECK (true);
-CREATE POLICY "toppings_delete"  ON toppings         FOR DELETE USING (true);
 
--- product_toppings: dibaca POS, dikelola admin UI custom auth
+-- product_toppings: dibaca POS, mutasi lewat RPC admin.
 CREATE POLICY "pt_select"  ON product_toppings FOR SELECT USING (true);
-CREATE POLICY "pt_insert"  ON product_toppings FOR INSERT WITH CHECK (true);
-CREATE POLICY "pt_update"  ON product_toppings FOR UPDATE USING (true) WITH CHECK (true);
-CREATE POLICY "pt_delete"  ON product_toppings FOR DELETE USING (true);
 
--- api_keys: dikelola admin UI custom auth
-CREATE POLICY "apikeys_select"  ON api_keys FOR SELECT USING (true);
-CREATE POLICY "apikeys_insert"  ON api_keys FOR INSERT WITH CHECK (true);
-CREATE POLICY "apikeys_update"  ON api_keys FOR UPDATE USING (true) WITH CHECK (true);
-CREATE POLICY "apikeys_delete"  ON api_keys FOR DELETE USING (true);
+-- api_keys tidak punya public policy. Integrasi tetap memanggil
+-- SECURITY DEFINER RPC get_transactions_api; admin kelola key lewat migration 054.
+
+NOTIFY pgrst, 'reload schema';

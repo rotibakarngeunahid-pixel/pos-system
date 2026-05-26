@@ -24,6 +24,19 @@ const adminDataIntegrationPortalUi = {
   _currentTab:     'sales',
   _bound:          false,
 
+  _sessionToken() {
+    return auth.getSession()?.session_token || '';
+  },
+
+  _isMissingRpcError(error) {
+    const msg  = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || '');
+    return code === '42883'
+      || code === 'PGRST202'
+      || msg.includes('could not find the function')
+      || (msg.includes('function') && msg.includes('does not exist'));
+  },
+
   // ── Init ──────────────────────────────────────────────────────────────
   init() {
     const boot = () => {
@@ -114,14 +127,26 @@ const adminDataIntegrationPortalUi = {
     const warning = document.getElementById('dip-apikey-warning');
 
     try {
-      const { data, error } = await db
-        .from('api_keys')
-        .select('id, name, key_value, is_active')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+      let data, error = null;
+      const rpcRes = await db.rpc('rbn_admin_list_api_keys', {
+        p_session_token: this._sessionToken() || null
+      });
+
+      if (rpcRes.error && this._isMissingRpcError(rpcRes.error)) {
+        const legacyRes = await db
+          .from('api_keys')
+          .select('id, name, key_value, is_active')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        data = legacyRes.data;
+        error = legacyRes.error;
+      } else {
+        data = rpcRes.data;
+        error = rpcRes.error;
+      }
 
       if (error) throw error;
-      this._apiKeys = data || [];
+      this._apiKeys = (data || []).filter(k => k.is_active);
 
       if (!this._apiKeys.length) {
         const empty = '<option value="">— Belum ada API key aktif —</option>';
