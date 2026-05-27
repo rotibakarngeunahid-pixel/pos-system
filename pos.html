@@ -154,6 +154,36 @@
       transition: background .15s ease, transform .15s ease !important;
     }
     .pcard:hover .pcard-btn { background: #dc2626 !important; transform: scale(1.1) !important; }
+
+    /* ── Deposit mode tabs ── */
+    .deposit-mode-tabs {
+      display: flex; gap: 6px; margin: 12px 0 0;
+      background: var(--surface-2, #f3f4f6); border-radius: 10px; padding: 4px;
+    }
+    .deposit-mode-btn {
+      flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 8px 10px; border: none; border-radius: 8px; cursor: pointer;
+      font-size: 13px; font-weight: 600; color: var(--text-muted, #6b7280);
+      background: transparent; transition: all .15s;
+    }
+    .deposit-mode-btn.active {
+      background: #fff; color: var(--primary, #2563eb);
+      box-shadow: 0 1px 4px rgba(0,0,0,.10);
+    }
+
+    /* ── Incoming approval panel ── */
+    .deposit-incoming-card { margin-bottom: 8px; }
+    .deposit-incoming-list { padding: 0; }
+    .deposit-incoming-item {
+      border-bottom: 1px solid var(--border, #e5e7eb); padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .deposit-incoming-item:last-child { border-bottom: none; }
+    .deposit-incoming-meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+    .deposit-incoming-amount { font-size: 18px; font-weight: 700; color: var(--text); }
+    .deposit-incoming-from { font-size: 13px; color: var(--text-muted); }
+    .deposit-incoming-actions { display: flex; gap: 8px; margin-top: 4px; }
+    .deposit-incoming-proof { font-size: 12px; }
   </style>
 </head>
 <body class="pos-page">
@@ -414,6 +444,20 @@
           </button>
         </div>
 
+        <!-- ── Setoran Masuk (Approval) ── -->
+        <section class="card deposit-incoming-card" id="deposit-incoming-section" style="display:none">
+          <div class="card-header">
+            <span class="card-title">
+              <i data-lucide="inbox" class="icon-sm"></i>
+              Setoran Masuk
+            </span>
+            <span class="badge badge-warning" id="deposit-incoming-badge" style="display:none">0</span>
+          </div>
+          <div id="deposit-incoming-body" class="deposit-incoming-list">
+            <div class="deposit-history-loading">Memuat...</div>
+          </div>
+        </section>
+
         <section class="deposit-cash-card" id="deposit-cash-card" tabindex="0" aria-label="Ringkasan kas tunai">
           <div class="deposit-cash-card-top">
             <div>
@@ -440,8 +484,21 @@
 
         <div id="deposit-blocking-alert" class="deposit-blocking-alert" style="display:none" role="alert"></div>
 
+        <!-- ── Mode Tabs ── -->
+        <div class="deposit-mode-tabs" id="deposit-mode-tabs" role="tablist">
+          <button class="deposit-mode-btn active" id="deposit-mode-regular" role="tab" aria-selected="true" data-deposit-mode="regular">
+            <i data-lucide="building-2" class="icon-sm"></i>
+            Ke Rekening / QRIS
+          </button>
+          <button class="deposit-mode-btn" id="deposit-mode-outlet" role="tab" aria-selected="false" data-deposit-mode="outlet">
+            <i data-lucide="arrow-right-left" class="icon-sm"></i>
+            Ke Outlet Lain
+          </button>
+        </div>
+
         <div class="deposit-content-grid">
-          <section class="card deposit-form-card">
+          <!-- ── Mode: Ke Rekening / QRIS ── -->
+          <section class="card deposit-form-card" id="deposit-panel-regular">
             <div class="card-body">
               <div id="deposit-success" class="deposit-success-state" style="display:none" role="status"></div>
 
@@ -495,6 +552,64 @@
               <button class="btn btn-primary btn-full deposit-submit-btn" id="btn-submit-deposit">
                 <i data-lucide="send" class="icon-sm"></i>
                 <span>Setor Sekarang</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- ── Mode: Ke Outlet Lain ── -->
+          <section class="card deposit-form-card" id="deposit-panel-outlet" style="display:none">
+            <div class="card-body">
+              <div id="transfer-success" class="deposit-success-state" style="display:none" role="status"></div>
+
+              <div class="form-group">
+                <label class="form-label" for="transfer-to-branch">Outlet Tujuan</label>
+                <select class="form-control" id="transfer-to-branch">
+                  <option value="">Pilih outlet tujuan</option>
+                </select>
+                <div id="transfer-to-branch-error" class="form-error"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="transfer-amount">Jumlah Setoran</label>
+                <div class="deposit-currency-field">
+                  <span>Rp</span>
+                  <input type="text" class="form-control" id="transfer-amount" inputmode="numeric" autocomplete="off" placeholder="0" aria-describedby="transfer-amount-error" />
+                </div>
+                <div class="deposit-quick-grid" aria-label="Pilihan cepat nominal transfer">
+                  <button type="button" class="deposit-quick-btn" data-transfer-quick="50000">50rb</button>
+                  <button type="button" class="deposit-quick-btn" data-transfer-quick="100000">100rb</button>
+                  <button type="button" class="deposit-quick-btn" data-transfer-quick="200000">200rb</button>
+                  <button type="button" class="deposit-quick-btn" data-transfer-quick="500000">500rb</button>
+                  <button type="button" class="deposit-quick-btn" data-transfer-quick="1000000">1 Juta</button>
+                  <button type="button" class="deposit-quick-btn deposit-quick-all" data-transfer-quick="all">Setor Semua</button>
+                </div>
+                <div id="transfer-amount-error" class="form-error"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Bukti Serah Tunai <span class="text-muted">(opsional)</span></label>
+                <input class="deposit-file-input" type="file" id="transfer-proof-file" accept="image/jpeg,image/png,application/pdf" capture="environment" />
+                <div id="transfer-proof-zone" class="deposit-upload-zone optional" role="button" tabindex="0" aria-label="Upload bukti serah tunai">
+                  <div class="deposit-upload-empty" id="transfer-upload-empty">
+                    <i data-lucide="upload-cloud" class="icon-lg"></i>
+                    <div class="deposit-upload-copy">
+                      <strong>Upload bukti (opsional)</strong>
+                      <span>Foto serah tunai JPG, PNG, PDF maks. 5MB.</span>
+                    </div>
+                  </div>
+                  <div id="transfer-proof-preview" class="deposit-proof-preview"></div>
+                </div>
+                <div class="form-hint">Foto opsional, tapi disarankan untuk keamanan.</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="transfer-notes">Catatan (opsional)</label>
+                <textarea id="transfer-notes" class="form-control" rows="2" placeholder="Contoh: Uang fisik diserahkan ke kasir Dalung shift pagi"></textarea>
+              </div>
+
+              <button class="btn btn-primary btn-full" id="btn-submit-transfer" disabled>
+                <i data-lucide="send" class="icon-sm"></i>
+                <span>Kirim ke Outlet</span>
               </button>
             </div>
           </section>
@@ -1092,7 +1207,8 @@
   <script src="js/services/transactionService.js?v=20260520-branch-cash-outlet-1"></script>
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260517-manual-deposit-3"></script>
-  <script src="js/depositUi.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/cashBranchTransferService.js?v=20260527-antar-outlet-1"></script>
+  <script src="js/depositUi.js?v=20260527-antar-outlet-1"></script>
   <script src="js/pos.js?v=20260520-branch-cash-outlet-1"></script>
 
   <!-- ══════════════════════════════════════════

@@ -378,7 +378,7 @@ const ADMIN = {
       ingredients: 'Bahan Baku',        settings:     'Pengaturan',
       'cash-report': 'Laporan Kas',     'cash-categories': 'Kategori Kas',
       'cash-deposits': 'Setoran Manual', 'toppings':    'Manajemen Topping',
-      'branch-cash': 'Kas Outlet',
+      'branch-cash': 'Kas Outlet',      'cash-branch-transfers': 'Setoran Antar Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
       'finance-integration': 'Portal Integrasi Data',
       'transfer-monitoring': 'Monitoring Transfer Stok'
@@ -409,6 +409,9 @@ const ADMIN = {
       case 'api-keys':              this.loadApiKeysSection();    break;
       case 'investor-access':       this.loadInvestorAccess();    break;
       case 'branch-cash':           this.loadBranchCash();        break;
+      case 'cash-branch-transfers':
+        if (window.adminCashBranchTransferUi) adminCashBranchTransferUi.load();
+        break;
       case 'finance-integration':   this.loadFinanceIntegration(); break;
       case 'transfer-monitoring':   this.loadTransferMonitoring(); break;
     }

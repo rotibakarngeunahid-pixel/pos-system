@@ -118,6 +118,13 @@
 
     /* Text alignment helpers for portal tables */
     .text-right { text-align:right !important; }
+
+    /* ── Setoran Antar Outlet detail modal ── */
+    .cbt-detail-grid { display:flex; flex-direction:column; gap:8px; }
+    .cbt-detail-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; font-size:13px; }
+    .cbt-detail-row span:first-child { color:var(--text-muted); flex-shrink:0; min-width:140px; }
+    .cbt-detail-row strong, .cbt-detail-row a { text-align:right; word-break:break-all; }
+    .cbt-detail-divider { margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
   </style>
 </head>
 <body class="admin-page">
@@ -206,6 +213,9 @@
       </button>
       <button class="nav-item" data-admin-action="navigate" data-section="branch-cash" title="Kas Outlet / Posisi Kas Cabang">
         <i data-lucide="building-2"></i><span class="nav-text">Kas Outlet</span>
+      </button>
+      <button class="nav-item" data-admin-action="navigate" data-section="cash-branch-transfers" title="Setoran Antar Outlet">
+        <i data-lucide="arrow-right-left"></i><span class="nav-text">Antar Outlet</span>
       </button>
       <button class="nav-item" data-admin-action="navigate" data-section="finance-integration" title="Portal Integrasi Data">
         <i data-lucide="network"></i><span class="nav-text">Portal Integrasi</span>
@@ -1105,6 +1115,98 @@
           <div class="bc-cards-empty">Memuat...</div>
         </div>
       </section>
+
+      <!-- ══════════ SETORAN ANTAR OUTLET ══════════ -->
+      <section class="admin-section" id="section-cash-branch-transfers">
+        <div class="section-header">
+          <h2 class="section-title">Setoran Antar Outlet</h2>
+          <div class="section-actions">
+            <button class="btn btn-primary" id="cbt-filter-btn">
+              <i data-lucide="search" style="width:15px;height:15px"></i> Tampilkan
+            </button>
+          </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="stats-grid" id="cbt-summary-cards" style="margin-bottom:16px"></div>
+
+        <!-- Filter -->
+        <div class="card dep-filter-card">
+          <div class="dep-filter-row" style="flex-wrap:wrap;gap:12px">
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Dari Outlet</label>
+              <select id="cbt-filter-from-branch" class="form-control dep-filter-select">
+                <option value="">Semua Outlet</option>
+              </select>
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Ke Outlet</label>
+              <select id="cbt-filter-to-branch" class="form-control dep-filter-select">
+                <option value="">Semua Outlet</option>
+              </select>
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Status</label>
+              <select id="cbt-filter-status" class="form-control dep-filter-select">
+                <option value="">Semua Status</option>
+                <option value="pending">Menunggu</option>
+                <option value="confirmed">Diterima</option>
+                <option value="rejected">Ditolak</option>
+                <option value="cancelled">Dibatalkan</option>
+              </select>
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Dari Tanggal</label>
+              <input type="date" id="cbt-filter-from" class="form-control dep-filter-select" />
+            </div>
+            <div class="dep-filter-group">
+              <label class="dep-filter-label">Sampai Tanggal</label>
+              <input type="date" id="cbt-filter-to" class="form-control dep-filter-select" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="card" style="margin-top:12px">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Kode Transfer</th>
+                  <th>Waktu Request</th>
+                  <th>Dari Outlet</th>
+                  <th>Ke Outlet</th>
+                  <th>Staff Pengirim</th>
+                  <th class="text-right">Jumlah</th>
+                  <th>Status</th>
+                  <th>Penerima / Penolak</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="cbt-table-body">
+                <tr><td colspan="10" class="empty-td">Pilih filter lalu klik Tampilkan.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODAL: Detail Transfer Antar Outlet -->
+      <div class="modal-overlay" id="modal-cbt-detail" style="display:none">
+        <div class="modal modal-sm" style="max-width:520px">
+          <div class="modal-header">
+            <span class="modal-title"><i data-lucide="arrow-right-left" class="icon-sm"></i> Detail Transfer Antar Outlet</span>
+            <button class="modal-close" id="cbt-detail-close">&times;</button>
+          </div>
+          <div class="modal-body" id="cbt-detail-body" style="padding:16px">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" id="cbt-detail-close-footer">Tutup</button>
+          </div>
+        </div>
+      </div>
 
       <!-- MODAL: Koreksi Kas Outlet -->
       <div class="modal-overlay" id="modal-branch-cash-correction" style="display:none">
@@ -2815,8 +2917,10 @@ atau tidak aktif."
   <script src="js/services/transactionService.js?v=20260520-branch-cash-outlet-1"></script>
   <script src="js/services/rbnDataEvents.js"></script>
   <script src="js/depositService.js?v=20260519-deposit-confirm-fix-1"></script>
+  <script src="js/cashBranchTransferService.js?v=20260527-antar-outlet-1"></script>
   <script src="js/adminDepositUi.js?v=20260520-branch-cash-deposit-1"></script>
   <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-outlet-1"></script>
+  <script src="js/adminCashBranchTransferUi.js?v=20260527-antar-outlet-1"></script>
   <script src="js/adminFinanceIntegrationUi.js?v=20260526-api-key-hardening-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>

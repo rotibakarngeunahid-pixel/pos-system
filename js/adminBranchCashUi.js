@@ -481,6 +481,11 @@ const adminBranchCashUi = {
       // Setoran
       deposit_approved:      'Setoran Approved',
       deposit_rejected:      'Setoran Ditolak',
+      // Transfer kas antar outlet (migration 055)
+      cash_branch_transfer_out:       'Transfer Kas Keluar',
+      cash_branch_transfer_in:        'Transfer Kas Masuk',
+      cash_branch_transfer_rejected:  'Transfer Kas Ditolak',
+      cash_branch_transfer_cancelled: 'Transfer Kas Dibatalkan',
       // Admin
       admin_adjustment:      'Koreksi Admin',
       sale_cash_backfill:    'Backfill Penjualan'
@@ -496,12 +501,13 @@ const adminBranchCashUi = {
 
     // ── Badge tipe ──────────────────────────────────────────────────────
     const typeBadgeClass = mt => {
-      if (['sale_cash_in', 'manual_cash_in'].includes(mt))   return 'badge-success';
+      if (['sale_cash_in', 'manual_cash_in', 'cash_branch_transfer_in'].includes(mt))   return 'badge-success';
       if (['sale_cash_void', 'manual_cash_in_void',
            'manual_cash_out', 'manual_cash_out_void',
-           'deposit_approved'].includes(mt))                  return 'badge-danger';
-      if (['deposit_rejected', 'admin_adjustment',
-           'opening_variance'].includes(mt))                  return 'badge-warning';
+           'deposit_approved', 'cash_branch_transfer_out'].includes(mt))                return 'badge-danger';
+      if (['deposit_rejected', 'admin_adjustment', 'opening_variance',
+           'cash_branch_transfer_rejected',
+           'cash_branch_transfer_cancelled'].includes(mt))                              return 'badge-warning';
       return 'badge-default';
     };
 

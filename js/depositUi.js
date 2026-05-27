@@ -20,6 +20,13 @@ const depositUi = {
   accountLoadError: null,
   didBind: false,
 
+  // ── Transfer Antar Outlet state ──
+  depositMode: 'regular',         // 'regular' | 'outlet'
+  activeBranches: [],
+  selectedTransferFile: null,
+  selectedTransferFileUrl: null,
+  isTransferSubmitting: false,
+
   getPOS() {
     if (typeof window !== 'undefined' && window.POS) return window.POS;
     if (typeof POS !== 'undefined') return POS;
@@ -87,6 +94,33 @@ const depositUi = {
     this.el.headerShift = document.getElementById('deposit-header-shift');
     this.el.cashCard = document.getElementById('deposit-cash-card');
     this.el.cardLabel = document.getElementById('deposit-card-label');
+
+    // ── Transfer Antar Outlet elements ──
+    this.el.modeTabs        = document.getElementById('deposit-mode-tabs');
+    this.el.modeRegularBtn  = document.getElementById('deposit-mode-regular');
+    this.el.modeOutletBtn   = document.getElementById('deposit-mode-outlet');
+    this.el.panelRegular    = document.getElementById('deposit-panel-regular');
+    this.el.panelOutlet     = document.getElementById('deposit-panel-outlet');
+
+    this.el.transferToBranch       = document.getElementById('transfer-to-branch');
+    this.el.transferToBranchError  = document.getElementById('transfer-to-branch-error');
+    this.el.transferAmountInput    = document.getElementById('transfer-amount');
+    this.el.transferAmountError    = document.getElementById('transfer-amount-error');
+    this.el.transferQuickButtons   = Array.from(document.querySelectorAll('[data-transfer-quick]'));
+    this.el.transferProofFile      = document.getElementById('transfer-proof-file');
+    this.el.transferProofZone      = document.getElementById('transfer-proof-zone');
+    this.el.transferUploadEmpty    = document.getElementById('transfer-upload-empty');
+    this.el.transferProofPreview   = document.getElementById('transfer-proof-preview');
+    this.el.transferNotesInput     = document.getElementById('transfer-notes');
+    this.el.transferSubmitBtn      = document.getElementById('btn-submit-transfer');
+    this.el.transferSuccess        = document.getElementById('transfer-success');
+
+    this.el.incomingSection = document.getElementById('deposit-incoming-section');
+    this.el.incomingBody    = document.getElementById('deposit-incoming-body');
+    this.el.incomingBadge   = document.getElementById('deposit-incoming-badge');
+
+    this.bindModeSelector();
+    this.bindTransferForm();
 
     if (this.el.amountInput) this.el.amountInput.addEventListener('input', () => this.onAmountInput());
     this.el.quickButtons.forEach(btn => {
@@ -223,6 +257,13 @@ const depositUi = {
     } catch (e) {
       console.error('getMyDeposits', e);
       if (typeof showToast === 'function') showToast('Gagal memuat riwayat setoran', 'error');
+    }
+
+    // Load incoming transfer approvals
+    try {
+      await this.loadIncoming();
+    } catch (e) {
+      console.warn('loadIncoming', e);
     }
   },
 
@@ -1183,6 +1224,456 @@ const depositUi = {
       '"': '&quot;',
       "'": '&#39;'
     }[ch]));
+  },
+
+  // ══════════════════════════════════════════════════════════════════
+  // TRANSFER ANTAR OUTLET — mode selector & form
+  // ══════════════════════════════════════════════════════════════════
+
+  bindModeSelector() {
+    const modeButtons = document.querySelectorAll('[data-deposit-mode]');
+    modeButtons.forEach(btn => {
+      btn.addEventListener('click', () => this.switchMode(btn.dataset.depositMode));
+    });
+  },
+
+  switchMode(mode) {
+    this.depositMode = mode;
+
+    // Toggle tab active states
+    const regularBtn = this.el.modeRegularBtn;
+    const outletBtn  = this.el.modeOutletBtn;
+    if (regularBtn) regularBtn.classList.toggle('active', mode === 'regular');
+    if (regularBtn) regularBtn.setAttribute('aria-selected', mode === 'regular');
+    if (outletBtn)  outletBtn.classList.toggle('active', mode === 'outlet');
+    if (outletBtn)  outletBtn.setAttribute('aria-selected', mode === 'outlet');
+
+    // Toggle panels
+    if (this.el.panelRegular) this.el.panelRegular.style.display = mode === 'regular' ? '' : 'none';
+    if (this.el.panelOutlet)  this.el.panelOutlet.style.display  = mode === 'outlet'  ? '' : 'none';
+
+    // Load branches when switching to outlet mode for the first time
+    if (mode === 'outlet' && !this.activeBranches.length) {
+      this.loadActiveBranches();
+    }
+  },
+
+  async loadActiveBranches() {
+    const pos = this.getPOS();
+    try {
+      const all = await cashBranchTransferService.getActiveBranches();
+      // Exclude current branch
+      this.activeBranches = all.filter(b => Number(b.id) !== Number(pos?.branch?.id));
+      this.renderBranchOptions();
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Gagal memuat daftar outlet: ' + (e.message || e), 'error');
+    }
+  },
+
+  renderBranchOptions() {
+    const sel = this.el.transferToBranch;
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Pilih outlet tujuan</option>'
+      + this.activeBranches.map(b =>
+          `<option value="${this.esc(b.id)}">${this.esc(b.name)}</option>`
+        ).join('');
+    this.updateTransferSubmitState();
+  },
+
+  bindTransferForm() {
+    // Amount input
+    if (this.el.transferAmountInput) {
+      this.el.transferAmountInput.addEventListener('input', () => this.updateTransferSubmitState());
+    }
+    // Quick buttons
+    this.el.transferQuickButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.transferQuick;
+        const amount = val === 'all' ? this.depositableCash : Number(val || 0);
+        if (this.el.transferAmountInput) {
+          this.el.transferAmountInput.value = amount > 0 ? amount.toLocaleString('id-ID') : '';
+        }
+        this.updateTransferSubmitState();
+      });
+    });
+    // Branch select
+    if (this.el.transferToBranch) {
+      this.el.transferToBranch.addEventListener('change', () => this.updateTransferSubmitState());
+    }
+    // Proof file
+    if (this.el.transferProofFile) {
+      this.el.transferProofFile.addEventListener('change', e => this.onTransferFileChange(e.target.files));
+    }
+    this.bindTransferUploadZone();
+    // Submit
+    if (this.el.transferSubmitBtn) {
+      this.el.transferSubmitBtn.addEventListener('click', () => this.onTransferSubmit());
+    }
+  },
+
+  bindTransferUploadZone() {
+    const zone = this.el.transferProofZone;
+    if (!zone) return;
+    zone.addEventListener('click', e => {
+      if (e.target.closest('.deposit-proof-remove')) { this.removeTransferFile(); return; }
+      if (e.target.closest('a')) return;
+      this.el.transferProofFile?.click();
+    });
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', e => { if (e.currentTarget === zone) zone.classList.remove('dragover'); });
+    zone.addEventListener('drop', e => {
+      e.preventDefault(); zone.classList.remove('dragover');
+      this.onTransferFileChange(e.dataTransfer?.files);
+    });
+  },
+
+  onTransferFileChange(files) {
+    const file = files && files[0];
+    if (!file) { this.removeTransferFile({ clearInput: false }); return; }
+    const ext = (file.name || '').split('.').pop().toLowerCase();
+    if (file.size <= 0)                           { this.rejectFile('File tidak boleh kosong'); return; }
+    if (file.size > DEPOSIT_MAX_FILE_SIZE)         { this.rejectFile('Ukuran file maksimal 5 MB'); return; }
+    if (!DEPOSIT_ALLOWED_MIME.includes(file.type) && !DEPOSIT_ALLOWED_EXT.includes(ext)) {
+      this.rejectFile('Hanya JPG, PNG, atau PDF yang diterima'); return;
+    }
+    this.removeTransferObjectUrl();
+    this.selectedTransferFile = file;
+    // Render preview inside transfer zone
+    const preview = this.el.transferProofPreview;
+    const empty   = this.el.transferUploadEmpty;
+    if (empty)   empty.style.display = 'none';
+    if (preview) {
+      preview.style.display = '';
+      const safeName = this.esc(file.name || 'Bukti');
+      if (file.type === 'application/pdf' || safeName.toLowerCase().endsWith('.pdf')) {
+        preview.innerHTML = `<div class="deposit-preview-file"><i data-lucide="file-text" class="icon-lg"></i><div><strong>${safeName}</strong><span>${this.formatFileSize(file.size)}</span></div><button type="button" class="deposit-proof-remove" aria-label="Hapus"><i data-lucide="x" class="icon-sm"></i></button></div>`;
+      } else {
+        this.selectedTransferFileUrl = URL.createObjectURL(file);
+        preview.innerHTML = `<div class="deposit-preview-image"><img src="${this.selectedTransferFileUrl}" alt="Preview" /><div class="deposit-preview-meta"><strong>${safeName}</strong><span>${this.formatFileSize(file.size)}</span></div><button type="button" class="deposit-proof-remove" aria-label="Hapus"><i data-lucide="x" class="icon-sm"></i></button></div>`;
+      }
+      if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+    }
+    this.updateTransferSubmitState();
+  },
+
+  removeTransferFile({ clearInput = true } = {}) {
+    this.removeTransferObjectUrl();
+    this.selectedTransferFile = null;
+    if (clearInput && this.el.transferProofFile) this.el.transferProofFile.value = '';
+    if (this.el.transferProofPreview) { this.el.transferProofPreview.innerHTML = ''; this.el.transferProofPreview.style.display = 'none'; }
+    if (this.el.transferUploadEmpty) this.el.transferUploadEmpty.style.display = '';
+    this.updateTransferSubmitState();
+  },
+
+  removeTransferObjectUrl() {
+    if (this.selectedTransferFileUrl) {
+      URL.revokeObjectURL(this.selectedTransferFileUrl);
+      this.selectedTransferFileUrl = null;
+    }
+  },
+
+  parseTransferAmount() {
+    const digits = String(this.el.transferAmountInput?.value || '').replace(/\D/g, '');
+    return digits ? Number(digits) : 0;
+  },
+
+  updateTransferSubmitState() {
+    const btn = this.el.transferSubmitBtn;
+    if (!btn) return;
+    const blocked     = this.isFormBlocked();
+    const amount      = this.parseTransferAmount();
+    const branchId    = this.el.transferToBranch?.value || '';
+    const amountErr   = this.el.transferAmountError;
+
+    let msg = '';
+    if (amount <= 0) {
+      msg = '';
+    } else if (blocked) {
+      msg = '';
+    } else if (amount > this.depositableCash) {
+      msg = `Melebihi kas yang dapat disetor (${typeof fRp === 'function' ? fRp(this.depositableCash) : this.depositableCash})`;
+    } else if (amount % DEPOSIT_STEP !== 0) {
+      msg = 'Nominal harus kelipatan Rp 50.000';
+    }
+    if (amountErr) { amountErr.textContent = msg; amountErr.classList.toggle('show', Boolean(msg)); }
+
+    const valid   = !blocked && amount > 0 && !msg && branchId;
+    btn.disabled  = this.isTransferSubmitting || !valid;
+  },
+
+  async onTransferSubmit() {
+    if (this.isTransferSubmitting) return;
+    const pos = this.getPOS();
+    if (!pos?.branch) { if (typeof showToast === 'function') showToast('Cabang belum dipilih', 'error'); return; }
+    if (!this.hasEligibleClosedShift()) {
+      if (typeof showToast === 'function') showToast('Tutup shift terlebih dahulu sebelum membuat setoran antar outlet', 'error');
+      return;
+    }
+    const sess = this.selectedClosedSession;
+    if (sess?.block_reason) { if (typeof showToast === 'function') showToast(sess.block_reason, 'error'); return; }
+
+    const amount   = this.parseTransferAmount();
+    const branchId = this.el.transferToBranch?.value || '';
+    if (!branchId) { if (typeof showToast === 'function') showToast('Pilih outlet tujuan', 'error'); return; }
+
+    if (amount <= 0)          { if (typeof showToast === 'function') showToast('Jumlah setoran harus lebih dari 0', 'error'); return; }
+    if (amount % DEPOSIT_STEP !== 0) { if (typeof showToast === 'function') showToast('Nominal harus kelipatan Rp 50.000', 'error'); return; }
+    if (amount > this.depositableCash) {
+      if (typeof showToast === 'function') showToast(`Melebihi kas yang dapat disetor (${typeof fRp === 'function' ? fRp(this.depositableCash) : this.depositableCash})`, 'error');
+      return;
+    }
+
+    const branchName = this.el.transferToBranch?.options[this.el.transferToBranch.selectedIndex]?.text || branchId;
+    const ok = await this.showTransferConfirm({ amount, branchName });
+    if (!ok) return;
+
+    this.isTransferSubmitting = true;
+    if (this.el.transferSubmitBtn) {
+      this.el.transferSubmitBtn.disabled = true;
+      this.el.transferSubmitBtn.innerHTML = '<span class="btn-spinner"></span><span>Mengirim...</span>';
+    }
+
+    try {
+      const clientRequestId = `tr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const result = await cashBranchTransferService.createTransfer({
+        fromBranchId:    pos.branch.id,
+        toBranchId:      branchId,
+        sessionId:       sess.session_id,
+        staffId:         pos.user.id,
+        amount,
+        notes:           this.el.transferNotesInput?.value?.trim() || null,
+        proofFile:       this.selectedTransferFile || null,
+        clientRequestId
+      });
+
+      // Reset form
+      if (this.el.transferAmountInput) this.el.transferAmountInput.value = '';
+      if (this.el.transferToBranch)    this.el.transferToBranch.value = '';
+      if (this.el.transferNotesInput)  this.el.transferNotesInput.value = '';
+      this.removeTransferFile();
+
+      // Show success
+      const code = result?.transfer_code || '';
+      if (this.el.transferSuccess) {
+        this.el.transferSuccess.style.display = '';
+        this.el.transferSuccess.innerHTML = `
+          <i data-lucide="check-circle-2" class="icon-lg"></i>
+          <div>
+            <strong>Setoran ke ${this.esc(branchName)} berhasil dikirim</strong>
+            <span>Menunggu approval staff ${this.esc(branchName)}. Kode: ${this.esc(code)}</span>
+          </div>`;
+        setTimeout(() => { if (this.el.transferSuccess) this.el.transferSuccess.style.display = 'none'; }, 8000);
+        if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+      }
+      if (typeof showToast === 'function') showToast(result?.message || `Transfer ke ${branchName} dikirim. Kode: ${code}`, 'success');
+
+      // Refresh data
+      await this.refresh();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'deposit-transfer' });
+
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e.message || 'Gagal membuat transfer antar outlet', 'error');
+    } finally {
+      this.isTransferSubmitting = false;
+      if (this.el.transferSubmitBtn) {
+        this.el.transferSubmitBtn.innerHTML = '<i data-lucide="send" class="icon-sm"></i><span>Kirim ke Outlet</span>';
+        if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+      }
+      this.updateTransferSubmitState();
+    }
+  },
+
+  showTransferConfirm({ amount, branchName }) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'deposit-confirm-overlay';
+      overlay.innerHTML = `
+        <div class="deposit-confirm-modal" role="dialog" aria-modal="true">
+          <div class="deposit-confirm-header">
+            <div>
+              <div class="deposit-confirm-kicker">Konfirmasi Transfer Outlet</div>
+              <h3>Periksa data sebelum dikirim</h3>
+            </div>
+            <button type="button" class="deposit-confirm-close" aria-label="Batalkan">
+              <i data-lucide="x" class="icon-sm"></i>
+            </button>
+          </div>
+          <div class="deposit-confirm-body">
+            <div class="deposit-confirm-amount">${this.esc(typeof fRp === 'function' ? fRp(amount) : 'Rp' + amount)}</div>
+            <div class="deposit-confirm-summary">
+              <div><span>Ke Outlet</span><strong>${this.esc(branchName)}</strong></div>
+              <div><span>Kas Dapat Disetor</span><strong>${this.esc(typeof fRp === 'function' ? fRp(this.depositableCash) : this.depositableCash)}</strong></div>
+              <div><span>Sisa Setelah Transfer</span><strong>${this.esc(typeof fRp === 'function' ? fRp(this.depositableCash - amount) : (this.depositableCash - amount))}</strong></div>
+            </div>
+            <p style="font-size:13px;color:var(--text-muted);margin:12px 0 0">
+              Transfer akan menunggu konfirmasi dari staff ${this.esc(branchName)}.
+              Saldo outlet belum berubah sampai disetujui.
+            </p>
+          </div>
+          <div class="deposit-confirm-footer">
+            <button type="button" class="btn btn-outline deposit-confirm-cancel">Batalkan</button>
+            <button type="button" class="btn btn-primary deposit-confirm-ok">Kirim ke Outlet</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('active'));
+      if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+      const ac = new AbortController();
+      const close = result => { ac.abort(); overlay.classList.remove('active'); setTimeout(() => overlay.remove(), 180); resolve(result); };
+      let okClicked = false;
+      overlay.querySelector('.deposit-confirm-ok')?.addEventListener('click', () => {
+        if (okClicked) return; okClicked = true;
+        overlay.querySelector('.deposit-confirm-ok').disabled = true;
+        close(true);
+      }, { signal: ac.signal });
+      overlay.querySelector('.deposit-confirm-cancel')?.addEventListener('click', () => close(false), { signal: ac.signal });
+      overlay.querySelector('.deposit-confirm-close')?.addEventListener('click', () => close(false), { signal: ac.signal });
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(false); }, { signal: ac.signal });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') close(false); }, { signal: ac.signal });
+      setTimeout(() => overlay.querySelector('.deposit-confirm-ok')?.focus(), 80);
+    });
+  },
+
+  // ── Incoming Transfers (Setoran Masuk / Approval) ─────────────────────
+
+  async loadIncoming() {
+    const pos = this.getPOS();
+    if (!pos?.branch || !pos?.user) return;
+
+    if (this.el.incomingBody) {
+      this.el.incomingBody.innerHTML = '<div class="deposit-history-loading">Memuat...</div>';
+    }
+
+    try {
+      const items = await cashBranchTransferService.getPendingIncoming({
+        branchId: pos.branch.id,
+        userId:   pos.user.id
+      });
+      this.renderIncoming(items);
+    } catch (e) {
+      if (this.el.incomingBody) {
+        this.el.incomingBody.innerHTML = `<div class="deposit-incoming-item" style="color:var(--danger)">Gagal memuat: ${this.esc(e.message || e)}</div>`;
+      }
+    }
+  },
+
+  renderIncoming(items) {
+    const section = this.el.incomingSection;
+    const body    = this.el.incomingBody;
+    const badge   = this.el.incomingBadge;
+    if (!section || !body) return;
+
+    // Selalu tampilkan section (walau kosong) agar staff tahu ada panel ini
+    section.style.display = '';
+
+    if (!items || !items.length) {
+      body.innerHTML = `
+        <div class="deposit-incoming-item" style="text-align:center;color:var(--text-muted);padding:16px 16px">
+          <i data-lucide="inbox" style="width:24px;height:24px;display:block;margin:0 auto 6px"></i>
+          Belum ada setoran masuk yang menunggu approval.
+        </div>`;
+      if (badge) badge.style.display = 'none';
+      if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+      return;
+    }
+
+    if (badge) { badge.style.display = ''; badge.textContent = items.length; }
+
+    body.innerHTML = items.map(item => {
+      const proofHtml = item.proof_url
+        ? `<a class="deposit-incoming-proof" href="${this.esc(item.proof_url)}" target="_blank" rel="noopener">Lihat Bukti</a>`
+        : '';
+      return `
+        <div class="deposit-incoming-item">
+          <div class="deposit-incoming-meta">
+            <span class="deposit-incoming-amount">${this.esc(typeof fRp === 'function' ? fRp(item.amount) : 'Rp' + item.amount)}</span>
+            <span class="badge badge-warning">Menunggu</span>
+          </div>
+          <div class="deposit-incoming-from">
+            Dari <strong>${this.esc(item.from_branch_name || '-')}</strong>
+            &mdash; ${this.esc(item.staff_name || '-')}
+            &mdash; ${this.esc(this.formatDateTime(item.requested_at))}
+          </div>
+          ${item.notes ? `<div style="font-size:12px;color:var(--text-muted)">${this.esc(item.notes)}</div>` : ''}
+          ${proofHtml}
+          <div class="deposit-incoming-actions">
+            <button class="btn btn-success btn-sm" data-incoming-action="approve" data-transfer-id="${this.esc(item.transfer_id)}" data-from-branch="${this.esc(item.from_branch_name)}" data-amount="${this.esc(item.amount)}">
+              <i data-lucide="check" class="icon-sm"></i> Terima
+            </button>
+            <button class="btn btn-outline btn-sm" style="border-color:var(--danger);color:var(--danger)" data-incoming-action="reject" data-transfer-id="${this.esc(item.transfer_id)}" data-from-branch="${this.esc(item.from_branch_name)}" data-amount="${this.esc(item.amount)}">
+              <i data-lucide="x" class="icon-sm"></i> Tolak
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+
+    // Bind action buttons
+    body.querySelectorAll('[data-incoming-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action     = btn.dataset.incomingAction;
+        const transferId = btn.dataset.transferId;
+        const fromBranch = btn.dataset.fromBranch;
+        const amount     = Number(btn.dataset.amount);
+        if (action === 'approve') this.onApproveIncoming(transferId, fromBranch, amount);
+        if (action === 'reject')  this.onRejectIncoming(transferId, fromBranch, amount);
+      });
+    });
+
+    if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  async onApproveIncoming(transferId, fromBranch, amount) {
+    const pos = this.getPOS();
+    if (!pos?.user) return;
+
+    const amountFmt = typeof fRp === 'function' ? fRp(amount) : 'Rp' + amount;
+    const confirmed = window.confirm(
+      `Terima setoran ${amountFmt} dari ${fromBranch}?\n\nPastikan uang fisik sudah Anda terima sebelum konfirmasi.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await cashBranchTransferService.confirmTransfer({
+        transferId,
+        userId: pos.user.id
+      });
+      if (typeof showToast === 'function') showToast(
+        result?.message || `Setoran diterima. Kas outlet bertambah ${amountFmt}.`,
+        'success'
+      );
+      await this.loadIncoming();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'deposit-transfer-approve' });
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e.message || 'Gagal konfirmasi transfer', 'error');
+    }
+  },
+
+  async onRejectIncoming(transferId, fromBranch, amount) {
+    const pos = this.getPOS();
+    if (!pos?.user) return;
+
+    const reason = window.prompt(
+      `Tolak setoran dari ${fromBranch}?\n\nMasukkan alasan penolakan (wajib):`
+    );
+    if (!reason || reason.trim().length < 3) {
+      if (reason !== null) {
+        if (typeof showToast === 'function') showToast('Alasan wajib diisi minimal 3 karakter', 'error');
+      }
+      return;
+    }
+
+    try {
+      await cashBranchTransferService.rejectTransfer({
+        transferId,
+        userId: pos.user.id,
+        reason: reason.trim()
+      });
+      if (typeof showToast === 'function') showToast('Transfer ditolak. Saldo tidak berubah.', 'info');
+      await this.loadIncoming();
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'deposit-transfer-reject' });
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e.message || 'Gagal menolak transfer', 'error');
+    }
   }
 };
 
