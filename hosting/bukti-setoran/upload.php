@@ -29,6 +29,92 @@ define('UPLOAD_DIR', __DIR__ . '/proofs/');
 
 // Base URL publik folder proofs
 define('BASE_URL', 'https://bukti-setoran.rotibakarngeunah.my.id/proofs/');
+
+define('PUBLIC_DIR_MODE', 0755);
+define('PUBLIC_FILE_MODE', 0644);
+
+function respondError(int $status, string $message): void
+{
+    http_response_code($status);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+function ensurePublicUploadDirectory(string $dir): void
+{
+    if (!is_dir($dir)) {
+        if (!mkdir($dir, PUBLIC_DIR_MODE, true) && !is_dir($dir)) {
+            respondError(500, 'Gagal membuat folder penyimpanan');
+        }
+    }
+
+    @chmod($dir, PUBLIC_DIR_MODE);
+    clearstatcache(true, $dir);
+
+    if (!is_dir($dir) || !is_writable($dir)) {
+        respondError(500, 'Folder penyimpanan tidak dapat ditulis');
+    }
+}
+
+function normalizeExistingUploadRules(): void
+{
+    foreach ([__DIR__ . '/.htaccess', UPLOAD_DIR . '.htaccess'] as $rulesFile) {
+        if (is_file($rulesFile)) {
+            @chmod($rulesFile, PUBLIC_FILE_MODE);
+        }
+    }
+}
+
+function repairProofPermissions(): array
+{
+    $summary = [
+        'ok' => true,
+        'directories' => 0,
+        'files' => 0,
+        'skipped' => 0,
+        'errors' => [],
+    ];
+
+    ensurePublicUploadDirectory(UPLOAD_DIR);
+    normalizeExistingUploadRules();
+
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator(UPLOAD_DIR, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            $path = $item->getPathname();
+
+            if ($item->isDir()) {
+                if (@chmod($path, PUBLIC_DIR_MODE)) {
+                    $summary['directories']++;
+                } else {
+                    $summary['errors'][] = $path;
+                }
+                continue;
+            }
+
+            $baseName = $item->getBasename();
+            $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+            if ($baseName === '.htaccess' || in_array($ext, ALLOWED_EXT, true)) {
+                if (@chmod($path, PUBLIC_FILE_MODE)) {
+                    $summary['files']++;
+                } else {
+                    $summary['errors'][] = $path;
+                }
+            } else {
+                $summary['skipped']++;
+            }
+        }
+    } catch (Throwable $e) {
+        $summary['errors'][] = $e->getMessage();
+    }
+
+    $summary['ok'] = count($summary['errors']) === 0;
+    return $summary;
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
@@ -69,6 +155,11 @@ $secret = $_SERVER['HTTP_X_UPLOAD_SECRET'] ?? '';
 if (!hash_equals(UPLOAD_SECRET, $secret)) {
     http_response_code(401);
     echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
+
+if (($_POST['action'] ?? '') === 'repair_permissions') {
+    echo json_encode(repairProofPermissions());
     exit;
 }
 
@@ -126,13 +217,9 @@ $destPath   = $subDir . $fileName;
 $relativePath = $branchId . '/' . $fileName;
 
 // ── Buat folder jika belum ada ───────────────────────────────────────────────
-if (!is_dir($subDir)) {
-    if (!mkdir($subDir, 0750, true)) {
-        http_response_code(500);
-        echo json_encode(['error' => 'Gagal membuat folder penyimpanan']);
-        exit;
-    }
-}
+ensurePublicUploadDirectory(UPLOAD_DIR);
+ensurePublicUploadDirectory($subDir);
+normalizeExistingUploadRules();
 
 // ── Pindahkan file dari tmp ───────────────────────────────────────────────────
 if (!move_uploaded_file($file['tmp_name'], $destPath)) {
@@ -140,6 +227,7 @@ if (!move_uploaded_file($file['tmp_name'], $destPath)) {
     echo json_encode(['error' => 'Gagal menyimpan file']);
     exit;
 }
+@chmod($destPath, PUBLIC_FILE_MODE);
 
 // ── Berhasil ──────────────────────────────────────────────────────────────────
 $publicUrl    = BASE_URL . $branchId . '/' . rawurlencode($fileName);

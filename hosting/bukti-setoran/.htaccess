@@ -12,13 +12,23 @@ Options -Indexes
 
 # Izinkan akses langsung ke file gambar/pdf di /proofs/
 <FilesMatch "\.(jpg|jpeg|png|pdf)$">
-    Allow from all
+    <IfModule mod_authz_core.c>
+        Require all granted
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Allow from all
+    </IfModule>
 </FilesMatch>
 
 # Larang akses file selain upload.php dan file statis
 <FilesMatch "^(?!upload\.php$|index\.html$).*\.(php|phtml|php3|php4|php5|php7|phps|cgi|pl|py|sh)$">
-    Order Deny,Allow
-    Deny from all
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Deny,Allow
+        Deny from all
+    </IfModule>
 </FilesMatch>
 # Keep Authorization header available to PHP under CGI/FastCGI.
 SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1
