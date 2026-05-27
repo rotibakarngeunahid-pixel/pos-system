@@ -10,6 +10,7 @@ const adminCashBranchTransferUi = {
   _summary: {},
   _branches: [],
   _loading: false,
+  _actionBusy: new Set(),
 
   init() {
     document.addEventListener('DOMContentLoaded', async () => {
@@ -41,9 +42,11 @@ const adminCashBranchTransferUi = {
         if (!btn) return;
         const action     = btn.dataset.cbtAction;
         const transferId = btn.dataset.transferId;
-        const row        = this._rows.find(r => r.transfer_id === transferId);
+        const row        = this._rows.find(r => String(r.transfer_id) === String(transferId));
         if (!row) return;
         if (action === 'detail') this._openDetail(row);
+        if (action === 'approve') this._approveTransfer(row);
+        if (action === 'reject') this._rejectTransfer(row);
         if (action === 'cancel') this._cancelTransfer(row);
       });
     }
@@ -55,6 +58,14 @@ const adminCashBranchTransferUi = {
     if (modal) {
       modal.addEventListener('click', e => {
         if (e.target === modal) this._closeDetail();
+        const btn = e.target.closest('[data-cbt-detail-action]');
+        if (!btn) return;
+        const row = this._rows.find(r => String(r.transfer_id) === String(btn.dataset.transferId));
+        if (!row) return;
+        const action = btn.dataset.cbtDetailAction;
+        if (action === 'approve') this._approveTransfer(row);
+        if (action === 'reject') this._rejectTransfer(row);
+        if (action === 'cancel') this._cancelTransfer(row);
       });
     }
   },
@@ -193,7 +204,18 @@ const adminCashBranchTransferUi = {
       const status = this._statusMeta(row.status);
       const fmtRp  = v => typeof formatRupiah === 'function' ? formatRupiah(v || 0) : ('Rp' + (v || 0));
       const fmtDt  = v => v ? (typeof fDate === 'function' ? fDate(v) : new Date(v).toLocaleString('id-ID')) : '-';
-      const canCancel = row.status === 'pending';
+      const canAct = row.status === 'pending';
+      const busy = this._actionBusy.has(String(row.transfer_id));
+      const pendingActions = canAct ? `
+            <button class="btn btn-ghost btn-sm" data-cbt-action="approve" data-transfer-id="${escHtml(row.transfer_id)}" title="Approve sebagai admin" ${busy ? 'disabled' : ''} style="color:var(--success)">
+              <i data-lucide="check-circle-2" style="width:14px;height:14px"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" data-cbt-action="reject" data-transfer-id="${escHtml(row.transfer_id)}" title="Tolak sebagai admin" ${busy ? 'disabled' : ''} style="color:var(--danger)">
+              <i data-lucide="x" style="width:14px;height:14px"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" data-cbt-action="cancel" data-transfer-id="${escHtml(row.transfer_id)}" title="Batalkan" ${busy ? 'disabled' : ''} style="color:var(--danger)">
+              <i data-lucide="ban" style="width:14px;height:14px"></i>
+            </button>` : '';
 
       return `
         <tr>
@@ -210,7 +232,7 @@ const adminCashBranchTransferUi = {
             <button class="btn btn-ghost btn-sm" data-cbt-action="detail" data-transfer-id="${escHtml(row.transfer_id)}" title="Lihat Detail">
               <i data-lucide="eye" style="width:14px;height:14px"></i>
             </button>
-            ${canCancel ? `<button class="btn btn-ghost btn-sm" data-cbt-action="cancel" data-transfer-id="${escHtml(row.transfer_id)}" title="Batalkan" style="color:var(--danger)"><i data-lucide="x-circle" style="width:14px;height:14px"></i></button>` : ''}
+            ${pendingActions}
           </td>
         </tr>`;
     }).join('');
@@ -238,6 +260,8 @@ const adminCashBranchTransferUi = {
     const fmtRp = v => typeof formatRupiah === 'function' ? formatRupiah(v || 0) : ('Rp' + (v || 0));
     const fmtDt = v => v ? (typeof fDate === 'function' ? fDate(v) : new Date(v).toLocaleString('id-ID')) : '-';
     const status = this._statusMeta(row.status);
+    const isPending = row.status === 'pending';
+    const busy = this._actionBusy.has(String(row.transfer_id));
 
     body.innerHTML = `
       <div class="cbt-detail-grid">
@@ -267,10 +291,27 @@ const adminCashBranchTransferUi = {
           <div class="cbt-detail-row cbt-detail-divider"><span>Dibatalkan Oleh</span><strong>${escHtml(row.cancelled_by_name || '-')}</strong></div>
           <div class="cbt-detail-row"><span>Alasan Pembatalan</span><strong>${escHtml(row.cancel_reason)}</strong></div>
         ` : ''}
+        ${isPending ? `
+          <div class="cbt-detail-row cbt-detail-divider" style="display:block">
+            <span style="display:block;margin-bottom:8px">Aksi Admin</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">
+              <button class="btn btn-success btn-sm" data-cbt-detail-action="approve" data-transfer-id="${escHtml(row.transfer_id)}" ${busy ? 'disabled' : ''}>
+                <i data-lucide="check-circle-2" class="icon-sm"></i> Approve
+              </button>
+              <button class="btn btn-outline btn-sm" data-cbt-detail-action="reject" data-transfer-id="${escHtml(row.transfer_id)}" ${busy ? 'disabled' : ''} style="border-color:var(--danger);color:var(--danger)">
+                <i data-lucide="x" class="icon-sm"></i> Tolak
+              </button>
+              <button class="btn btn-outline btn-sm" data-cbt-detail-action="cancel" data-transfer-id="${escHtml(row.transfer_id)}" ${busy ? 'disabled' : ''} style="border-color:var(--danger);color:var(--danger)">
+                <i data-lucide="ban" class="icon-sm"></i> Batalkan
+              </button>
+            </div>
+          </div>
+        ` : ''}
       </div>`;
 
     modal.classList.add('active');
     modal.style.display = 'flex';
+    if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
   },
 
   _closeDetail() {
@@ -278,29 +319,129 @@ const adminCashBranchTransferUi = {
     if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; }
   },
 
-  async _cancelTransfer(row) {
+  async _confirmDialog(opts) {
+    if (typeof showConfirm === 'function') return showConfirm(opts);
+    return window.confirm(`${opts.title || 'Konfirmasi'}\n\n${opts.message || ''}`);
+  },
+
+  async _promptDialog(opts) {
+    if (typeof showPrompt === 'function') return showPrompt(opts);
+    return window.prompt(`${opts.title || 'Input'}\n\n${opts.message || ''}`, opts.defaultValue || '');
+  },
+
+  _setActionBusy(transferId, on) {
+    const key = String(transferId);
+    if (on) this._actionBusy.add(key);
+    else this._actionBusy.delete(key);
+    this._renderTable();
+  },
+
+  _publishCashChanged(source) {
+    if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source });
+    if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
+  },
+
+  async _approveTransfer(row) {
+    const transferId = row?.transfer_id;
     const adminId = auth.getSession()?.id;
-    if (!adminId) return;
-    const reason = window.prompt(
-      `Batalkan transfer ${row.transfer_code}?\n\nMasukkan alasan pembatalan (wajib untuk admin):`
-    );
+    if (!transferId || !adminId || this._actionBusy.has(String(transferId))) return;
+
+    const fmtRp = v => typeof formatRupiah === 'function' ? formatRupiah(v || 0) : ('Rp' + (v || 0));
+    const ok = await this._confirmDialog({
+      title: 'Approve Setoran Antar Outlet',
+      message: `Approve ${row.transfer_code || 'transfer ini'} senilai ${fmtRp(row.amount)} dari ${row.from_branch_name || '-'} ke ${row.to_branch_name || '-'}?`,
+      subText: 'Saldo outlet asal akan berkurang dan saldo outlet tujuan akan bertambah.',
+      confirmText: 'Ya, Approve',
+      success: true
+    });
+    if (!ok) return;
+
+    this._setActionBusy(transferId, true);
+    try {
+      const result = await cashBranchTransferService.confirmTransfer({
+        transferId,
+        userId: adminId
+      });
+      if (typeof showToast === 'function') showToast(result?.message || 'Setoran antar outlet berhasil di-approve.', 'success');
+      this._closeDetail();
+      await this.load();
+      this._publishCashChanged('admin-cbt-approve');
+    } catch (e) {
+      if (window.showDbError) showDbError(e, { action: 'approve setoran antar outlet', entity: 'Setoran antar outlet' });
+      else if (typeof showToast === 'function') showToast(e.message || 'Gagal approve transfer', 'error');
+    } finally {
+      this._setActionBusy(transferId, false);
+    }
+  },
+
+  async _rejectTransfer(row) {
+    const transferId = row?.transfer_id;
+    const adminId = auth.getSession()?.id;
+    if (!transferId || !adminId || this._actionBusy.has(String(transferId))) return;
+
+    const reason = await this._promptDialog({
+      title: 'Tolak Setoran Antar Outlet',
+      message: `Masukkan alasan penolakan untuk ${row.transfer_code || 'transfer ini'}.`,
+      placeholder: 'Alasan penolakan',
+      confirmText: 'Tolak'
+    });
+    if (reason === null) return;
     if (!reason || reason.trim().length < 3) {
-      if (reason !== null) {
-        if (typeof showToast === 'function') showToast('Alasan wajib diisi minimal 3 karakter', 'error');
-      }
+      if (typeof showToast === 'function') showToast('Alasan wajib diisi minimal 3 karakter', 'error');
       return;
     }
+
+    this._setActionBusy(transferId, true);
+    try {
+      await cashBranchTransferService.rejectTransfer({
+        transferId,
+        userId: adminId,
+        reason: reason.trim()
+      });
+      if (typeof showToast === 'function') showToast('Transfer ditolak. Saldo outlet tidak berubah.', 'info');
+      this._closeDetail();
+      await this.load();
+      this._publishCashChanged('admin-cbt-reject');
+    } catch (e) {
+      if (window.showDbError) showDbError(e, { action: 'menolak setoran antar outlet', entity: 'Setoran antar outlet' });
+      else if (typeof showToast === 'function') showToast(e.message || 'Gagal menolak transfer', 'error');
+    } finally {
+      this._setActionBusy(transferId, false);
+    }
+  },
+
+  async _cancelTransfer(row) {
+    const transferId = row?.transfer_id;
+    const adminId = auth.getSession()?.id;
+    if (!transferId || !adminId || this._actionBusy.has(String(transferId))) return;
+
+    const reason = await this._promptDialog({
+      title: 'Batalkan Setoran Antar Outlet',
+      message: `Masukkan alasan pembatalan untuk ${row.transfer_code || 'transfer ini'} (wajib untuk admin).`,
+      placeholder: 'Alasan pembatalan',
+      confirmText: 'Batalkan Transfer'
+    });
+    if (reason === null) return;
+    if (!reason || reason.trim().length < 3) {
+      if (typeof showToast === 'function') showToast('Alasan wajib diisi minimal 3 karakter', 'error');
+      return;
+    }
+    this._setActionBusy(transferId, true);
     try {
       await cashBranchTransferService.cancelTransfer({
-        transferId: row.transfer_id,
+        transferId,
         userId:     adminId,
         reason:     reason.trim()
       });
       if (typeof showToast === 'function') showToast('Transfer dibatalkan.', 'info');
+      this._closeDetail();
       await this.load();
-      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-cbt-cancel' });
+      this._publishCashChanged('admin-cbt-cancel');
     } catch (e) {
-      if (typeof showToast === 'function') showToast(e.message || 'Gagal membatalkan transfer', 'error');
+      if (window.showDbError) showDbError(e, { action: 'membatalkan setoran antar outlet', entity: 'Setoran antar outlet' });
+      else if (typeof showToast === 'function') showToast(e.message || 'Gagal membatalkan transfer', 'error');
+    } finally {
+      this._setActionBusy(transferId, false);
     }
   }
 };
