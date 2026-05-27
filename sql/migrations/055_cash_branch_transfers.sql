@@ -1196,8 +1196,8 @@ BEGIN
     WHERE (p_from_branch_id IS NULL OR cbt.from_branch_id = p_from_branch_id)
       AND (p_to_branch_id   IS NULL OR cbt.to_branch_id   = p_to_branch_id)
       AND (p_status         IS NULL OR cbt.status         = p_status)
-      AND (p_date_from      IS NULL OR cbt.requested_at  >= (p_date_from::timestamptz AT TIME ZONE 'Asia/Makassar'))
-      AND (p_date_to        IS NULL OR cbt.requested_at  <= (p_date_to::timestamptz + interval '1 day' - interval '1 second' AT TIME ZONE 'Asia/Makassar'))
+      AND (p_date_from      IS NULL OR cbt.requested_at >= (p_date_from::timestamp AT TIME ZONE 'Asia/Makassar'))
+      AND (p_date_to        IS NULL OR cbt.requested_at <  ((p_date_to + 1)::timestamp AT TIME ZONE 'Asia/Makassar'))
     ORDER BY cbt.requested_at DESC
     LIMIT COALESCE(p_limit, 200)
     OFFSET COALESCE(p_offset, 0)
