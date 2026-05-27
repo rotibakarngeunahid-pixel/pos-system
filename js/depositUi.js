@@ -1392,9 +1392,8 @@ const depositUi = {
       msg = '';
     } else if (amount > this.depositableCash) {
       msg = `Melebihi kas yang dapat disetor (${typeof fRp === 'function' ? fRp(this.depositableCash) : this.depositableCash})`;
-    } else if (amount % DEPOSIT_STEP !== 0) {
-      msg = 'Nominal harus kelipatan Rp 50.000';
     }
+    // Transfer antar outlet tidak wajib kelipatan Rp 50.000
     if (amountErr) { amountErr.textContent = msg; amountErr.classList.toggle('show', Boolean(msg)); }
 
     const valid   = !blocked && amount > 0 && !msg && branchId;
@@ -1416,8 +1415,8 @@ const depositUi = {
     const branchId = this.el.transferToBranch?.value || '';
     if (!branchId) { if (typeof showToast === 'function') showToast('Pilih outlet tujuan', 'error'); return; }
 
-    if (amount <= 0)          { if (typeof showToast === 'function') showToast('Jumlah setoran harus lebih dari 0', 'error'); return; }
-    if (amount % DEPOSIT_STEP !== 0) { if (typeof showToast === 'function') showToast('Nominal harus kelipatan Rp 50.000', 'error'); return; }
+    if (amount <= 0) { if (typeof showToast === 'function') showToast('Jumlah setoran harus lebih dari 0', 'error'); return; }
+    // Transfer antar outlet tidak wajib kelipatan Rp 50.000
     if (amount > this.depositableCash) {
       if (typeof showToast === 'function') showToast(`Melebihi kas yang dapat disetor (${typeof fRp === 'function' ? fRp(this.depositableCash) : this.depositableCash})`, 'error');
       return;

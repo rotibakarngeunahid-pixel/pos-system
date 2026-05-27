@@ -30,8 +30,8 @@ const cashBranchTransferService = {
     if (!sessionId) throw new Error('Tutup shift terlebih dahulu sebelum membuat setoran antar outlet');
 
     const parsedAmount = safeNum(amount, 'Jumlah setoran');
-    if (parsedAmount <= 0)            throw new Error('Jumlah setoran harus lebih dari 0');
-    if (parsedAmount % 50000 !== 0)   throw new Error('Nominal harus kelipatan Rp 50.000');
+    if (parsedAmount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
+    // Transfer tunai antar outlet tidak wajib kelipatan Rp 50.000
 
     // Upload bukti jika ada
     let proof = null;

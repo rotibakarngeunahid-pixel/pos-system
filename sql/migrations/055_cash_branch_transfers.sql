@@ -422,9 +422,8 @@ BEGIN
   IF p_amount <= 0 THEN
     RAISE EXCEPTION 'Jumlah setoran harus lebih dari 0';
   END IF;
-  IF (p_amount % 50000) <> 0 THEN
-    RAISE EXCEPTION 'Nominal harus kelipatan Rp 50.000';
-  END IF;
+  -- Transfer tunai antar outlet tidak wajib kelipatan Rp 50.000
+  -- (berbeda dengan setoran ke rekening/QRIS yang tetap wajib kelipatan)
 
   -- ── Hitung kas eligible ─────────────────────────────────────────────────
   v_final_cash := COALESCE(
