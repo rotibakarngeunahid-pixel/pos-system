@@ -212,19 +212,18 @@ const adminDataIntegrationPortalUi = {
       return;
     }
 
-    const supaUrl = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '');
-    const supaKey = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '');
+    const apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php');
 
     const rpcName = tab === 'sales'   ? 'get_sales_integration'
                   : tab === 'cashout' ? 'get_kas_keluar_integration'
                   :                     'get_integration_summary';
 
-    const params = new URLSearchParams({ apikey: supaKey, p_api_key: apiKey });
-    if (branchId)     params.set('p_branch_id', branchId);
-    if (limit  !== null) params.set('p_limit',  limit);
+    const params = new URLSearchParams({ p_api_key: apiKey });
+    if (branchId)            params.set('p_branch_id', branchId);
+    if (limit  !== null)     params.set('p_limit',  limit);
     if (offset !== null && offset > 0) params.set('p_offset', offset);
 
-    const link = `${supaUrl}/rest/v1/rpc/${rpcName}?${params.toString()}`;
+    const link = `${apiBase}/rpc/${rpcName}?${params.toString()}`;
     if (linkBox) { linkBox.textContent = link; linkBox.style.color = 'var(--text)'; }
     if (copyBtn) copyBtn.disabled = false;
   },
@@ -567,20 +566,18 @@ const adminDataIntegrationPortalUi = {
   // ── Update endpoint docs ──────────────────────────────────────────────
   // Tampilkan URL tanpa tanggal — filter tanggal dilakukan di sistem keuangan.
   _updateDocEndpoints() {
-    const base = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '');
-    const anon = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '');
+    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php');
     const ph   = '<API_KEY>';
 
     const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    setEl('dip-doc-sales-ep',   `${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=${ph}&p_limit=1000&p_offset=0`);
-    setEl('dip-doc-cashout-ep', `${base}/rest/v1/rpc/get_kas_keluar_integration?apikey=${anon}&p_api_key=${ph}&p_limit=1000&p_offset=0`);
-    setEl('dip-doc-summary-ep', `${base}/rest/v1/rpc/get_integration_summary?apikey=${anon}&p_api_key=${ph}`);
+    setEl('dip-doc-sales-ep',   `${base}/rpc/get_sales_integration?p_api_key=${ph}&p_limit=1000&p_offset=0`);
+    setEl('dip-doc-cashout-ep', `${base}/rpc/get_kas_keluar_integration?p_api_key=${ph}&p_limit=1000&p_offset=0`);
+    setEl('dip-doc-summary-ep', `${base}/rpc/get_integration_summary?p_api_key=${ph}`);
   },
 
   // ── Salin semua dokumentasi ke clipboard ───────────────────────────────
   async _copyDocs() {
-    const base = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '');
-    const anon = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '');
+    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php') + '/rpc';
 
     const docs = `# ====================================================================
 # Panduan Integrasi API — Portal Integrasi Data Keuangan
@@ -594,12 +591,11 @@ Filter tanggal, pengelompokan, dan analisis dilakukan di SISTEM KEUANGAN Anda.
 Gunakan p_limit + p_offset untuk mengambil data secara bertahap (pagination).
 
 ## Base URL
-${base}/rest/v1/rpc/
+${base}/
 
 ## Autentikasi (WAJIB)
 Setiap request harus menyertakan:
-  1. apikey    : Supabase anon key (sudah termasuk dalam URL yang di-generate portal ini)
-  2. p_api_key : API key yang dibuat di menu API Keys
+  - p_api_key : API key yang dibuat di menu API Keys (tambahkan sebagai query parameter)
 
 Jika API key tidak valid:
   { "success": false, "error": "API key tidak valid atau tidak aktif." }
@@ -627,7 +623,7 @@ Cara tarik semua data (loop di sistem keuangan Anda):
     offset += 1000
 
 ## ─── ENDPOINT 1: Data Penjualan ─────────────────────────────────────────
-URL   : ${base}/rest/v1/rpc/get_sales_integration
+URL   : ${base}/get_sales_integration
 Method: GET
 
 Parameter:
@@ -639,10 +635,10 @@ Parameter:
   - p_date_to   (opsional): Filter tanggal akhir YYYY-MM-DD (WITA)
 
 Contoh — ambil halaman pertama semua data:
-${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=<API_KEY>&p_limit=1000&p_offset=0
+${base}/get_sales_integration?p_api_key=<API_KEY>&p_limit=1000&p_offset=0
 
 Contoh — filter bulan Mei 2026 (dilakukan dari sistem keuangan):
-${base}/rest/v1/rpc/get_sales_integration?apikey=${anon}&p_api_key=<API_KEY>&p_limit=1000&p_offset=0&p_date_from=2026-05-01&p_date_to=2026-05-31
+${base}/get_sales_integration?p_api_key=<API_KEY>&p_limit=1000&p_offset=0&p_date_from=2026-05-01&p_date_to=2026-05-31
 
 Contoh Response:
 {
@@ -675,13 +671,13 @@ Contoh Response:
 }
 
 ## ─── ENDPOINT 2: Data Kas Keluar ─────────────────────────────────────────
-URL   : ${base}/rest/v1/rpc/get_kas_keluar_integration
+URL   : ${base}/get_kas_keluar_integration
 Method: GET
 
 Parameter: sama seperti endpoint penjualan.
 
 Contoh — ambil halaman pertama semua kas keluar:
-${base}/rest/v1/rpc/get_kas_keluar_integration?apikey=${anon}&p_api_key=<API_KEY>&p_limit=1000&p_offset=0
+${base}/get_kas_keluar_integration?p_api_key=<API_KEY>&p_limit=1000&p_offset=0
 
 Contoh Response:
 {
@@ -712,7 +708,7 @@ Contoh Response:
 }
 
 ## ─── ENDPOINT 3: Ringkasan Gabungan ──────────────────────────────────────
-URL   : ${base}/rest/v1/rpc/get_integration_summary
+URL   : ${base}/get_integration_summary
 Method: GET
 
 Parameter: p_api_key (wajib), p_branch_id / p_date_from / p_date_to (opsional).
@@ -721,7 +717,7 @@ Mengembalikan: total penjualan, total kas keluar, selisih,
 Catatan: jika tanggal tidak dikirim, per_tanggal dikelompokkan dari data nyata.
 
 Contoh:
-${base}/rest/v1/rpc/get_integration_summary?apikey=${anon}&p_api_key=<API_KEY>
+${base}/get_integration_summary?p_api_key=<API_KEY>
 
 Contoh Response:
 {

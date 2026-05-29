@@ -1,0 +1,21 @@
+# TODO (Kas Outlet / Tutup Shift Admin)
+
+- [ ] admin.html: tambahkan tombol “Tutup Shift” pada Kas Outlet (hanya untuk shift_status=open).
+- [ ] admin.html: tambahkan modal “Tutup Shift” normal (input kas akhir + catatan opsional) dengan id:
+  - modal-branch-close-shift
+  - bc-close-shift-cash
+  - bc-close-shift-note
+  - bc-close-shift-save-btn
+  - bc-close-shift-cancel-btn
+  - bc-close-shift-close-btn
+- [ ] js/adminBranchCashUi.js: tambah wiring event handler untuk modal close shift.
+- [ ] js/adminBranchCashUi.js: tambah state target close shift (branchId/branchName/openSessionId/openStaffId).
+- [ ] js/adminBranchCashUi.js: implement `_openCloseShift(row)` dan `_saveCloseShift()`:
+  - validasi cash >= 0
+  - panggil `transactionService.closeShiftApplyBalance({ sessionId, closingCash, staffId, closingNote })`
+- [ ] js/adminBranchCashUi.js: update `_renderTable()` agar menampilkan tombol “Tutup Shift” (data-bc-action="close-shift") untuk shift_status=open.
+- [ ] Testing manual:
+  - Buka shift outlet (staff)
+  - Admin buka menu Kas Outlet → muncul tombol “Tutup Shift”
+  - Admin tutup shift → shift berubah closed
+  - Ledger & posisi kas outlet ter-refresh

@@ -10,9 +10,20 @@ const fmt = {
     return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
   },
 
+  // Parse MySQL DATETIME string ('YYYY-MM-DD HH:MM:SS') sebagai WITA.
+  // Tanpa suffix timezone, Chrome bisa interpretasi space-format sebagai UTC →
+  // jam maju 8 jam. Dengan append '+08:00' kita paksa interpretasi WITA eksplisit.
+  _parseWita(iso) {
+    if (!iso) return new Date(NaN);
+    if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso)) {
+      return new Date(iso.replace(' ', 'T') + '+08:00');
+    }
+    return new Date(iso);
+  },
+
   date(iso) {
     if (!iso) return '—';
-    const d = new Date(iso);
+    const d = this._parseWita(iso);
     return d.toLocaleDateString('id-ID', {
       day: '2-digit', month: 'short', year: 'numeric',
       timeZone: SYSTEM_TZ
@@ -24,7 +35,7 @@ const fmt = {
 
   dateOnly(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('id-ID', {
+    return this._parseWita(iso).toLocaleDateString('id-ID', {
       day: '2-digit', month: 'long', year: 'numeric',
       timeZone: SYSTEM_TZ
     });
@@ -32,7 +43,7 @@ const fmt = {
 
   timeOnly(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleTimeString('id-ID', {
+    return this._parseWita(iso).toLocaleTimeString('id-ID', {
       hour: '2-digit', minute: '2-digit',
       timeZone: SYSTEM_TZ
     });
@@ -79,40 +90,44 @@ const fmt = {
     return witaDate.toISOString().slice(0, 10);
   },
 
-  // BUG 5A FIX: use padStart(2,'0') for both startHour and endHour
-  // to prevent malformed timestamps like "T002:59:59" or "T03:00:00" for cutoff >= 10.
+  // Menghasilkan WITA literal yang cocok dengan data tersimpan di MySQL.
+  // DB menyimpan DATETIME dalam WITA (hasil migrasi dengan server timezone WITA).
+  // Filter dikirim tanpa konversi timezone — PHP normalizeSqlValue pakai sebagai literal.
+  // Contoh: business date '2026-05-28', cutoff 03:00 WITA
+  //   from = '2026-05-28T03:00:00' → PHP → '2026-05-28 03:00:00' WITA literal
+  //   to   = '2026-05-29T02:59:59' → PHP → '2026-05-29 02:59:59' WITA literal
+  // Menghasilkan DATETIME string format MySQL dalam WITA (UTC+8).
+  // Contoh output: '2026-05-29 14:35:00' — cocok untuk kolom DATETIME MySQL.
+  getWitaTimestamp() {
+    const now = new Date();
+    const witaOffset = 8 * 60;
+    const localOffset = now.getTimezoneOffset();
+    const witaMs = now.getTime() + (witaOffset + localOffset) * 60000;
+    return new Date(witaMs).toISOString().slice(0, 19).replace('T', ' ');
+  },
+
   getBusinessDateRange(businessDate) {
-    const cutoff    = this.BUSINESS_DAY_CUTOFF_HOUR;
-    const startHour = String(cutoff).padStart(2, '0');
-    const from      = `${businessDate}T${startHour}:00:00`;
+    const cutoff = this.BUSINESS_DAY_CUTOFF_HOUR;
+    const from = `${businessDate}T${String(cutoff).padStart(2, '0')}:00:00`;
 
-    const d = new Date(businessDate + 'T12:00:00');
-    d.setDate(d.getDate() + 1);
-    const nextDate = d.toISOString().slice(0, 10);
-
-    // Guard: if cutoff is 0 treat end-of-range as same calendar-day 23:59:59
-    const endH  = cutoff > 0 ? cutoff - 1 : 23;
-    const endHour = String(endH).padStart(2, '0');
-    const to      = cutoff > 0 ? `${nextDate}T${endHour}:59:59` : `${businessDate}T23:59:59`;
+    const endH = cutoff > 0 ? cutoff - 1 : 23;
+    // Hitung tanggal berikutnya (operasi kalender murni, tanpa timezone issue)
+    const [y, m, d] = businessDate.split('-').map(Number);
+    const next = new Date(y, m - 1, d + 1);
+    const nextDate = [
+      next.getFullYear(),
+      String(next.getMonth() + 1).padStart(2, '0'),
+      String(next.getDate()).padStart(2, '0')
+    ].join('-');
+    const to = `${nextDate}T${String(endH).padStart(2, '0')}:59:59`;
 
     return { from, to };
   }
 };
 
-// ── BUG-17 FIX: Unified window-level helpers ───────────────────────────────
-// Shared by both pos.js and admin.js — single source of truth.
-// Local definitions in those files are thin aliases that defer here.
-window.fRp = window.formatRupiah = function(n) {
-  return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
-};
-
-window.escHtml = window.escapeHtml = function(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
-};
+// ── Window-level helpers — delegate ke fmt (single source of truth) ──────────
+window.fRp = window.formatRupiah = (n) => fmt.rupiah(n);
+window.escHtml = window.escapeHtml = (str) => fmt.html(str);
 
 window.showToast = function(msg, type = 'info') {
   const c = document.getElementById('toast-container');

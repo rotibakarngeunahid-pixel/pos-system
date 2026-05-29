@@ -155,6 +155,34 @@
     }
     .pcard:hover .pcard-btn { background: #dc2626 !important; transform: scale(1.1) !important; }
 
+    /* ── Deposit-only mode: kunci tab non-setoran ── */
+    body.deposit-only-mode .pos-tab-item:not([data-tab="deposits"]) {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    body.deposit-only-mode .pos-tab-item:not([data-tab="deposits"]):hover {
+      background: transparent !important;
+      color: inherit !important;
+    }
+    body.deposit-only-mode .drawer-btn:not([data-tab="deposits"]) {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    /* Banner deposit-only hint strip */
+    #deposit-only-banner {
+      display: none;
+      background: var(--primary-bg, #eff6ff);
+      border-bottom: 1px solid var(--primary-muted, #bfdbfe);
+      padding: 7px 16px;
+      font-size: 12px;
+      color: var(--primary, #2563eb);
+      font-weight: 600;
+      text-align: center;
+      gap: 8px;
+    }
+    body.deposit-only-mode #deposit-only-banner { display: flex; align-items: center; justify-content: center; }
+
     /* ── Deposit mode tabs ── */
     .deposit-mode-tabs {
       display: flex; gap: 6px; margin: 12px 0 0;
@@ -238,6 +266,16 @@
     </button>
     <button class="pos-tab-item" id="pos-maintab-deposits" data-action="switch-main-tab" data-tab="deposits">
       <i data-lucide="dollar-sign" class="icon-sm"></i> Setoran
+    </button>
+  </div>
+
+  <!-- Banner: Mode Setoran (hanya muncul saat deposit-only-mode) -->
+  <div id="deposit-only-banner" role="alert">
+    <i data-lucide="lock" style="width:14px;height:14px;flex-shrink:0"></i>
+    <span>Mode Setoran — Buka shift terlebih dahulu untuk mengakses fitur lainnya</span>
+    <button class="btn btn-ghost btn-sm" data-action="startup-open-shift"
+      style="font-size:11px;padding:2px 10px;margin-left:8px;height:auto;background:var(--primary,#2563eb);color:#fff;border-radius:6px">
+      Buka Shift
     </button>
   </div>
 
@@ -809,6 +847,53 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       MODAL: Pilih Aktivitas Awal (Tanpa Shift Aktif)
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-startup-choice">
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="startup-choice-title">
+      <div class="modal-body" style="padding:28px 24px 20px">
+        <div style="text-align:center;margin-bottom:22px">
+          <div style="width:54px;height:54px;background:var(--primary-bg,#eff6ff);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
+            <i data-lucide="store" style="width:28px;height:28px;color:var(--primary,#2563eb)"></i>
+          </div>
+          <h3 id="startup-choice-title" style="font-size:18px;font-weight:800;margin:0 0 5px;color:var(--text)">Selamat Datang!</h3>
+          <p id="startup-staff-greeting" style="font-size:13px;color:var(--text-muted);margin:0">Tidak ada shift aktif. Pilih aktivitas:</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <!-- Option: Buka Shift -->
+          <button class="btn btn-primary" data-action="startup-open-shift"
+            style="height:62px;font-size:15px;font-weight:700;border-radius:14px;display:flex;align-items:center;gap:12px;padding:0 18px;text-align:left">
+            <div style="width:38px;height:38px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <i data-lucide="play-circle" style="width:22px;height:22px"></i>
+            </div>
+            <div>
+              <div style="line-height:1.2">Buka Shift & Mulai Berjualan</div>
+              <div style="font-size:11px;font-weight:400;opacity:.8;margin-top:2px">Mulai menerima transaksi pelanggan</div>
+            </div>
+          </button>
+          <!-- Option: Setoran (hanya tampil kalau ada sesi tertutup) -->
+          <button class="btn btn-outline" data-action="startup-go-deposit" id="btn-startup-deposit"
+            style="height:62px;font-size:15px;font-weight:700;border-radius:14px;display:none;align-items:center;gap:12px;padding:0 18px;text-align:left;border-width:2px">
+            <div style="width:38px;height:38px;background:var(--primary-bg,#eff6ff);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <i data-lucide="banknote" style="width:22px;height:22px;color:var(--primary,#2563eb)"></i>
+            </div>
+            <div>
+              <div style="line-height:1.2">Setoran Tunai</div>
+              <div style="font-size:11px;font-weight:400;color:var(--text-muted);margin-top:2px">Setor hasil kas shift sebelumnya</div>
+            </div>
+          </button>
+        </div>
+        <div style="text-align:center;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+          <button class="btn btn-ghost btn-sm" style="color:var(--text-muted);font-size:12px" data-action="confirm-logout">
+            <i data-lucide="log-out" class="icon-sm"></i>
+            Keluar dari Sistem
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        MODAL: Buka Shift (WAJIB)
   ══════════════════════════════════════════ -->
   <div class="modal-overlay" id="modal-shift">
@@ -866,8 +951,8 @@
         <!-- Input tersembunyi untuk kompatibilitas backward (diisi otomatis oleh JS) -->
         <input type="hidden" id="shift-opening-cash" value="0" />
 
-        <!-- ── Setoran Tunai Opsional ──────────────────────────── -->
-        <div id="shift-open-deposit-wrap" style="margin-top:16px">
+        <!-- Setoran Tunai sudah dipindah ke flow Startup Choice — section ini disembunyikan -->
+        <div id="shift-open-deposit-wrap" style="display:none;margin-top:16px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
             <hr style="flex:1;border:none;border-top:1px solid var(--border);margin:0">
             <span style="font-size:10px;font-weight:700;color:var(--text-muted);white-space:nowrap;letter-spacing:.6px;text-transform:uppercase">Setoran Tunai</span>
@@ -903,7 +988,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost btn-sm" data-action="confirm-logout" title="Batalkan dan keluar">Keluar</button>
+        <button class="btn btn-ghost btn-sm" data-action="shift-modal-back">← Kembali</button>
         <button class="btn btn-primary" id="btn-open-shift" data-action="confirm-open-shift">Buka Shift &amp; Mulai Berjualan</button>
       </div>
     </div>
@@ -1195,7 +1280,6 @@
   <!-- Loader -->
   <div id="page-loader" class="loader-overlay"><div class="spinner"></div></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/supabaseClient.js"></script>
   <script src="js/auth.js?v=20260526-session-hardening-1"></script>
   <script src="js/utils/safeNum.js"></script>

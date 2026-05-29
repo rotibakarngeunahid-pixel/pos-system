@@ -4,13 +4,6 @@
 // All cash_log operations go through this service.
 // Core rule: cash_logs are IMMUTABLE — never delete, only void with reason.
 
-// TODO (DBA): Verify FK constraint names with this SQL if getLogs() still fails:
-// SELECT conname, a.attname
-// FROM pg_constraint c
-// JOIN pg_attribute a ON a.attnum = ANY(c.conkey) AND a.attrelid = c.conrelid
-// WHERE c.conrelid = 'cash_logs'::regclass AND c.contype = 'f';
-// Then update the alias hints below to match the actual constraint names.
-
 function isMissingRpcError(error) {
   const msg = String(error?.message || '').toLowerCase();
   return error?.code === '42883' ||
@@ -113,8 +106,8 @@ const cashService = {
     const { error } = await db.from('cash_logs').update({
       is_void:    true,
       void_reason: reason.trim(),
-      voided_by:  voidedBy || null,
-      voided_at:  new Date().toISOString()
+      void_by:    voidedBy || null,
+      void_at:    fmt.getWitaTimestamp()
     }).eq('id', logId);
     if (error) throw error;
     return true;
@@ -129,8 +122,8 @@ const cashService = {
     if (sessionId) {
       q = q.eq('session_id', sessionId);
     } else {
-      if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
-      if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59');
+      if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00+08:00');
+      if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59+08:00');
     }
 
     const { data, error } = await q;
@@ -155,8 +148,8 @@ const cashService = {
     if (sessionId) {
       q = q.eq('session_id', sessionId);
     } else {
-      if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
-      if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59');
+      if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00+08:00');
+      if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59+08:00');
     }
 
     const { data: logs, error } = await q;
@@ -245,10 +238,10 @@ const cashService = {
         .select(`
           id, type, amount, note, created_at,
           reference_type, reference_id,
-          is_void, void_reason, voided_at,
+          is_void, void_reason, void_at,
           cash_categories(name),
           creator:users!cash_logs_created_by_fkey(name),
-          voider:users!cash_logs_voided_by_fkey(name)
+          voider:users!cash_logs_void_by_fkey(name)
         `)
         .eq('branch_id', branchId)
         .order('created_at', { ascending: false })
@@ -256,8 +249,8 @@ const cashService = {
 
       if (sessionId)      q = q.eq('session_id', sessionId);
       if (!includeVoided) q = q.eq('is_void', false);
-      if (dateFrom)       q = q.gte('created_at', dateFrom + 'T00:00:00');
-      if (dateTo)         q = q.lte('created_at', dateTo   + 'T23:59:59');
+      if (dateFrom)       q = q.gte('created_at', dateFrom + 'T00:00:00+08:00');
+      if (dateTo)         q = q.lte('created_at', dateTo   + 'T23:59:59+08:00');
 
       const { data, error } = await q;
       if (!error) return data || [];
@@ -269,22 +262,22 @@ const cashService = {
     // Robust fallback: fetch basic fields + creator/voider IDs, then resolve user names
     try {
       let q2 = db.from('cash_logs')
-        .select('id, type, amount, note, created_at, reference_type, reference_id, is_void, void_reason, voided_at, cash_categories(name), created_by, voided_by')
+        .select('id, type, amount, note, created_at, reference_type, reference_id, is_void, void_reason, void_at, void_by, cash_categories(name), created_by')
         .eq('branch_id', branchId)
         .order('created_at', { ascending: false })
         .limit(limit);
 
       if (sessionId)      q2 = q2.eq('session_id', sessionId);
       if (!includeVoided) q2 = q2.eq('is_void', false);
-      if (dateFrom)       q2 = q2.gte('created_at', dateFrom + 'T00:00:00');
-      if (dateTo)         q2 = q2.lte('created_at', dateTo   + 'T23:59:59');
+      if (dateFrom)       q2 = q2.gte('created_at', dateFrom + 'T00:00:00+08:00');
+      if (dateTo)         q2 = q2.lte('created_at', dateTo   + 'T23:59:59+08:00');
 
       const { data: rows, error: e2 } = await q2;
       if (e2) throw e2;
       const out = rows || [];
 
       // Resolve creator/voider names in batch
-      const userIds = Array.from(new Set(out.flatMap(r => [r.created_by, r.voided_by].filter(Boolean))));
+      const userIds = Array.from(new Set(out.flatMap(r => [r.created_by, r.void_by].filter(Boolean))));
       const usersMap = {};
       if (userIds.length) {
         const { data: users } = await db.from('users').select('id, name').in('id', userIds);
@@ -301,10 +294,10 @@ const cashService = {
         reference_id: r.reference_id,
         is_void: r.is_void,
         void_reason: r.void_reason,
-        voided_at: r.voided_at,
+        void_at: r.void_at,
         cash_categories: r.cash_categories || null,
         creator: r.created_by ? { name: usersMap[r.created_by] || '—' } : null,
-        voider:  r.voided_by  ? { name: usersMap[r.voided_by]  || '—' } : null
+        voider:  r.void_by    ? { name: usersMap[r.void_by]    || '—' } : null
       }));
     } catch (err) {
       throw err;
@@ -368,7 +361,7 @@ const cashService = {
     const branchId = session.branch_id;
     const staffId = session.staff_id;
     const depositsQuery = db.from('cash_deposits')
-      .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id, deposit_account_id, deposit_account_name_snapshot, proof_url, proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at')
+      .select('id, amount, status, notes, created_at, reviewed_at, reject_reason, session_id, account_id, proof_url, proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at')
       .eq('session_id', sessionId)
       .order('created_at', { ascending: false })
       .limit(30);

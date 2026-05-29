@@ -9,8 +9,8 @@ const reportService = {
     // void stats — all in one round-trip.
     let q = db.from('transactions')
       .select('id, created_at, total, subtotal, discount_amount, tax_amount, payment_method, status, branches(name), users!staff_id(name)')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
+      .gte('created_at', dateFrom + 'T00:00:00+08:00')
+      .lte('created_at', dateTo + 'T23:59:59+08:00')
       .order('created_at', { ascending: false });
     if (branchId) q = q.eq('branch_id', branchId);
     if (paymentMethod) q = q.eq('payment_method', paymentMethod);
@@ -53,8 +53,8 @@ const reportService = {
         )
       `)
       .eq('transactions.status', 'completed')
-      .gte('transactions.created_at', dateFrom + 'T00:00:00')
-      .lte('transactions.created_at', dateTo + 'T23:59:59');
+      .gte('transactions.created_at', dateFrom + 'T00:00:00+08:00')
+      .lte('transactions.created_at', dateTo + 'T23:59:59+08:00');
 
     if (branchId)      q = q.eq('transactions.branch_id', branchId);
     if (paymentMethod) q = q.eq('transactions.payment_method', paymentMethod);
@@ -88,11 +88,10 @@ const reportService = {
   // ── Inventory Usage ───────────────────────────────────────────
   async getInventoryUsage({ branchId, dateFrom, dateTo }) {
     let q = db.from('inventory_logs')
-      .select('qty, type, created_at, ingredients(name, unit)')
+      .select('quantity, type, created_at, reference_type, ingredients(name, unit)')
       .eq('type', 'out')
-      .eq('reference_type', 'transaction')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59');
+      .gte('created_at', dateFrom + 'T00:00:00+08:00')
+      .lte('created_at', dateTo + 'T23:59:59+08:00');
     if (branchId) q = q.eq('branch_id', branchId);
 
     const { data, error } = await q;
@@ -104,7 +103,7 @@ const reportService = {
       if (!map[name]) map[name] = {
         name, unit: log.ingredients?.unit || '', totalUsed: 0
       };
-      map[name].totalUsed += parseFloat(log.qty || 0);
+      map[name].totalUsed += Math.abs(parseFloat(log.quantity || 0));
     }
 
     return Object.values(map).sort((a, b) => b.totalUsed - a.totalUsed);
@@ -114,8 +113,8 @@ const reportService = {
   async getSessionReport({ branchId, dateFrom, dateTo }) {
     let q = db.from('cashier_sessions')
       .select('*, branches(name), users!staff_id(name)')
-      .gte('opened_at', dateFrom + 'T00:00:00')
-      .lte('opened_at', dateTo + 'T23:59:59')
+      .gte('opened_at', dateFrom + 'T00:00:00+08:00')
+      .lte('opened_at', dateTo + 'T23:59:59+08:00')
       .order('opened_at', { ascending: false });
     if (branchId) q = q.eq('branch_id', branchId);
 

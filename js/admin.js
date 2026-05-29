@@ -185,10 +185,9 @@ const ADMIN = {
       if (btn) btn.textContent = '›';
     }
 
-    // Set today's date for transactions
-    const today = new Date().toISOString().slice(0,10);
+    // Set today's date for transactions (WITA business date)
     const dateInput = document.getElementById('trx-date-filter');
-    if (dateInput) dateInput.value = today;
+    if (dateInput) dateInput.value = fmt.getBusinessDate();
 
     await this.loadMasterData();
     // Load settings (includes payment methods)
@@ -1112,11 +1111,21 @@ const ADMIN = {
 
     if (fileInput.files?.[0]) {
       const file = fileInput.files[0];
-      const path = `products/${Date.now()}.${file.name.split('.').pop()}`;
-      const { data: upData, error: upErr } = await db.storage.from('product-images').upload(path, file, { upsert:true });
-      if (!upErr && upData) {
-        const { data: urlData } = db.storage.from('product-images').getPublicUrl(path);
-        imageUrl = urlData.publicUrl;
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('folder', 'products');
+        const UPLOAD_URL = API_BASE.replace('/api.php', '/upload.php');
+        const upRes  = await fetch(UPLOAD_URL, { method: 'POST', headers: { 'X-API-Key': API_KEY }, body: fd });
+        const upJson = await upRes.json();
+        if (upJson.success && upJson.url) {
+          imageUrl = upJson.url;
+          document.getElementById('product-image-url').value = imageUrl;
+        } else {
+          showToast('Upload gambar gagal: ' + (upJson.error || 'Unknown error'), 'error');
+        }
+      } catch (upErr) {
+        showToast('Upload gambar gagal: ' + upErr.message, 'error');
       }
     }
 
@@ -1454,6 +1463,7 @@ const ADMIN = {
     document.getElementById('ing-unit').value      = '';
     document.getElementById('ing-cost-price').value = '';
     document.getElementById('ing-modal-title').textContent = 'Tambah Bahan';
+    this._renderIngBranchCheckboxes([]);
     openModal('modal-ingredient');
   },
 
@@ -1465,7 +1475,27 @@ const ADMIN = {
     document.getElementById('ing-unit').value       = ing.unit;
     document.getElementById('ing-cost-price').value = ing.cost_price || '';
     document.getElementById('ing-modal-title').textContent = 'Edit Bahan';
+
+    try {
+      const { data: assignments } = await db
+        .from('branch_ingredient_assignments')
+        .select('branch_id')
+        .eq('ingredient_id', id);
+      const assignedIds = (assignments || []).map(a => a.branch_id);
+      this._renderIngBranchCheckboxes(assignedIds);
+    } catch { this._renderIngBranchCheckboxes([]); }
+
     openModal('modal-ingredient');
+  },
+
+  _renderIngBranchCheckboxes(assignedIds) {
+    const container = document.getElementById('ing-branch-checkboxes');
+    if (!container) return;
+    container.innerHTML = this.branches.map(b => `
+      <label class="flex items-center gap-2 cursor-pointer p-2 hover:bg-alt rounded transition-colors">
+        <input type="checkbox" class="ing-branch-cb" value="${b.id}" ${assignedIds.includes(b.id) ? 'checked' : ''} />
+        <span>${escHtml(b.name)}</span>
+      </label>`).join('');
   },
 
   // BUG-11 FIX: Only show products that actually use this ingredient via recipe_items
@@ -1514,10 +1544,28 @@ const ADMIN = {
     if (!name || !unit) { showToast('Nama dan satuan wajib diisi', 'error'); return; }
 
     const payload = { name, unit, cost_price: costPrice };
-    const { error } = id
-      ? await db.from('ingredients').update(payload).eq('id', id)
-      : await db.from('ingredients').insert(payload);
-    if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
+    let savedId = id ? parseInt(id) : null;
+
+    if (id) {
+      const { error } = await db.from('ingredients').update(payload).eq('id', id);
+      if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
+    } else {
+      const { data, error } = await db.from('ingredients').insert(payload).select('id').single();
+      if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
+      savedId = data.id;
+    }
+
+    // Simpan mapping cabang (non-fatal jika tabel belum ada)
+    try {
+      const checkedIds = [...document.querySelectorAll('.ing-branch-cb:checked')].map(cb => parseInt(cb.value));
+      await db.from('branch_ingredient_assignments').delete().eq('ingredient_id', savedId);
+      if (checkedIds.length > 0) {
+        await db.from('branch_ingredient_assignments').insert(
+          checkedIds.map(bid => ({ branch_id: bid, ingredient_id: savedId }))
+        );
+      }
+    } catch { /* tabel belum ada, mapping dilewati */ }
+
     this.closeModal('modal-ingredient');
     await this._refreshIngredientsCache();
     if (this.currentSection === 'ingredients') await this.loadIngredients();
@@ -1538,7 +1586,23 @@ const ADMIN = {
     const invMap = {};
     (inv||[]).forEach(i => { if (i.ingredients) invMap[i.ingredients.id] = i; });
 
-    const ingredientsInBranch = this.ingredients.filter(ing => invMap[ing.id] !== undefined);
+    // Load branch assignments (non-fatal jika tabel belum ada)
+    const assignMap = {};
+    try {
+      const { data: assignRows } = await db.from('branch_ingredient_assignments').select('ingredient_id, branch_id');
+      for (const a of (assignRows || [])) {
+        if (!assignMap[a.ingredient_id]) assignMap[a.ingredient_id] = new Set();
+        assignMap[a.ingredient_id].add(a.branch_id);
+      }
+    } catch { /* tabel belum ada, tampilkan semua */ }
+    const bidNum = parseInt(branchId);
+
+    const ingredientsInBranch = this.ingredients.filter(ing => {
+      // Jika ada mapping khusus tapi cabang ini tidak termasuk → skip
+      const assigned = assignMap[ing.id];
+      if (assigned && !assigned.has(bidNum)) return false;
+      return invMap[ing.id] !== undefined;
+    });
     grid.innerHTML = ingredientsInBranch.length
       ? ingredientsInBranch.map(ing => {
           const record  = invMap[ing.id];
@@ -1604,20 +1668,20 @@ const ADMIN = {
   setTrxQuickFilter(type, el) {
     document.querySelectorAll('.quick-filter-btn').forEach(b => b.classList.remove('active'));
     if (el) el.classList.add('active');
-    const today     = new Date();
-    // BUG FIX: renamed local helper to fmtDate to avoid shadowing global fmt object
-    const fmtDate   = d => d.toISOString().slice(0, 10);
     const dateInput = document.getElementById('trx-date-filter');
+    const todayWita = fmt.getBusinessDate(); // WITA calendar date
     if (type === 'today') {
-      if (dateInput) dateInput.value = fmtDate(today);
+      if (dateInput) dateInput.value = todayWita;
     } else if (type === 'yesterday') {
-      const y = new Date(today); y.setDate(y.getDate() - 1);
-      if (dateInput) dateInput.value = fmtDate(y);
+      const d = new Date(todayWita + 'T12:00:00+08:00');
+      d.setUTCDate(d.getUTCDate() - 1);
+      if (dateInput) dateInput.value = d.toISOString().slice(0, 10);
     } else if (type === 'week') {
-      const w = new Date(today); w.setDate(w.getDate() - 6);
-      if (dateInput) dateInput.value = fmtDate(w);
+      const d = new Date(todayWita + 'T12:00:00+08:00');
+      d.setUTCDate(d.getUTCDate() - 6);
+      if (dateInput) dateInput.value = d.toISOString().slice(0, 10);
     } else if (type === 'month') {
-      if (dateInput) dateInput.value = fmtDate(today).slice(0, 7) + '-01';
+      if (dateInput) dateInput.value = todayWita.slice(0, 7) + '-01';
     }
     this.loadTransactions();
   },
@@ -1984,17 +2048,20 @@ const ADMIN = {
     const typeLabel = { in:'Masuk', out:'Keluar', opname:'Opname', transfer_in:'Transfer Masuk', transfer_out:'Transfer Keluar' };
     const typeBadge = { in:'badge-green', out:'badge-red', opname:'badge-orange', transfer_in:'badge-green', transfer_out:'badge-orange' };
 
-    tbody.innerHTML = data?.length ? data.map(log => `
-      <tr>
+    tbody.innerHTML = data?.length ? data.map(log => {
+      const qty = parseFloat(log.quantity ?? 0);
+      const qtyStr = qty > 0 ? '+' + qty : String(qty);
+      const noteStr = log.note || log.reference_type || '—';
+      return `<tr>
         <td class="nowrap text-xs">${fDate(log.created_at)}</td>
         <td>${escHtml(log.branches?.name||'—')}</td>
         <td class="fw-600">${escHtml(log.ingredients?.name||'—')}</td>
         <td><span class="badge ${typeBadge[log.type]||'badge-orange'}">${typeLabel[log.type]||log.type}</span></td>
-        <td class="fw-700">${log.qty > 0 ? '+'+log.qty : log.qty} ${escHtml(log.ingredients?.unit||'')}</td>
-        <td>${log.stock_before} → ${log.stock_after}</td>
+        <td class="fw-700">${qtyStr} ${escHtml(log.ingredients?.unit||'')}</td>
+        <td>${parseFloat(log.stock_before??0)} → ${parseFloat(log.stock_after??0)}</td>
         <td>${escHtml(log.users?.name||'Sistem')}</td>
-        <td class="text-xs text-muted">${escHtml(log.notes||log.reference_type||'—')}</td>
-      </tr>`).join('')
+        <td class="text-xs text-muted">${escHtml(noteStr)}</td>
+      </tr>`;}).join('')
     : `<tr><td colspan="8" class="empty-td">Belum ada log inventori</td></tr>`;
   },
 
@@ -2456,20 +2523,40 @@ const ADMIN = {
     if (!container) return;
     await this._refreshIngredientsCache();
     const data = this.ingredients;
+
+    // Load branch assignments untuk ditampilkan sebagai badge (non-fatal jika tabel belum ada)
+    let assignMap = {};
+    try {
+      const { data: assignRows } = await db.from('branch_ingredient_assignments').select('ingredient_id, branch_id');
+      for (const a of (assignRows || [])) {
+        if (!assignMap[a.ingredient_id]) assignMap[a.ingredient_id] = [];
+        assignMap[a.ingredient_id].push(a.branch_id);
+      }
+    } catch { /* tabel belum ada, badge tidak ditampilkan */ }
+    const branchNameMap = {};
+    for (const b of this.branches) branchNameMap[b.id] = b.name;
+
     container.innerHTML = data.length
-      ? `<div class="admin-list">${data.map(ing => `
+      ? `<div class="admin-list">${data.map(ing => {
+          const bids      = assignMap[ing.id] || [];
+          const branchBadges = bids.length
+            ? bids.map(bid => `<span class="badge badge-blue">${escHtml(branchNameMap[bid] || bid)}</span>`).join(' ')
+            : `<span class="badge badge-orange">Semua Cabang</span>`;
+          return `
           <div class="admin-list-card">
             <div class="list-card-icon green"><i data-lucide="leaf" class="icon"></i></div>
             <div class="list-card-info">
               <div class="list-card-title">${escHtml(ing.name)}</div>
               <div class="list-card-sub">Satuan: ${escHtml(ing.unit)}${ing.cost_price > 0 ? ' · Harga beli: ' + fRp(ing.cost_price) + '/' + escHtml(ing.unit) : ''}</div>
+              <div class="flex gap-1 flex-wrap mt-1">${branchBadges}</div>
             </div>
             <div class="list-card-actions">
               <button class="btn btn-outline btn-sm" data-admin-action="open-ingredient-products" data-id="${ing.id}">Lihat Produk</button>
               <button class="btn btn-outline btn-sm" data-admin-action="open-edit-ingredient-modal" data-id="${ing.id}">Edit</button>
               <button class="btn btn-danger-soft btn-sm" data-admin-action="delete-ingredient" data-id="${ing.id}" data-name="${escHtml(ing.name)}">Hapus</button>
             </div>
-          </div>`).join('')}</div>`
+          </div>`;
+        }).join('')}</div>`
       : `<div class="empty-state">
           <div class="empty-icon"><i data-lucide="leaf" class="icon"></i></div>
           <div class="empty-title">Belum ada bahan baku</div>
@@ -2547,7 +2634,7 @@ const ADMIN = {
     if (defPriceEl) defPriceEl.value = '';
 
     if (id) {
-      const p = this.products.find(x => x.id === id) || {};
+      const p = (this._allProducts || this.products).find(x => Number(x.id) === id) || {};
       document.getElementById('product-name').value     = p.name     || '';
       document.getElementById('product-category').value = p.category || '';
       if (p.image_url) {
@@ -2691,15 +2778,28 @@ const ADMIN = {
 
     // Try load from Supabase; fall back to localStorage or defaults
     try {
-      const { data, error } = await db.from('payment_methods').select('id, code, label, icon, fee_label, fee_percent, is_active').order('id');
+      let { data, error } = await db.from('payment_methods').select('id, code, label, icon, fee_label, fee_percent, is_fee_enabled, is_active').order('id');
+      const loadErrMsg = String(error?.message || '').toLowerCase();
+      if (error && loadErrMsg.includes('is_fee_enabled')) {
+        ({ data, error } = await db.from('payment_methods').select('id, code, label, icon, fee_label, fee_percent, is_active').order('id'));
+      }
       if (error) throw error;
       if (Array.isArray(data) && data.length) {
-        this.paymentMethods = data.map(m => ({ id: m.id, code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label, fee_percent: parseFloat(m.fee_percent||0), is_active: m.is_active }));
+        this.paymentMethods = data.map(m => ({
+          id: m.id,
+          code: m.code,
+          label: m.label,
+          icon: m.icon,
+          fee_label: m.fee_label,
+          fee_percent: parseFloat(m.fee_percent || 0),
+          is_fee_enabled: m.is_fee_enabled === true || m.is_fee_enabled === 1 || m.is_fee_enabled === '1',
+          is_active: m.is_active
+        }));
       } else {
         // No rows in DB — use localStorage if present, otherwise seed with defaults
         this.paymentMethods = Array.isArray(sLocal.paymentMethods) && sLocal.paymentMethods.length ? sLocal.paymentMethods : defaultMethods;
         try {
-          const payload = this.paymentMethods.map(m => ({ code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label || null, fee_percent: m.fee_percent || 0, is_active: m.is_active ?? true }));
+          const payload = this.paymentMethods.map(m => ({ code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label || null, fee_percent: m.fee_percent || 0, is_fee_enabled: !!(m.is_fee_enabled || Number(m.fee_percent || 0) > 0), is_active: m.is_active ?? true }));
           await db.from('payment_methods').insert(payload);
         } catch (seedErr) {
           // ignore seed errors
@@ -2739,7 +2839,7 @@ const ADMIN = {
         if (delErr) throw delErr;
       }
 
-      const payloadFull = methods.map(m => ({ code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label || null, fee_percent: m.fee_percent || 0, is_active: m.is_active ?? true }));
+      const payloadFull = methods.map(m => ({ code: m.code, label: m.label, icon: m.icon, fee_label: m.fee_label || null, fee_percent: m.fee_percent || 0, is_fee_enabled: !!(m.is_fee_enabled || Number(m.fee_percent || 0) > 0), is_active: m.is_active ?? true }));
       try {
         const { error: upErr } = await db.from('payment_methods').upsert(payloadFull, { onConflict: 'code' });
         if (upErr) throw upErr;
@@ -2749,7 +2849,7 @@ const ADMIN = {
         // If the error mentions missing fee columns in the remote schema, retry without those fields
         const errMsg = upErr && (upErr.message || upErr.error) ? (upErr.message || upErr.error) : String(upErr || '');
         console.warn('Upsert failed, attempting fallback without fee fields:', errMsg);
-        if (/fee_label|fee_percent/.test(errMsg)) {
+        if (/fee_label|fee_percent|is_fee_enabled/.test(errMsg)) {
           const payloadFallback = methods.map(m => ({ code: m.code, label: m.label, icon: m.icon, is_active: m.is_active ?? true }));
           const { error: upErr2 } = await db.from('payment_methods').upsert(payloadFallback, { onConflict: 'code' });
           if (!upErr2) {
@@ -3014,6 +3114,7 @@ const ADMIN = {
     m.label = newLabel.trim() || m.label;
     m.fee_label = (newFeeLabel || '').trim() || null;
     m.fee_percent = isNaN(pct) ? (m.fee_percent || 0) : pct;
+    m.is_fee_enabled = !!(m.fee_label || Number(m.fee_percent || 0) > 0);
     this.renderPaymentMethodsSettings();
     const saved = await this.saveSettings();
     if (saved) showToast('Metode diperbarui', 'success');
@@ -3192,12 +3293,15 @@ const ADMIN = {
   // ── Cash Report ───────────────────────────────────────────────
   // BUG-13 FIX: Show informative empty-state when no branch is selected
   async loadCashReport() {
-    const today = new Date().toISOString().slice(0, 10);
     const dateFromEl = document.getElementById('cash-report-date-from');
     const dateToEl   = document.getElementById('cash-report-date-to');
     const branchEl   = document.getElementById('cash-report-branch');
     if (!dateFromEl) return;
-    if (!dateFromEl.value) { dateFromEl.value = today; dateToEl.value = today; }
+    if (!dateFromEl.value) {
+      const today = fmt.getBusinessDate();
+      dateFromEl.value = today;
+      dateToEl.value   = today;
+    }
 
     if (branchEl && branchEl.options.length <= 1 && this.branches?.length) {
       branchEl.innerHTML = '<option value="">-- Pilih Cabang --</option>' +
@@ -3982,13 +4086,10 @@ const ADMIN = {
     // Fill endpoint display
     const epEl   = document.getElementById('api-endpoint-display');
     const codeEl = document.getElementById('api-code-example');
-    const supaUrl = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '') ||
-                    (typeof db?._url !== 'undefined' ? db._url : '') ||
-                    '<SUPABASE_URL>';
-    const supaKey = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') || '<SUPABASE_ANON_KEY>';
+    const apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php');
 
-    if (epEl)   epEl.textContent   = `${supaUrl}/rest/v1/rpc/get_transactions_api`;
-    if (codeEl) codeEl.textContent = `fetch('${supaUrl}/rest/v1/rpc/get_transactions_api', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'apikey': '${supaKey}'\n  },\n  body: JSON.stringify({\n    p_api_key: 'YOUR_API_KEY_HERE',\n    p_from: '2025-01-01T00:00:00Z',\n    p_to:   '2025-12-31T23:59:59Z'\n  })\n})`;
+    if (epEl)   epEl.textContent   = `${apiBase}/rpc/get_transactions_api`;
+    if (codeEl) codeEl.textContent = `fetch('${apiBase}/rpc/get_transactions_api?p_api_key=YOUR_API_KEY_HERE&p_from=2025-01-01&p_to=2025-12-31')`;
 
     await this.loadApiKeys();
   },

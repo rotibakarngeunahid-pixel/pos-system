@@ -186,7 +186,7 @@ const adminDepositUi = {
         const date      = fDate(r.created_at);
         const staff     = escHtml(this.staffMap[r.staff_id] || '-');
         const br        = escHtml(this.branches.find(b => b.id === r.branch_id)?.name || '-');
-        const acc       = this.accounts.find(a => a.id === r.deposit_account_id);
+        const acc       = this.accounts.find(a => a.id === (r.account_id || r.deposit_account_id));
         const method    = escHtml(this.getDepositMethodLabel(r, acc));
         const typeIcon  = this.getAccountIcon(acc);
         const proof     = this.renderProofLink(r);
@@ -263,10 +263,9 @@ const adminDepositUi = {
   },
 
   getDepositMethodLabel(row, account = null) {
-    return row?.deposit_account_name_snapshot
-      || account?.label
-      || row?.legacy_method
-      || 'Metode lama/tidak tersedia';
+    return account?.label
+      || row?.method
+      || 'Metode tidak tersedia';
   },
 
   getAccountIcon(account) {
@@ -786,11 +785,15 @@ const adminDepositUi = {
   },
 
   async doReject(depositId) {
-    const reason = await showPrompt({ title: 'Tolak Setoran', placeholder: 'Alasan penolakan (opsional)' });
+    const reason = await showPrompt({ title: 'Tolak Setoran', placeholder: 'Alasan penolakan (wajib, min. 3 karakter)' });
     if (reason === null) return;
+    if (!reason.trim() || reason.trim().length < 3) {
+      showToast('Alasan penolakan wajib diisi minimal 3 karakter', 'error');
+      return;
+    }
     try {
       const adminId = auth.getSession()?.id || null;
-      await depositService.confirmDeposit({ depositId, adminId, action: 'rejected', rejectReason: reason || null });
+      await depositService.confirmDeposit({ depositId, adminId, action: 'rejected', rejectReason: reason.trim() });
       showToast('Setoran ditolak', 'success');
       await this.loadDeposits();
       if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-deposit-reject' });

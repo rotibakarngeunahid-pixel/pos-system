@@ -39,12 +39,12 @@ const INVESTOR = {
   },
 
   _setDefaultDates() {
-    const today = new Date();
-    const yyyy  = today.getFullYear();
-    const mm    = String(today.getMonth() + 1).padStart(2, '0');
-    const dd    = String(today.getDate()).padStart(2, '0');
-    document.getElementById('inv-date-from').value = `${yyyy}-${mm}-01`;
-    document.getElementById('inv-date-to').value   = `${yyyy}-${mm}-${dd}`;
+    // Use fmt.getBusinessDate() for WITA-correct date (UTC+8)
+    const todayWita = (typeof fmt !== 'undefined')
+      ? fmt.getBusinessDate()
+      : new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    document.getElementById('inv-date-from').value = todayWita.slice(0, 7) + '-01';
+    document.getElementById('inv-date-to').value   = todayWita;
   },
 
   async _loadAccessConfig() {

@@ -34,7 +34,11 @@ const depositUi = {
   },
 
   hasEligibleClosedShift() {
-    return this.selectedClosedSession !== null && this.selectedClosedSession.session_status === 'closed';
+    const sess = this.selectedClosedSession;
+    if (!sess) return false;
+    // RPC may return 'status' or 'session_status' depending on code path
+    const status = sess.session_status ?? sess.status;
+    return status === 'closed';
   },
 
   isFormBlocked() {
@@ -122,7 +126,16 @@ const depositUi = {
     this.bindModeSelector();
     this.bindTransferForm();
 
-    if (this.el.amountInput) this.el.amountInput.addEventListener('input', () => this.onAmountInput());
+    if (this.el.amountInput) {
+      // Block non-numeric keystrokes (allow control keys, digits only)
+      this.el.amountInput.addEventListener('keydown', e => {
+        const passKeys = ['Backspace','Delete','Tab','Escape','Enter',
+                          'ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+        if (passKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
+        if (!/^\d$/.test(e.key)) e.preventDefault();
+      });
+      this.el.amountInput.addEventListener('input', () => this.onAmountInput());
+    }
     this.el.quickButtons.forEach(btn => {
       btn.addEventListener('click', () => this.setQuickAmount(btn.dataset.depositQuick));
     });
@@ -192,15 +205,27 @@ const depositUi = {
     });
   },
 
-  refreshWhenReady(attempt = 0, opts = {}) {
+  refreshWhenReady(attemptOrOpts = 0, opts = {}) {
+    // Support two call signatures:
+    //   refreshWhenReady()                          — no-arg
+    //   refreshWhenReady({ preferSessionId })       — opts as first arg (legacy callers)
+    //   refreshWhenReady(attempt, opts)             — internal recursive call
+    let attempt, resolvedOpts;
+    if (typeof attemptOrOpts === 'object' && attemptOrOpts !== null) {
+      attempt = 0;
+      resolvedOpts = attemptOrOpts;
+    } else {
+      attempt = Number(attemptOrOpts) || 0;
+      resolvedOpts = opts;
+    }
     const pos = this.getPOS();
     if (pos?.user && pos?.branch) {
-      this.refresh(opts);
+      this.refresh(resolvedOpts);
       return;
     }
     if (attempt >= 40) return;
     clearTimeout(this.readyRefreshTimer);
-    this.readyRefreshTimer = setTimeout(() => this.refreshWhenReady(attempt + 1, opts), 250);
+    this.readyRefreshTimer = setTimeout(() => this.refreshWhenReady(attempt + 1, resolvedOpts), 250);
   },
 
   async refresh({ preferSessionId = null } = {}) {
@@ -1166,8 +1191,8 @@ const depositUi = {
 
     this.el.historyBody.innerHTML = rows.map(row => {
       const status = this.getStatusMeta(row.status);
-      const method = row.deposit_account_name_snapshot
-        || row.deposit_accounts?.label
+      const method = row.deposit_accounts?.label
+        || row.method
         || 'Metode lama/tidak tersedia';
       const proof = row.proof_url
         ? `<a href="${this.esc(row.proof_url)}" target="_blank" rel="noopener">${this.esc(row.proof_file_name || 'Lihat bukti')}</a>`
@@ -1281,9 +1306,21 @@ const depositUi = {
   },
 
   bindTransferForm() {
-    // Amount input
+    // Amount input — numeric-only with live currency formatting
     if (this.el.transferAmountInput) {
-      this.el.transferAmountInput.addEventListener('input', () => this.updateTransferSubmitState());
+      this.el.transferAmountInput.addEventListener('keydown', e => {
+        const passKeys = ['Backspace','Delete','Tab','Escape','Enter',
+                          'ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+        if (passKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
+        if (!/^\d$/.test(e.key)) e.preventDefault();
+      });
+      this.el.transferAmountInput.addEventListener('input', () => {
+        const digits = String(this.el.transferAmountInput.value || '').replace(/\D/g, '');
+        const num = digits ? Number(digits) : 0;
+        const cursor = this.el.transferAmountInput.selectionStart;
+        this.el.transferAmountInput.value = num > 0 ? num.toLocaleString('id-ID') : '';
+        this.updateTransferSubmitState();
+      });
     }
     // Quick buttons
     this.el.transferQuickButtons.forEach(btn => {

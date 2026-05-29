@@ -68,11 +68,11 @@ const auth = {
       const code = String(error.code || '');
 
       if (code === '42883' || msg.includes('does not exist') || msg.includes('function'))
-        throw new Error('Fungsi login belum ada. Jalankan fix_login.sql di Supabase SQL Editor.');
+        throw new Error('Terjadi kesalahan server. Hubungi admin.');
       if (code === '42501' || msg.includes('permission denied'))
-        throw new Error('Permission ditolak. Jalankan fix_login.sql di Supabase SQL Editor.');
+        throw new Error('Akses ditolak. Hubungi admin.');
 
-      throw new Error('Error [' + (code || '?') + ']: ' + (error.message || JSON.stringify(error)));
+      throw new Error(error.message || 'Terjadi kesalahan. Coba lagi atau hubungi admin.');
     }
 
     if (!data) throw new Error('Username atau password salah.');

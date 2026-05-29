@@ -4,8 +4,11 @@ const DEPOSIT_PROOF_ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'
 const DEPOSIT_PROOF_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
 const DEPOSIT_PROOF_MAX_FILE_SIZE = 5 * 1024 * 1024;
 
-const DEPOSIT_UPLOAD_ENDPOINT = 'https://bukti-setoran.rotibakarngeunah.my.id/upload.php';
-const DEPOSIT_UPLOAD_SECRET   = '78998219380f85802eb86a9b4f2d3f6f';
+// Upload endpoint: gunakan upload.php di direktori yang sama dengan api.php
+// API_BASE didefinisikan di supabaseClient.js, e.g. 'https://pos.rotibakarngeunah.my.id/api/api.php'
+function _depositUploadUrl() {
+  return (typeof API_BASE !== 'undefined' ? API_BASE : '').replace('/api.php', '/upload.php');
+}
 
 const depositService = {
 
@@ -22,26 +25,23 @@ const depositService = {
   },
 
   async fetchAccountsViaRest({ branchId = null } = {}) {
-    const supabaseUrl = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : (typeof window !== 'undefined' ? window.SUPABASE_URL : ''));
-    const supabaseKey = (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : (typeof window !== 'undefined' ? window.SUPABASE_KEY : ''));
-    if (!supabaseUrl || !supabaseKey || typeof fetch !== 'function') {
+    const apiBase = typeof API_BASE !== 'undefined' ? API_BASE : '';
+    const apiKey  = typeof API_KEY  !== 'undefined' ? API_KEY  : '';
+    if (!apiBase || typeof fetch !== 'function') {
       throw new Error('REST fallback metode setoran tidak tersedia');
     }
 
-    const url = new URL(`${supabaseUrl}/rest/v1/deposit_accounts`);
+    const url = new URL(`${apiBase}/deposit_accounts`);
     url.searchParams.set('select', '*');
     url.searchParams.set('is_active', 'eq.true');
-    if (branchId) url.searchParams.set('or', `(branch_id.is.null,branch_id.eq.${branchId})`);
-    url.searchParams.set('order', 'branch_id.desc.nullslast,created_at.desc');
+    if (branchId) url.searchParams.set('_or', `branch_id.is.null,branch_id.eq.${branchId}`);
+    url.searchParams.set('order', 'branch_id.desc,created_at.desc');
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
     try {
       const res = await fetch(url.toString(), {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`
-        },
+        headers: { 'X-API-Key': apiKey },
         signal: controller.signal
       });
       if (!res.ok) {
@@ -145,13 +145,15 @@ const depositService = {
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('branch_id', scope);
+    formData.append('folder', 'bukti_setoran');
 
     let res;
     try {
-      res = await fetch(DEPOSIT_UPLOAD_ENDPOINT, {
+      const uploadUrl = _depositUploadUrl();
+      const uploadKey = typeof API_KEY !== 'undefined' ? API_KEY : '';
+      res = await fetch(uploadUrl, {
         method: 'POST',
-        headers: { 'X-Upload-Secret': DEPOSIT_UPLOAD_SECRET },
+        headers: { 'X-API-Key': uploadKey },
         body: formData
       });
     } catch (networkErr) {
@@ -274,18 +276,17 @@ const depositService = {
   },
 
   async getMyDeposits({ staffId, branchId, limit = 50, daysBack = 0 }) {
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    const start = new Date(end);
-    start.setDate(start.getDate() - daysBack);
-    start.setHours(0, 0, 0, 0);
+    // Hitung range tanggal dalam WITA (UTC+8) agar cocok dengan data tersimpan di DB
+    const witaMs    = Date.now() + (8 * 60 + new Date().getTimezoneOffset()) * 60000;
+    const endDate   = new Date(witaMs).toISOString().slice(0, 10);
+    const startDate = new Date(witaMs - daysBack * 86400000).toISOString().slice(0, 10);
 
     const { data, error } = await db.from('cash_deposits')
       .select('*, deposit_accounts(label, type, bank_name, account_number)')
       .eq('staff_id', staffId)
       .eq('branch_id', branchId)
-      .gte('created_at', start.toISOString())
-      .lte('created_at', end.toISOString())
+      .gte('created_at', startDate + 'T00:00:00+08:00')
+      .lte('created_at', endDate   + 'T23:59:59+08:00')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
@@ -298,9 +299,8 @@ const depositService = {
     // deposit_accounts.id is UUID but we still skip the join — caller resolves names client-side.
     let q = db.from('cash_deposits')
       .select(`
-        id, branch_id, staff_id, reviewed_by, deposit_account_id,
-        deposit_account_name_snapshot,
-        amount, cash_balance_at_deposit, proof_url,
+        id, branch_id, staff_id, session_id, reviewed_by, account_id,
+        amount, method, cash_balance_at_deposit, proof_url,
         proof_file_name, proof_file_type, proof_file_size, proof_uploaded_at,
         notes,
         status, reject_reason, created_at, reviewed_at
@@ -309,8 +309,8 @@ const depositService = {
       .limit(limit);
     if (branchId) q = q.eq('branch_id', branchId);
     if (status)   q = q.eq('status', status);
-    if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00+07:00');
-    if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59+07:00');
+    if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00+08:00');
+    if (dateTo)   q = q.lte('created_at', dateTo   + 'T23:59:59+08:00');
     const { data, error } = await q;
     if (error) throw error;
     return data || [];
@@ -418,18 +418,15 @@ const depositService = {
     if (!allowed.includes(file.type)) throw new Error('Hanya JPG, PNG, atau WEBP yang diterima');
     if (file.size <= 0) throw new Error('File tidak boleh kosong');
     if (file.size > 5 * 1024 * 1024) throw new Error('Ukuran file maksimal 5 MB');
-    const ext = (file.name || '').split('.').pop() || file.type.split('/').pop();
-    const scope = branchId || 'global';
-    const path = `qris/${scope}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { data: uploadData, error } = await db.storage.from('deposit-qris').upload(path, file, { contentType: file.type, upsert: true });
-    if (error) {
-      if (this.isStoragePolicyError(error)) {
-        throw new Error('Upload QRIS belum diizinkan oleh Storage. Jalankan migrasi database terbaru lalu coba lagi.');
-      }
-      throw new Error('Upload QRIS gagal: ' + error.message);
-    }
-    const { data: pub } = await db.storage.from('deposit-qris').getPublicUrl(path);
-    return pub?.publicUrl || null;
+    const UPLOAD_URL = API_BASE.replace('/api.php', '/upload.php');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('folder', 'qris');
+    const upRes = await fetch(UPLOAD_URL, { method: 'POST', headers: { 'X-API-Key': API_KEY }, body: fd });
+    if (!upRes.ok) throw new Error('Upload QRIS gagal: HTTP ' + upRes.status);
+    const upJson = await upRes.json();
+    if (!upJson.success) throw new Error('Upload QRIS gagal: ' + (upJson.error || 'Unknown error'));
+    return upJson.url || null;
   },
 
   async getSessionDepositSummary(sessionId) {

@@ -11,6 +11,10 @@ const adminBranchCashUi = {
   _corrTarget: null, // { branchId, branchName, currentBalance, version, hasActiveShift }
   _corrSaving: false,
 
+  // Normal close modal
+  _csTarget: null,   // { branchId, branchName, openSessionId, staffId, staffName }
+  _csSaving: false,
+
   // Force-close modal
   _fcTarget: null,   // { branchId, branchName, openSessionId, staffName }
   _fcSaving: false,
@@ -38,9 +42,11 @@ const adminBranchCashUi = {
     }
   },
 
+
   _bindEvents() {
     if (this._bound) return;
     this._bound = true;
+
 
     const on = (id, ev, fn) => {
       const el = document.getElementById(id);
@@ -57,6 +63,12 @@ const adminBranchCashUi = {
     on('bc-correction-close-btn',  'click', () => this._closeModal('modal-branch-cash-correction'));
     on('bc-correction-cancel-btn', 'click', () => this._closeModal('modal-branch-cash-correction'));
     on('bc-correction-save-btn',   'click', () => this._saveCorrection());
+
+    // Close Shift (normal) modal
+    on('bc-close-shift-close-btn',  'click', () => this._closeModal('modal-branch-close-shift'));
+    on('bc-close-shift-cancel-btn', 'click', () => this._closeModal('modal-branch-close-shift'));
+    on('bc-close-shift-cancel-btn-2', 'click', () => this._closeModal('modal-branch-close-shift'));
+    on('bc-close-shift-save-btn',   'click', () => this._saveCloseShift());
 
     // Force-close modal
     on('bc-forceclose-close-btn',  'click', () => this._closeModal('modal-branch-force-close'));
@@ -78,9 +90,10 @@ const adminBranchCashUi = {
         const branchId = Number(btn.dataset.branchId);
         const row = this._rows.find(r => Number(r.branch_id) === branchId);
         if (!row) return;
-        if (action === 'correct')      this._openCorrection(row);
-        else if (action === 'ledger')  this._openLedger(row);
+        if (action === 'correct')       this._openCorrection(row);
+        else if (action === 'ledger')   this._openLedger(row);
         else if (action === 'force-close') this._openForceClose(row);
+        else if (action === 'close-shift') this._openCloseShift(row);
       });
     }
 
@@ -140,7 +153,13 @@ const adminBranchCashUi = {
   _renderSummaryCards() {
     const el = document.getElementById('bc-summary-cards');
     if (!el) return;
-    const totalKas      = this._rows.reduce((s, r) => s + Number(r.current_balance || 0), 0);
+    // Gunakan estimasi kas berjalan jika tersedia (shift aktif), else committed balance
+    const totalKas = this._rows.reduce((s, r) => {
+      const val = (r.shift_status === 'open' && r.estimated_running_cash != null)
+        ? Number(r.estimated_running_cash)
+        : Number(r.current_balance || 0);
+      return s + val;
+    }, 0);
     const activeCount   = this._rows.filter(r => r.shift_status === 'open').length;
     const pendingCount  = this._rows.filter(r => Number(r.pending_deposit_amount || 0) > 0).length;
     const pendingTotal  = this._rows.reduce((s, r) => s + Number(r.pending_deposit_amount || 0), 0);
@@ -210,9 +229,12 @@ const adminBranchCashUi = {
       const varianceHtml = r.has_variance && r.last_variance_amount != null
         ? `<span class="badge ${Number(r.last_variance_amount) >= 0 ? 'badge-success' : 'badge-danger'}">${Number(r.last_variance_amount) >= 0 ? '+' : ''}${formatRupiah(r.last_variance_amount)}</span>`
         : '<span class="text-muted">—</span>';
+
+      const closeShiftBtn = '';
+
       const forceCloseBtn = r.shift_status === 'open'
-        ? `<button class="btn btn-danger btn-xs" data-bc-action="force-close" data-branch-id="${r.branch_id}" title="Paksa Tutup Shift">
-             <i data-lucide="x-octagon" style="width:12px;height:12px"></i> Paksa Tutup
+        ? `<button class="btn btn-danger btn-xs" data-bc-action="force-close" data-branch-id="${r.branch_id}" title="Tutup Shift (Admin)">
+             <i data-lucide="lock" style="width:12px;height:12px"></i> Tutup Shift
            </button>`
         : '';
 
@@ -221,8 +243,18 @@ const adminBranchCashUi = {
           <div class="bc-card-name">${escHtml(r.branch_name)}</div>
           ${statusBadge}
         </div>
-        <div class="bc-card-balance">${formatRupiah(r.current_balance)}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin:-8px 0 8px;text-align:center">Kas awal shift berikutnya</div>
+        ${r.shift_status === 'open' && r.estimated_running_cash != null ? `
+          <div class="bc-card-balance" style="color:var(--primary)">${formatRupiah(r.estimated_running_cash)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin:-8px 0 8px;text-align:center">
+            Estimasi kas berjalan (shift aktif)
+            <span style="display:block;font-size:10px;color:var(--text-muted);margin-top:2px">
+              Saldo komit: ${formatRupiah(r.current_balance)}
+            </span>
+          </div>
+        ` : `
+          <div class="bc-card-balance">${formatRupiah(r.current_balance)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin:-8px 0 8px;text-align:center">${r.shift_status === 'open' ? 'Saldo kas outlet (aktif)' : 'Kas awal shift berikutnya'}</div>
+        `}
         <div class="bc-card-meta">
           <div>
             <div class="bc-meta-label">Kas Awal Terakhir</div>
@@ -260,6 +292,7 @@ const adminBranchCashUi = {
           <button class="btn btn-outline btn-xs" data-bc-action="correct" data-branch-id="${r.branch_id}" title="Set / Input Kas Outlet">
             <i data-lucide="edit-3" style="width:12px;height:12px"></i> Set Kas
           </button>
+          ${closeShiftBtn}
           ${forceCloseBtn}
         </div>
       </div>`;
@@ -364,6 +397,83 @@ const adminBranchCashUi = {
     }
   },
 
+  // ── Close Shift (Normal) Modal ───────────────────────────────
+  _openCloseShift(row) {
+    if (row.shift_status !== 'open' || !row.open_session_id) {
+      showToast('Tidak ada shift aktif untuk outlet ini', 'warning'); return;
+    }
+
+    const staffId =
+      row.open_staff_id ?? row.open_session_staff_id ?? row.open_staff?.id ?? row.open_staff_id;
+
+    this._csTarget = {
+      branchId:      row.branch_id,
+      branchName:    row.branch_name,
+      openSessionId: row.open_session_id,
+      staffId:       staffId,
+      staffName:     row.open_staff_name || '—'
+    };
+
+    if (!this._csTarget.staffId) {
+      showToast('Data staff untuk shift ini tidak lengkap (open_staff_id kosong).', 'error');
+      return;
+    }
+
+    const g = id => document.getElementById(id);
+    const nameEl   = g('bc-close-shift-branch-name');
+    const staffEl  = g('bc-close-shift-staff-name');
+    const cashEl   = g('bc-close-shift-cash');
+    const noteEl   = g('bc-close-shift-note');
+    const saveBtn  = g('bc-close-shift-save-btn');
+
+    if (nameEl)  nameEl.textContent  = row.branch_name;
+    if (staffEl) staffEl.textContent = `Staff aktif: ${row.open_staff_name || '—'}`;
+    if (cashEl)  cashEl.value        = '';
+    if (noteEl)  noteEl.value        = '';
+    if (saveBtn) saveBtn.disabled    = false;
+    if (saveBtn) saveBtn.textContent = 'Tutup Shift';
+
+    this._openModal('modal-branch-close-shift');
+  },
+
+  async _saveCloseShift() {
+    if (this._csSaving || !this._csTarget) return;
+    const g = id => document.getElementById(id);
+
+    const cashStr = g('bc-close-shift-cash')?.value;
+    const note    = g('bc-close-shift-note')?.value?.trim() || '';
+    const saveBtn = g('bc-close-shift-save-btn');
+
+    const closingCash = parseFloat(cashStr);
+    if (isNaN(closingCash) || closingCash < 0) {
+      showToast('Masukkan kas penutupan yang valid (≥ 0)', 'error'); return;
+    }
+
+    this._csSaving = true;
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Menutup…'; }
+
+    try {
+      await transactionService.closeShiftApplyBalance({
+        sessionId:   this._csTarget.openSessionId,
+        closingCash,
+        staffId:     this._csTarget.staffId,
+        closingNote: note || null
+      });
+
+      showToast(`Shift ${this._csTarget.branchName} berhasil ditutup.`, 'success');
+      if (window.RBNDataEvents) RBNDataEvents.publish('cash:changed', { source: 'admin-branch-cash' });
+
+      this._closeModal('modal-branch-close-shift');
+      this.load();
+    } catch (e) {
+      showToast(e?.message || 'Gagal menutup shift', 'error');
+      console.error(e);
+    } finally {
+      this._csSaving = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Tutup Shift'; }
+    }
+  },
+
   // ── Force Close Modal ─────────────────────────────────────────
   _openForceClose(row) {
     if (row.shift_status !== 'open' || !row.open_session_id) {
@@ -437,7 +547,7 @@ const adminBranchCashUi = {
     const nameEl  = document.getElementById('bc-ledger-branch-name');
     const tbody   = document.getElementById('bc-ledger-table-body');
     if (nameEl) nameEl.textContent = row.branch_name;
-    if (tbody)  tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Memuat...</td></tr>';
+    if (tbody)  tbody.innerHTML = '<tr><td colspan="10" class="empty-td">Memuat...</td></tr>';
     this._openModal('modal-branch-cash-ledger');
 
     try {
@@ -464,31 +574,33 @@ const adminBranchCashUi = {
     // ── Label tipe gerakan kas ──────────────────────────────────────────
     const typeLabels = {
       // Shift
-      default_seed:          'Inisialisasi',
-      session_open_confirm:  'Buka Shift',
-      opening_variance:      'Selisih Buka',
-      session_close:         'Tutup Shift',
-      force_close:           'Paksa Tutup',
-      system_repair:         'Perbaikan Sistem',
-      // Penjualan tunai (real-time sync — migration 050)
-      sale_cash_in:          'Penjualan Tunai',
-      sale_cash_void:        'Void Penjualan',
-      // Kas masuk/keluar manual staff (real-time sync — migration 050)
-      manual_cash_in:        'Kas Masuk Manual',
-      manual_cash_out:       'Kas Keluar Manual',
-      manual_cash_in_void:   'Void Kas Masuk',
-      manual_cash_out_void:  'Void Kas Keluar',
+      default_seed:           'Inisialisasi',
+      session_open_confirm:   'Buka Shift',
+      opening_variance:       'Selisih Buka',
+      session_close:          'Tutup Shift',
+      force_close:            'Paksa Tutup',
+      system_repair:          'Perbaikan Sistem',
+      // Penjualan & void (dari cash_logs via UNION)
+      sale_cash_in:           'Penjualan Tunai',
+      sale_cash_void:         'Void Penjualan',
+      // Kas masuk/keluar manual staff (dari cash_logs via UNION)
+      manual_cash_in:         'Kas Masuk Manual',
+      manual_cash_out:        'Kas Keluar Manual',
+      manual_cash_in_void:    'Void Kas Masuk',
+      manual_cash_out_void:   'Void Kas Keluar',
+      // Refund (dari cash_logs via UNION)
+      refund:                 'Refund',
       // Setoran
-      deposit_approved:      'Setoran Approved',
-      deposit_rejected:      'Setoran Ditolak',
-      // Transfer kas antar outlet (migration 055)
+      deposit_approved:       'Setoran Disetujui',
+      deposit_rejected:       'Setoran Ditolak',
+      // Transfer kas antar outlet
       cash_branch_transfer_out:       'Transfer Kas Keluar',
       cash_branch_transfer_in:        'Transfer Kas Masuk',
       cash_branch_transfer_rejected:  'Transfer Kas Ditolak',
       cash_branch_transfer_cancelled: 'Transfer Kas Dibatalkan',
       // Admin
-      admin_adjustment:      'Koreksi Admin',
-      sale_cash_backfill:    'Backfill Penjualan'
+      admin_adjustment:       'Koreksi Admin',
+      sale_cash_backfill:     'Backfill Penjualan'
     };
 
     // ── Badge arah ──────────────────────────────────────────────────────
@@ -501,22 +613,30 @@ const adminBranchCashUi = {
 
     // ── Badge tipe ──────────────────────────────────────────────────────
     const typeBadgeClass = mt => {
-      if (['sale_cash_in', 'manual_cash_in', 'cash_branch_transfer_in'].includes(mt))   return 'badge-success';
+      if (['sale_cash_in', 'manual_cash_in', 'cash_branch_transfer_in',
+           'session_open_confirm'].includes(mt))                                        return 'badge-success';
       if (['sale_cash_void', 'manual_cash_in_void',
            'manual_cash_out', 'manual_cash_out_void',
-           'deposit_approved', 'cash_branch_transfer_out'].includes(mt))                return 'badge-danger';
+           'deposit_approved', 'cash_branch_transfer_out',
+           'refund'].includes(mt))                                                      return 'badge-danger';
       if (['deposit_rejected', 'admin_adjustment', 'opening_variance',
            'cash_branch_transfer_rejected',
-           'cash_branch_transfer_cancelled'].includes(mt))                              return 'badge-warning';
+           'cash_branch_transfer_cancelled', 'force_close'].includes(mt))              return 'badge-warning';
+      if (['session_close'].includes(mt))                                               return 'badge-info';
       return 'badge-default';
     };
 
+    const fmtBalance = val => {
+      if (val == null || val === '') return '<span class="text-muted" title="Data dari sesi aktif, saldo komit belum diperbarui">—</span>';
+      return formatRupiah(val);
+    };
+
     tbody.innerHTML = this._ledgerData.map(row => {
-      const label    = typeLabels[row.movement_type] || row.movement_type;
+      const label    = typeLabels[row.movement_type] || escHtml(row.movement_type);
       const cls      = typeBadgeClass(row.movement_type);
-      const saldoBefore = formatRupiah(row.balance_before);
-      const saldoAfter  = formatRupiah(row.balance_after);
-      const actor    = escHtml(row.staff_name || row.admin_name || '—');
+      const saldoBefore = fmtBalance(row.balance_before);
+      const saldoAfter  = fmtBalance(row.balance_after);
+      const actor    = escHtml((row.staff_name || row.admin_name || '').trim() || '—');
       const reason   = escHtml(row.reason || '—');
       const variance = row.variance_amount != null && row.variance_amount !== 0
         ? `<span style="color:${Number(row.variance_amount) >= 0 ? 'var(--success)' : 'var(--danger)'}">${Number(row.variance_amount) >= 0 ? '+' : ''}${formatRupiah(row.variance_amount)}</span>`

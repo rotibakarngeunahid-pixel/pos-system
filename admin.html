@@ -1246,6 +1246,40 @@
       </div>
 
       <!-- MODAL: Forced Close -->
+      <!-- MODAL: Close Shift (Normal) -->
+      <div class="modal-overlay" id="modal-branch-close-shift" style="display:none">
+        <div class="modal modal-sm">
+          <div class="modal-header">
+            <span class="modal-title"><i data-lucide="lock" class="icon-sm"></i> Tutup Shift</span>
+            <button class="modal-close" id="bc-close-shift-close-btn">&times;</button>
+            <button class="btn btn-outline" id="bc-close-shift-cancel-btn">Batal</button>
+          </div>
+
+          <div class="modal-body">
+            <div id="bc-close-shift-info" style="background:var(--bg-alt);border-radius:var(--r-md);padding:10px 14px;margin-bottom:12px;font-size:13px">
+              <div style="font-weight:700" id="bc-close-shift-branch-name"></div>
+              <div style="color:var(--text-muted)" id="bc-close-shift-staff-name"></div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:10px">
+              <label class="form-label">Kas Penutupan *</label>
+              <div class="input-prefix-wrap">
+                <span class="input-prefix">Rp</span>
+                <input type="number" class="form-control" id="bc-close-shift-cash" placeholder="0" min="0" />
+              </div>
+
+              <label class="form-label">Catatan (opsional)</label>
+              <textarea class="form-control" id="bc-close-shift-note" rows="2" placeholder="Contoh: Penutupan normal oleh admin"></textarea>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-outline" id="bc-close-shift-cancel-btn-2">Batal</button>
+            <button class="btn btn-primary" id="bc-close-shift-save-btn">Tutup Shift</button>
+          </div>
+        </div>
+      </div>
+
       <div class="modal-overlay" id="modal-branch-force-close" style="display:none">
         <div class="modal modal-sm">
           <div class="modal-header">
@@ -2293,6 +2327,11 @@ atau tidak aktif."
           </div>
           <span class="form-hint">Digunakan untuk estimasi HPP</span>
         </div>
+        <div class="form-group">
+          <label class="form-label">Cabang yang Menggunakan Bahan Ini</label>
+          <div id="ing-branch-checkboxes" class="flex flex-col gap-1 mt-1"></div>
+          <span class="form-hint">Kosongkan (tidak ada yang dicentang) = bahan tersedia di semua cabang</span>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-ingredient">Batal</button>
@@ -2804,7 +2843,6 @@ atau tidak aktif."
   <!-- Page Loader -->
   <div id="page-loader" class="loader-overlay"><div class="spinner"></div></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="js/supabaseClient.js"></script>
   <script src="js/auth.js?v=20260526-session-hardening-1"></script>

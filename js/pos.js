@@ -42,6 +42,24 @@ const POS = {
   _paymentsDirty:     false,
   _cashDirty:         false,
 
+  // ── Mode Setoran: lock user ke tab deposits sampai shift dibuka ──
+  _depositOnlyMode:   false,
+
+  // ── Tab data cache (ms timestamps) — avoids redundant API calls on rapid tab switching ──
+  _tabLastLoaded:     {},
+  _tabCacheTtlMs:     30000, // 30 seconds
+
+  _shouldReloadTab(tab) {
+    const last = this._tabLastLoaded[tab] || 0;
+    return Date.now() - last > this._tabCacheTtlMs;
+  },
+  _markTabLoaded(tab) {
+    this._tabLastLoaded[tab] = Date.now();
+  },
+  _invalidateTabCache(tab) {
+    delete this._tabLastLoaded[tab];
+  },
+
   // ── Init ─────────────────────────────────────────────────────
   async init() {
     // Event Delegation
@@ -71,13 +89,27 @@ const POS = {
         case 'test-print': POS.testPrint(); break;
         case 'confirm-open-shift': POS.confirmOpenShift(); break;
         case 'confirm-close-shift': POS.confirmCloseShift(); break;
+        case 'startup-open-shift':
+          closeModal('modal-startup-choice');
+          POS._setDepositOnlyMode(false);
+          setTimeout(() => POS.openShiftModal(), 120);
+          break;
+        case 'startup-go-deposit':
+          closeModal('modal-startup-choice');
+          POS._setDepositOnlyMode(true);
+          POS.switchMainTab('deposits', document.querySelector('.pos-tab-item[data-tab="deposits"]'));
+          break;
+        case 'shift-modal-back':
+          closeModal('modal-shift');
+          setTimeout(() => POS.showStartupChoice(), 150);
+          break;
         case 'deposit-blocker-tutup-shift':
           closeModal('modal-deposit-blocked');
           setTimeout(() => POS.openCloseShiftModal(), 160);
           break;
         case 'deposit-blocker-buka-shift':
           closeModal('modal-deposit-blocked');
-          setTimeout(() => POS.openShiftModal(), 160);
+          setTimeout(() => POS.showStartupChoice(), 160);
           break;
         case 'post-shift-setor':
           closeModal('modal-post-close-shift');
@@ -160,6 +192,17 @@ const POS = {
       else if (action === 'update-shift-diff') POS.updateShiftDiff(inputNode.value);
     });
 
+    // Global guard: prevent non-numeric characters in all inputmode="numeric" fields
+    document.addEventListener('keydown', e => {
+      const el = e.target;
+      if (el.tagName !== 'INPUT') return;
+      if (el.getAttribute('inputmode') !== 'numeric' && el.type !== 'tel') return;
+      const passKeys = ['Backspace','Delete','Tab','Escape','Enter',
+                        'ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+      if (passKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
+      if (!/^\d$/.test(e.key)) e.preventDefault();
+    }, true); // capture phase so it runs before other listeners
+
     // Handle Android back button / browser popstate
     window.addEventListener('popstate', () => {
       const viewCart = document.getElementById('view-cart');
@@ -171,13 +214,10 @@ const POS = {
     window.addEventListener('rbn:modal:opened', e => {
       if (e.detail?.id === 'modal-shift') {
         POS.loadBranchCashPosition();
-        if (!POS._openShiftBlocker) POS.loadOpenShiftDeposit();
+        // loadOpenShiftDeposit dihapus — setoran kini via Startup Choice → tab Setoran
       }
     });
-    document.addEventListener('change', e => {
-      if (e.target.id === 'shift-open-dep-account') POS.onOpenShiftDepositAccountChange();
-      if (e.target.id === 'shift-open-dep-proof') POS._openShiftDeposit.file = e.target.files?.[0] || null;
-    });
+    // shift-open-dep-account / shift-open-dep-proof listeners dihapus (section deposit di modal-shift sudah dinonaktifkan)
 
     this.user = auth.requireRole('staff');
     if (!this.user) return;
@@ -342,7 +382,7 @@ const POS = {
     setDisplay('shift-open-blocker', blocked);
     setDisplay('shift-opening-warning', !blocked);
     setDisplay('shift-opening-cash-group', !blocked);
-    setDisplay('shift-open-deposit-wrap', !blocked);
+    // shift-open-deposit-wrap permanently hidden — setoran kini via tab Setoran
 
     const msgEl = document.getElementById('shift-open-blocker-msg');
     if (msgEl && blocked) {
@@ -355,8 +395,6 @@ const POS = {
       btn.disabled = blocked;
       btn.textContent = blocked ? 'Kas Belum Ditutup' : 'Buka Shift & Mulai Berjualan';
     }
-
-    if (blocked) this.renderOpenShiftDeposit('hidden');
     if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
 
@@ -384,6 +422,37 @@ const POS = {
     }
     openModal('modal-shift');
     if (blocker) showToast(this.getOpenShiftBlockerMessage(blocker), 'warning');
+  },
+
+  // ── Startup Choice — Pilih Buka Shift atau Setoran ───────────
+  async showStartupChoice() {
+    const greetEl = document.getElementById('startup-staff-greeting');
+    if (greetEl && this.user?.name) {
+      greetEl.textContent = `${this.user.name} — Pilih aktivitas untuk memulai`;
+    }
+
+    // Cek apakah ada eligible session untuk setoran (async, non-blocking)
+    const depositBtn = document.getElementById('btn-startup-deposit');
+    if (depositBtn) depositBtn.style.display = 'none'; // sembunyikan dulu
+    if (this.branch && this.user && typeof depositService !== 'undefined') {
+      depositService.getEligibleSessions({ branchId: this.branch.id, staffId: this.user.id, limit: 1 })
+        .then(sessions => {
+          const hasEligible = (sessions || []).some(s => !s.block_reason && Number(s.depositable_cash || 0) > 0);
+          if (depositBtn) depositBtn.style.display = hasEligible ? 'flex' : 'none';
+          if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+        })
+        .catch(() => { /* tombol setoran tetap tersembunyi */ });
+    }
+
+    openModal('modal-startup-choice');
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  // ── Toggle deposit-only mode (lock non-deposit tabs) ─────────
+  _setDepositOnlyMode(active) {
+    this._depositOnlyMode = !!active;
+    document.body.classList.toggle('deposit-only-mode', this._depositOnlyMode);
+    if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
   },
 
   // ── Branch Cash Position (Posisi Kas Outlet) ─────────────────
@@ -509,13 +578,15 @@ const POS = {
 
     if (data) {
       this.session = data;
+      this._setDepositOnlyMode(false);
       this.setOpenShiftBlocker(null);
       this.updateShiftUI();
     } else {
       this.session = null;
       const blocker = await this.refreshOpenShiftBlocker();
       this.updateShiftUI();
-      openModal('modal-shift');
+      // Tampilkan pilihan Buka Shift / Setoran — bukan langsung modal-shift
+      await this.showStartupChoice();
       if (blocker) showToast(this.getOpenShiftBlockerMessage(blocker), 'warning');
     }
   },
@@ -563,36 +634,6 @@ const POS = {
         throw new Error(this.getPendingDepositBlockerMessage());
       }
 
-      // Proses setoran opsional dari shift sebelumnya
-      // Gunakan digit-only parsing agar "200.000" (format Android) → 200000, bukan 200.
-      const depAmountRaw = String(document.getElementById('shift-open-dep-amount')?.value || '');
-      const depAmount = depAmountRaw ? (Number(depAmountRaw.replace(/[^\d]/g, '')) || 0) : 0;
-      if (depAmount > 0) {
-        const d         = this._openShiftDeposit;
-        const accountId = document.getElementById('shift-open-dep-account')?.value || '';
-        if (!accountId) throw new Error('Pilih metode setoran sebelum membuka shift');
-        if (depAmount % 50000 !== 0) throw new Error('Nominal setoran harus kelipatan Rp 50.000');
-        if (depAmount > d.depositableCash) throw new Error(`Jumlah setoran melebihi kas yang dapat disetor (maks ${formatRupiah(d.depositableCash)})`);
-        const acc = d.accounts.find(a => a.id === accountId);
-        const requireProof = acc && !depositService.isCashDepositMethod(acc);
-        if (requireProof && !d.file) throw new Error('Bukti setoran wajib dilampirkan');
-        if (!d.session?.session_id) throw new Error('Shift tertutup tidak ditemukan untuk setoran');
-        if (btn) btn.textContent = 'Menyetor...';
-        await depositService.submitDeposit({
-          branchId:    this.branch.id,
-          sessionId:   d.session.session_id,
-          staffId:     this.user.id,
-          accountId,
-          amount:      depAmount,
-          cashBalance: d.depositableCash,
-          file:        d.file,
-          notes:       null,
-          requireProof
-        });
-        showToast('Setoran berhasil dikirim', 'success');
-        if (btn) btn.textContent = 'Membuka...';
-      }
-
       // Buka shift dari posisi kas outlet terkini.
       this.session = await transactionService.openShiftFromBalance({
         branchId:       this.branch.id,
@@ -600,6 +641,8 @@ const POS = {
       });
 
       closeModal('modal-shift');
+      closeModal('modal-startup-choice');
+      this._setDepositOnlyMode(false);
       this.updateShiftUI();
       const openingCash = this.session.opening_cash || 0;
       const openedMsg = this.session.already_open
@@ -870,6 +913,11 @@ const POS = {
       this._branchCashPosition.currentBalance = balanceAfter;
       this._branchCashPosition.hasBalanceRow  = true;
 
+      // Invalidate tab caches after shift close so all tabs show fresh data
+      this._invalidateTabCache('summary');
+      this._invalidateTabCache('cash');
+      this._invalidateTabCache('transactions');
+
       if (window.depositUi) {
         depositUi.refreshWhenReady({ preferSessionId: result.id });
       }
@@ -918,19 +966,19 @@ const POS = {
       if (!p) return;
 
       const resolvedVariants = (p.product_variants || []).map(v => ({
-        id:    v.id,
+        id:    Number(v.id),
         name:  v.name,
-        price: priceOverride[v.id] !== undefined ? priceOverride[v.id] : parseFloat(v.price)
+        price: priceOverride[Number(v.id)] !== undefined ? priceOverride[Number(v.id)] : parseFloat(v.price)
       }));
 
       if (!resolvedVariants.length) return;
 
-      const isSimple = p.has_variants === false;
+      const isSimple = p.has_variants === false || p.has_variants === 0 || p.has_variants === '0';
       this.allProducts.push({
-        productId:   p.id,
+        productId:   Number(p.id),
         productName: p.name,
         category:    p.category || 'Lainnya',
-        imageUrl:    p.image_url,
+        imageUrl:    p.image_url || null,
         isSimple,
         variants:    resolvedVariants
       });
@@ -1027,17 +1075,29 @@ const POS = {
         return;
       }
 
-      const [itemsRes, invRes] = await Promise.all([
+      const [itemsRes, invRes, assignRes] = await Promise.all([
         db.from('recipe_items')
           .select('recipe_id, ingredient_id, quantity, ingredients(name, unit)')
           .in('recipe_id', recipeIds),
         db.from('branch_inventory')
           .select('ingredient_id, stock')
-          .eq('branch_id', this.branch.id)
+          .eq('branch_id', this.branch.id),
+        db.from('branch_ingredient_assignments').select('ingredient_id, branch_id')
       ]);
+
+      // Build map: ingredientId → Set<branchId>. Kosong = tersedia di semua cabang.
+      const assignMap = new Map();
+      for (const a of (assignRes.data || [])) {
+        if (!assignMap.has(a.ingredient_id)) assignMap.set(a.ingredient_id, new Set());
+        assignMap.get(a.ingredient_id).add(a.branch_id);
+      }
+      const myBranchId = this.branch.id;
 
       const recipeItemsMap = {};
       for (const ri of (itemsRes.data || [])) {
+        // Skip bahan yang di-assign ke cabang lain (tidak termasuk cabang ini)
+        const assigns = assignMap.get(ri.ingredient_id);
+        if (assigns && !assigns.has(myBranchId)) continue;
         if (!recipeItemsMap[ri.recipe_id]) recipeItemsMap[ri.recipe_id] = [];
         recipeItemsMap[ri.recipe_id].push(ri);
       }
@@ -1520,6 +1580,19 @@ const POS = {
 
   // ── Tab Switching ─────────────────────────────────────────────
   switchMainTab(tab, btnEl) {
+    // Guard: tab yang butuh shift aktif tidak bisa diakses tanpa sesi
+    const requiresShift = ['kasir', 'summary', 'transactions', 'cash', 'stock'];
+    if (!this.session && requiresShift.includes(tab)) {
+      showToast('Buka shift terlebih dahulu untuk mengakses halaman ini', 'warning');
+      if (this._depositOnlyMode) {
+        // Pastikan tetap di deposits tab
+        this.switchMainTab('deposits', document.querySelector('.pos-tab-item[data-tab="deposits"]'));
+      } else {
+        setTimeout(() => this.showStartupChoice(), 150);
+      }
+      return;
+    }
+
     this.currentMainTab = tab;
     document.body.classList.toggle('deposit-tab-active', tab === 'deposits');
     document.querySelectorAll('.pos-tab-item').forEach(b => b.classList.remove('active'));
@@ -1549,16 +1622,48 @@ const POS = {
         this.loadProducts().catch(e => console.warn('[POS] reload products after dirty flag:', e));
       }
     }
-    if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
-    if (tab === 'stock')        { if (this._stockDirty) this._stockDirty = false; this.loadInventorySummary(); }
-    if (tab === 'cash')         { if (this._cashDirty) this._cashDirty = false; this.updateCashSummary(); }
+    if (tab === 'summary') {
+      if (this._shouldReloadTab('summary')) {
+        this._markTabLoaded('summary');
+        this.loadPaymentMethodFilter();
+        this.loadSalesSummary();
+      }
+    }
+    if (tab === 'stock') {
+      if (this._stockDirty || this._shouldReloadTab('stock')) {
+        this._stockDirty = false;
+        this._markTabLoaded('stock');
+        this.loadInventorySummary();
+      }
+    }
+    if (tab === 'cash') {
+      if (this._cashDirty || this._shouldReloadTab('cash')) {
+        this._cashDirty = false;
+        this._markTabLoaded('cash');
+        this.updateCashSummary();
+      }
+    }
     if (tab === 'deposits') {
       if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
     }
-    if (tab === 'transactions') this.loadSessionTransactions();
+    if (tab === 'transactions') {
+      if (this._shouldReloadTab('transactions')) {
+        this._markTabLoaded('transactions');
+        this.loadSessionTransactions();
+      }
+    }
   },
 
   switchMobileDrawerTab(tab, btnEl) {
+    // Guard: tab yang butuh shift aktif
+    const requiresShift = ['kasir', 'summary', 'transactions', 'cash', 'stock'];
+    if (!this.session && requiresShift.includes(tab)) {
+      this.closeMobileDrawer();
+      showToast('Buka shift terlebih dahulu untuk mengakses halaman ini', 'warning');
+      if (!this._depositOnlyMode) setTimeout(() => this.showStartupChoice(), 200);
+      return;
+    }
+
     document.querySelectorAll('.drawer-btn').forEach(b => b.classList.remove('active'));
     if (btnEl) btnEl.classList.add('active');
     document.body.classList.toggle('deposit-tab-active', tab === 'deposits');
@@ -1581,13 +1686,36 @@ const POS = {
         const el = document.getElementById(id);
         if (el) el.classList.toggle('active', id === 'panel-' + tab);
       });
-      if (tab === 'summary')      { this.loadPaymentMethodFilter(); this.loadSalesSummary(); }
-      if (tab === 'stock')        this.loadInventorySummary();
-      if (tab === 'cash')         this.updateCashSummary();
+      if (tab === 'summary') {
+        if (this._shouldReloadTab('summary')) {
+          this._markTabLoaded('summary');
+          this.loadPaymentMethodFilter();
+          this.loadSalesSummary();
+        }
+      }
+      if (tab === 'stock') {
+        if (this._stockDirty || this._shouldReloadTab('stock')) {
+          this._stockDirty = false;
+          this._markTabLoaded('stock');
+          this.loadInventorySummary();
+        }
+      }
+      if (tab === 'cash') {
+        if (this._cashDirty || this._shouldReloadTab('cash')) {
+          this._cashDirty = false;
+          this._markTabLoaded('cash');
+          this.updateCashSummary();
+        }
+      }
       if (tab === 'deposits') {
         if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
       }
-      if (tab === 'transactions') this.loadSessionTransactions();
+      if (tab === 'transactions') {
+        if (this._shouldReloadTab('transactions')) {
+          this._markTabLoaded('transactions');
+          this.loadSessionTransactions();
+        }
+      }
     }
 
     this.closeMobileDrawer();
@@ -1745,14 +1873,14 @@ const POS = {
     const [stockRes, logsRes, manualLogsRes] = await Promise.all([
       db.from('branch_inventory').select('stock, ingredient_id, ingredients(name, unit)').eq('branch_id', this.branch.id),
       db.from('inventory_logs')
-        .select('ingredient_id, qty, type, reference_type')
+        .select('ingredient_id, quantity, type, reference_type')
         .eq('branch_id', this.branch.id)
         .eq('type', 'out')
         .eq('reference_type', 'transaction')
         .gte('created_at', from)
         .lte('created_at', to),
       db.from('inventory_logs')
-        .select('qty, type, notes, created_at, ingredients(name, unit), users(name)')
+        .select('quantity, type, note, created_at, ingredients(name, unit), users(name)')
         .eq('branch_id', this.branch.id)
         .eq('reference_type', 'manual')
         .gte('created_at', from)
@@ -1769,7 +1897,7 @@ const POS = {
     logs.forEach(l => {
       const id = l.ingredient_id;
       if (!usageMap[id]) usageMap[id] = 0;
-      usageMap[id] += parseFloat(l.qty || 0);
+      usageMap[id] += parseFloat(l.quantity || 0);
     });
 
     if (!stockData.length) {
@@ -1830,7 +1958,7 @@ const POS = {
               const ts    = new Date(l.created_at);
               const tStr  = ts.toLocaleString('id-ID', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
               const isIn  = l.type === 'in';
-              const qty   = parseFloat(l.qty || 0);
+              const qty   = parseFloat(l.quantity || 0);
               const unit  = escapeHtml(l.ingredients?.unit || '');
               const name  = escapeHtml(l.ingredients?.name || '—');
               const actor = escapeHtml(l.users?.name || 'Staff');
@@ -1841,7 +1969,7 @@ const POS = {
                   </div>
                   <div style="flex:1;min-width:0;">
                     <div class="fw-600 text-sm">${name}</div>
-                    <div class="text-xs text-muted" style="margin-top:2px;">${escapeHtml(l.notes || '—')} &bull; ${actor}</div>
+                    <div class="text-xs text-muted" style="margin-top:2px;">${escapeHtml(l.note || '—')} &bull; ${actor}</div>
                   </div>
                   <div style="text-align:right;flex-shrink:0;">
                     <div class="fw-700 text-sm ${isIn ? 'text-success' : 'text-danger'}">${isIn ? '+' : '−'}${qty.toLocaleString('id-ID')} ${unit}</div>
@@ -1946,8 +2074,8 @@ const POS = {
     const fromEl   = document.getElementById('ing-log-date-from');
     const toEl     = document.getElementById('ing-log-date-to');
     const typeEl   = document.getElementById('ing-log-type-filter');
-    const dateFrom = fromEl?.value ? (fromEl.value + 'T00:00:00') : null;
-    const dateTo   = toEl?.value   ? (toEl.value   + 'T23:59:59') : null;
+    const dateFrom = fromEl?.value ? (fromEl.value + 'T00:00:00+08:00') : null;
+    const dateTo   = toEl?.value   ? (toEl.value   + 'T23:59:59+08:00') : null;
     const typeVal  = typeEl?.value || null;
 
     try {
@@ -2026,7 +2154,7 @@ const POS = {
     };
 
     const rows = logs.map(log => {
-      const qty    = parseFloat(log.qty || 0);
+      const qty    = parseFloat(log.quantity || 0);
       const isIn   = qty >= 0;
       const absQty = Math.abs(qty);
       const unit   = escapeHtml(log.ingredient_unit || '');
@@ -2038,7 +2166,7 @@ const POS = {
       const actor   = escapeHtml(log.user_name || 'Sistem');
       const before  = parseFloat(log.stock_before ?? 0);
       const after   = parseFloat(log.stock_after  ?? 0);
-      const notes   = escapeHtml(log.notes || '');
+      const notes   = escapeHtml(log.note || '');
       const typeKey = log.type || 'out';
       const refType = log.reference_type || '';
       const refId   = log.reference_id;
@@ -2889,6 +3017,23 @@ const POS = {
     if (this._checkoutLock) return;
     if (this.loading || !this.cart.length) return;
     if (!this.session) { showToast('Buka shift terlebih dahulu sebelum checkout', 'warning'); return; }
+
+    // Hard guard: pastikan sesi di DB masih open (menghindari state frontend stale).
+    try {
+      const latestOwnSession = await this.getOwnOpenShift();
+      if (!latestOwnSession) {
+        this.session = null;
+        showToast('Shift kas sudah ditutup. Buka shift kembali sebelum checkout.', 'warning');
+        await this.openShiftModal();
+        return;
+      }
+      this.session = latestOwnSession;
+    } catch (e) {
+      console.error('confirmCheckout: gagal validasi shift', e);
+      showToast('Gagal memvalidasi status shift. Coba lagi.', 'error');
+      return;
+    }
+
     this._checkoutLock = true;
 
     let clientTxId;
@@ -3006,6 +3151,10 @@ const POS = {
 
       // Run BOM deduction async without blocking UI
       this._applyBOMDeduction(savedCart, result.trx.id, preCheckoutStock);
+      // Invalidate tab caches so data refreshes on next visit
+      this._invalidateTabCache('summary');
+      this._invalidateTabCache('transactions');
+      this._invalidateTabCache('cash');
       if (this.currentMainTab === 'summary') this.loadSalesSummary();
       if (this.currentMainTab === 'stock') this.loadInventorySummary();
 

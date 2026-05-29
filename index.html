@@ -100,9 +100,7 @@
 
   <!-- 1. Lucide -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <!-- 2. Supabase CDN — HARUS selesai sebelum supabaseClient.js -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <!-- 3. File lokal — berurutan, synchronous -->
+  <!-- 2. File lokal — berurutan, synchronous -->
   <script src="js/supabaseClient.js"></script>
   <script src="js/auth.js?v=20260526-session-hardening-1"></script>
   <!-- 4. Inline logic — window.load menunggu SEMUA script di atas selesai -->
@@ -123,7 +121,7 @@
       async function testDbConnection() {
         const statusEl = document.getElementById('db-status');
 
-        if (typeof db === 'undefined' || typeof window.supabase === 'undefined') {
+        if (typeof db === 'undefined') {
           statusEl.className = 'fail';
           statusEl.innerHTML =
             '❌ <strong>supabaseClient.js gagal di-load.</strong><br>' +
@@ -140,27 +138,22 @@
             const status = Number(error.status || 0);
             console.error('[RBN] DB test error:', error);
 
-            if (status === 401 || status === 403 || code === '42501' || msg.includes('permission denied')) {
+            if (status === 401 || status === 403 || msg.includes('permission denied')) {
               statusEl.className = 'fail';
               statusEl.innerHTML =
-                '❌ <strong>Permission ditolak (401).</strong> Tabel ada tapi anon key tidak bisa mengakses.<br><br>' +
-                '<strong>Solusi — jalankan SQL ini di Supabase SQL Editor:</strong><br>' +
-                '<code>' +
-                'GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;<br>' +
-                'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;<br>' +
-                'GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated;' +
-                '</code>';
-            } else if (code === '42P01' || msg.includes('does not exist') || msg.includes('relation')) {
+                '❌ <strong>API Key ditolak (401).</strong><br>' +
+                'Periksa nilai <code>API_KEY</code> di <code>js/supabaseClient.js</code> ' +
+                'dan <code>API_SECRET_KEY</code> di <code>config.php</code> — harus sama persis.';
+            } else if (msg.includes('table') || msg.includes('does not exist')) {
               statusEl.className = 'fail';
               statusEl.innerHTML =
                 '❌ <strong>Tabel belum dibuat!</strong><br>' +
-                'Buka <strong>Supabase Dashboard → SQL Editor</strong>, paste seluruh isi file ' +
-                '<code>schema.sql</code>, lalu klik <strong>Run</strong>.';
-            } else if (msg.includes('jwt') || msg.includes('invalid key')) {
+                'Import file <code>sql/cpanel_mysql_schema.sql</code> ke database MySQL via phpMyAdmin.';
+            } else if (status === 0 || msg.includes('fetch') || msg.includes('network')) {
               statusEl.className = 'fail';
               statusEl.innerHTML =
-                '❌ <strong>API Key tidak valid!</strong><br>' +
-                'Periksa <code>SUPABASE_KEY</code> di <code>js/supabaseClient.js</code>.';
+                '❌ <strong>Tidak bisa terhubung ke API.</strong><br>' +
+                'Pastikan file <code>api.php</code> sudah diupload ke hosting dan <code>API_BASE</code> sudah benar.';
             } else {
               statusEl.className = 'warn';
               statusEl.innerHTML =
@@ -178,8 +171,8 @@
           console.error('[RBN] Fetch error:', e);
           statusEl.className = 'fail';
           statusEl.innerHTML =
-            '❌ <strong>Tidak bisa terhubung ke Supabase.</strong><br>' +
-            'Periksa koneksi internet Anda. Error: <code>' + (e.message || e) + '</code>';
+            '❌ <strong>Tidak bisa terhubung ke API server.</strong><br>' +
+            'Periksa koneksi internet dan pastikan hosting aktif. Error: <code>' + (e.message || e) + '</code>';
         }
       }
 

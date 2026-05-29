@@ -251,24 +251,10 @@ const transactionService = {
 
     if (error) throw new Error(error.message);
 
-    // Mark related cash_logs as void. This is a best-effort update — if it
-    // fails (e.g. network drop after the RPC succeeded), the transaction is
-    // still void in the DB; only the cash summary may be temporarily off
-    // until the next session reconciliation or a manual DB fix.
-    const { error: clErr } = await db.from('cash_logs')
-      .update({
-        is_void:    true,
-        void_reason: reason.trim(),
-        voided_by:  userId,
-        voided_at:  new Date().toISOString()
-      })
-      .eq('reference_type', 'sale')
-      .eq('reference_id', transactionId);
+    // cash_logs sudah di-void secara atomic di dalam rpc_void_transaction (backend).
+    // Update tambahan dari frontend tidak diperlukan dan dihapus untuk menghindari
+    // overwrite void_at dengan timestamp UTC yang salah timezone.
 
-    if (clErr) {
-      console.error('voidTransaction: cash_logs update failed — summary may be inaccurate until reconciled:', clErr);
-    }
-
-    return { transactionId, status: data?.status || 'void' };
+    return { transactionId, status: data?.status || 'voided' };
   }
 };

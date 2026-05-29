@@ -51,7 +51,7 @@ const inventoryService = {
       recipeItemsMap[ri.recipe_id].push(ri);
     }
 
-    // Step 3: Collect all ingredient IDs needed and batch-fetch stock levels
+    // Step 3: Collect all ingredient IDs needed, fetch stock + branch assignments
     const allIngredientIds = new Set();
     for (const item of cart) {
       const recipeId = recipeMap[item.variantId];
@@ -62,23 +62,36 @@ const inventoryService = {
     }
 
     const stockByIngredient = new Map(); // ingredientId -> stock
+    const assignMap = new Map();         // ingredientId -> Set<branchId>
     if (allIngredientIds.size > 0) {
-      const { data: invRows } = await db
-        .from('branch_inventory')
-        .select('ingredient_id, stock')
-        .eq('branch_id', branchId)
-        .in('ingredient_id', [...allIngredientIds]);
-      for (const row of (invRows || [])) {
+      const [invRes, assignRes] = await Promise.all([
+        db.from('branch_inventory')
+          .select('ingredient_id, stock')
+          .eq('branch_id', branchId)
+          .in('ingredient_id', [...allIngredientIds]),
+        db.from('branch_ingredient_assignments')
+          .select('ingredient_id, branch_id')
+          .in('ingredient_id', [...allIngredientIds])
+      ]);
+      for (const row of (invRes.data || [])) {
         stockByIngredient.set(row.ingredient_id, parseFloat(row.stock));
+      }
+      for (const a of (assignRes.data || [])) {
+        if (!assignMap.has(a.ingredient_id)) assignMap.set(a.ingredient_id, new Set());
+        assignMap.get(a.ingredient_id).add(a.branch_id);
       }
     }
 
-    // Step 4: Check sufficiency from in-memory maps
+    // Step 4: Check sufficiency — skip ingredients not assigned to this branch
     for (const item of cart) {
       const recipeId = recipeMap[item.variantId];
       if (!recipeId) continue;
       const items = recipeItemsMap[recipeId] || [];
       for (const ri of items) {
+        // Hormati branch assignment: jika di-assign ke cabang lain, abaikan
+        const assigns = assignMap.get(ri.ingredient_id);
+        if (assigns && !assigns.has(branchId)) continue;
+
         const needed    = ri.quantity * item.quantity;
         const available = stockByIngredient.get(ri.ingredient_id) ?? 0;
         if (available < needed) {
