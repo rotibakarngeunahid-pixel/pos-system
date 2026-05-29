@@ -4086,7 +4086,7 @@ const ADMIN = {
     // Fill endpoint display
     const epEl   = document.getElementById('api-endpoint-display');
     const codeEl = document.getElementById('api-code-example');
-    const apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php');
+    const apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://api.rotibakarngeunah.my.id/api/api.php');
 
     if (epEl)   epEl.textContent   = `${apiBase}/rpc/get_transactions_api`;
     if (codeEl) codeEl.textContent = `fetch('${apiBase}/rpc/get_transactions_api?p_api_key=YOUR_API_KEY_HERE&p_from=2025-01-01&p_to=2025-12-31')`;

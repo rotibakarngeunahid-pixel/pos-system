@@ -5,7 +5,7 @@ const DEPOSIT_PROOF_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
 const DEPOSIT_PROOF_MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 // Upload endpoint: gunakan upload.php di direktori yang sama dengan api.php
-// API_BASE didefinisikan di supabaseClient.js, e.g. 'https://pos.rotibakarngeunah.my.id/api/api.php'
+// API_BASE didefinisikan di supabaseClient.js, e.g. 'https://api.rotibakarngeunah.my.id/api/api.php'
 function _depositUploadUrl() {
   return (typeof API_BASE !== 'undefined' ? API_BASE : '').replace('/api.php', '/upload.php');
 }

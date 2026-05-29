@@ -8,8 +8,7 @@ require_once __DIR__ . '/config.php';
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$allowed = defined('ALLOWED_ORIGINS') ? ALLOWED_ORIGINS : [];
-if (in_array($origin, $allowed, true)) {
+if (function_exists('isOriginAllowed') && isOriginAllowed($origin)) {
     header('Access-Control-Allow-Origin: ' . $origin);
 }
 // Jika origin tidak diizinkan, tidak kirim CORS header — browser akan menolak otomatis.

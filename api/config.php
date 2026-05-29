@@ -39,9 +39,23 @@ define('ALLOWED_ORIGINS', [
     'https://www.rotibakarngeunah.my.id',
     'http://pos.rotibakarngeunah.my.id',
     'https://pos.rotibakarngeunah.my.id',
+    'https://pos-system.rotibakarngeunah.my.id',
     'http://localhost',
     'http://127.0.0.1',
 ]);
+
+// Pola domain tambahan (misal Vercel preview URL)
+define('ALLOWED_ORIGIN_PATTERNS', [
+    '/^https:\/\/[a-zA-Z0-9\-]+\.vercel\.app$/',
+]);
+
+function isOriginAllowed(string $origin): bool {
+    if (in_array($origin, ALLOWED_ORIGINS, true)) return true;
+    foreach (ALLOWED_ORIGIN_PATTERNS as $pattern) {
+        if (preg_match($pattern, $origin)) return true;
+    }
+    return false;
+}
 
 // Gunakan WITA (UTC+8) di PHP agar konsisten dengan data di MySQL.
 date_default_timezone_set('Asia/Makassar');

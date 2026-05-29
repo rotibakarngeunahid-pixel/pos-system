@@ -25,7 +25,7 @@ set_error_handler(function(int $errno, string $errstr) {
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, ALLOWED_ORIGINS, true)) {
+if (isOriginAllowed($origin)) {
     header("Access-Control-Allow-Origin: $origin");
 }
 // Jika origin tidak diizinkan, tidak kirim CORS header — browser akan menolak otomatis.

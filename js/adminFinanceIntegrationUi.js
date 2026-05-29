@@ -212,7 +212,7 @@ const adminDataIntegrationPortalUi = {
       return;
     }
 
-    const apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php');
+    const apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://api.rotibakarngeunah.my.id/api/api.php');
 
     const rpcName = tab === 'sales'   ? 'get_sales_integration'
                   : tab === 'cashout' ? 'get_kas_keluar_integration'
@@ -566,7 +566,7 @@ const adminDataIntegrationPortalUi = {
   // ── Update endpoint docs ──────────────────────────────────────────────
   // Tampilkan URL tanpa tanggal — filter tanggal dilakukan di sistem keuangan.
   _updateDocEndpoints() {
-    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php');
+    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://api.rotibakarngeunah.my.id/api/api.php');
     const ph   = '<API_KEY>';
 
     const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -577,7 +577,7 @@ const adminDataIntegrationPortalUi = {
 
   // ── Salin semua dokumentasi ke clipboard ───────────────────────────────
   async _copyDocs() {
-    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://pos.rotibakarngeunah.my.id/api/api.php') + '/rpc';
+    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://api.rotibakarngeunah.my.id/api/api.php') + '/rpc';
 
     const docs = `# ====================================================================
 # Panduan Integrasi API — Portal Integrasi Data Keuangan
