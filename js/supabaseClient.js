@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GANTI dua baris ini dengan URL dan key dari config.php Anda
-const API_BASE = 'https://pos.rotibakarngeunah.my.id/api/api.php';
+const API_BASE = 'https://pos-system.rotibakarngeunah.my.id/api/api.php';
 const API_KEY  = 'rbn2026xK9mPqL3vWnHjRtYcBfDsAeUo'; // harus sama persis dengan config.php
 
 // ─────────────────────────────────────────────────────────────────────────────
