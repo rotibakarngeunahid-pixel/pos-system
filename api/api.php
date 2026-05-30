@@ -1756,34 +1756,51 @@ function rpc_create_deposit(array $p): mixed {
     if ($amount <= 0) throw new Exception('Nominal setoran harus lebih dari 0');
     if ((int)round($amount) % 50000 !== 0) throw new Exception('Nominal setoran harus kelipatan Rp 50.000');
 
-    if ($sessionId) {
-        $s = $pdo->prepare("SELECT status FROM cashier_sessions WHERE id=? LIMIT 1");
-        $s->execute([$sessionId]);
-        $sess = $s->fetch();
-        if (!$sess || $sess['status'] !== 'closed') throw new Exception('Shift setoran belum tertutup');
-    }
+    $pdo->beginTransaction();
+    try {
+        if ($sessionId) {
+            $s = $pdo->prepare("SELECT status FROM cashier_sessions WHERE id=? LIMIT 1");
+            $s->execute([$sessionId]);
+            $sess = $s->fetch();
+            if (!$sess || $sess['status'] !== 'closed') throw new Exception('Shift setoran belum tertutup');
+        }
 
-    $id = uuid4();
-    $row = [
-        'id'         => $id,
-        'branch_id'  => $branchId,
-        'staff_id'   => $staffId,
-        'session_id' => $sessionId,
-        'amount'     => $amount,
-        'method'     => $method,
-        'proof_url'  => $proofUrl,
-        'notes'      => $notes,
-        'status'     => 'pending',
-        'account_id' => $accountId,
-    ];
-    if (dbColumnExists($pdo, 'cash_deposits', 'cash_balance_at_deposit')) $row['cash_balance_at_deposit'] = $cashBalance;
-    foreach (['proof_file_name','proof_file_type','proof_file_size','proof_uploaded_at'] as $suffix) {
-        $param = 'p_' . $suffix;
-        if (array_key_exists($param, $p) && dbColumnExists($pdo, 'cash_deposits', $suffix)) $row[$suffix] = $p[$param];
-    }
-    insertDynamic($pdo, 'cash_deposits', $row);
+        // Blokir jika staff masih punya setoran pending di shift manapun
+        $crossStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM cash_deposits
+            WHERE staff_id=? AND branch_id=? AND status='pending'
+        ");
+        $crossStmt->execute([$staffId, $branchId]);
+        if ((int)$crossStmt->fetchColumn() > 0) {
+            throw new Exception('Masih ada setoran yang belum dikonfirmasi admin. Tunggu konfirmasi terlebih dahulu.');
+        }
 
-    return ['id'=>$id,'status'=>'pending','amount'=>$amount];
+        $id = uuid4();
+        $row = [
+            'id'         => $id,
+            'branch_id'  => $branchId,
+            'staff_id'   => $staffId,
+            'session_id' => $sessionId,
+            'amount'     => $amount,
+            'method'     => $method,
+            'proof_url'  => $proofUrl,
+            'notes'      => $notes,
+            'status'     => 'pending',
+            'account_id' => $accountId,
+        ];
+        if (dbColumnExists($pdo, 'cash_deposits', 'cash_balance_at_deposit')) $row['cash_balance_at_deposit'] = $cashBalance;
+        foreach (['proof_file_name','proof_file_type','proof_file_size','proof_uploaded_at'] as $suffix) {
+            $param = 'p_' . $suffix;
+            if (array_key_exists($param, $p) && dbColumnExists($pdo, 'cash_deposits', $suffix)) $row[$suffix] = $p[$param];
+        }
+        insertDynamic($pdo, 'cash_deposits', $row);
+
+        $pdo->commit();
+        return ['id'=>$id,'status'=>'pending','amount'=>$amount];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 
 // ── admin_create_manual_deposit ───────────────────────────────────────────────
@@ -1954,25 +1971,77 @@ function rpc_get_deposit_eligible_sessions(array $p): mixed {
     $staffId  = (int)($p['p_staff_id']  ?? 0);
 
     $limit = isset($p['p_limit']) ? (int)$p['p_limit'] : 10;
+
+    // Ambil semua closed sessions (termasuk yang sudah punya deposit)
     $stmt = $pdo->prepare("
         SELECT cs.id, cs.id AS session_id, cs.opened_at, cs.closed_at,
                cs.opening_cash, cs.closing_cash, cs.status,
                cs.status AS session_status,
                u.name AS staff_name,
-               COALESCE(cs.closing_cash, cs.opening_cash, 0) AS depositable_cash
+               COALESCE(cs.closing_cash, cs.opening_cash, 0) AS base_cash
         FROM cashier_sessions cs
         LEFT JOIN users u ON u.id = cs.staff_id
         WHERE cs.branch_id=? AND cs.staff_id=? AND cs.status='closed'
-          AND cs.id NOT IN (SELECT session_id FROM cash_deposits WHERE staff_id=? AND status IN ('pending','confirmed') AND session_id IS NOT NULL)
         ORDER BY cs.closed_at DESC
         LIMIT ?
     ");
-    $stmt->execute([$branchId,$staffId,$staffId,$limit]);
-    $rows = $stmt->fetchAll();
-    return array_map(function($row) {
-        $row['block_reason'] = null;
+    $stmt->execute([$branchId, $staffId, $limit]);
+    $sessions = $stmt->fetchAll();
+
+    if (empty($sessions)) return [];
+
+    // Ambil deposit aktif untuk semua sessions sekaligus
+    $sessionIds = array_column($sessions, 'id');
+    $placeholders = implode(',', array_fill(0, count($sessionIds), '?'));
+    $depsStmt = $pdo->prepare("
+        SELECT session_id, amount, status
+        FROM cash_deposits
+        WHERE session_id IN ($placeholders)
+          AND status IN ('pending','confirmed')
+        ORDER BY status DESC
+    ");
+    $depsStmt->execute($sessionIds);
+    $allDeposits = $depsStmt->fetchAll();
+
+    // Group deposit per session
+    $depsBySession = [];
+    foreach ($allDeposits as $d) {
+        $sid = $d['session_id'];
+        if (!isset($depsBySession[$sid])) {
+            $depsBySession[$sid] = ['pending' => 0.0, 'confirmed' => 0.0, 'lastStatus' => null];
+        }
+        $depsBySession[$sid][$d['status']] += (float)$d['amount'];
+        $depsBySession[$sid]['lastStatus'] = $d['status'];
+    }
+
+    // Apakah ada pending deposit di shift manapun untuk staff ini?
+    $hasAnyPending = false;
+    foreach ($allDeposits as $d) {
+        if ($d['status'] === 'pending') { $hasAnyPending = true; break; }
+    }
+
+    return array_map(function($row) use ($depsBySession, $hasAnyPending) {
+        $sid = $row['id'];
+        $dep = $depsBySession[$sid] ?? ['pending' => 0.0, 'confirmed' => 0.0, 'lastStatus' => null];
+        $totalDep  = $dep['pending'] + $dep['confirmed'];
+        $baseCash  = (float)$row['base_cash'];
+        $depositable = max(0.0, $baseCash - $totalDep);
+
+        $blockReason = null;
+        if ($totalDep > 0 && $dep['lastStatus'] === 'pending') {
+            $blockReason = 'Setoran sedang menunggu konfirmasi';
+        } elseif ($totalDep > 0 && $dep['lastStatus'] === 'confirmed') {
+            $blockReason = 'Setoran shift ini sudah selesai';
+        } elseif ($hasAnyPending && $dep['pending'] == 0) {
+            $blockReason = 'Masih ada setoran dari shift lain yang menunggu konfirmasi';
+        }
+
+        $row['depositable_cash']    = $depositable;
+        $row['has_active_deposit']  = $totalDep > 0;
+        $row['last_deposit_status'] = $dep['lastStatus'];
+        $row['block_reason']        = $blockReason;
         return $row;
-    }, $rows);
+    }, $sessions);
 }
 
 // ── create_cash_branch_transfer ───────────────────────────────────────────────

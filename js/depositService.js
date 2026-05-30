@@ -220,6 +220,8 @@ const depositService = {
       depsBySession[d.session_id].lastStatus = d.status;
     });
 
+    const hasAnyPending = (deposits || []).some(d => d.status === 'pending');
+
     return sessions.map(sess => {
       const finalCash = Number(sess.current_cash_amount ?? sess.closing_cash ?? sess.expected_cash ?? 0);
       const dep = depsBySession[sess.id] || { pending: 0, confirmed: 0, lastStatus: null };
@@ -228,6 +230,7 @@ const depositService = {
       let blockReason = null;
       if (totalDep > 0 && dep.lastStatus === 'pending')   blockReason = 'Setoran sedang menunggu konfirmasi';
       if (totalDep > 0 && dep.lastStatus === 'confirmed') blockReason = 'Setoran shift ini sudah selesai';
+      if (!blockReason && hasAnyPending && dep.pending === 0) blockReason = 'Masih ada setoran dari shift lain yang menunggu konfirmasi';
       return {
         session_id:          sess.id,
         branch_id:           sess.branch_id,

@@ -1,0 +1,5 @@
+-- CATATAN: File ini TIDAK DIGUNAKAN.
+-- Sistem sudah migrasi ke MySQL (cPanel). Logika create_deposit dan
+-- get_deposit_eligible_sessions ada di api/api.php (PHP), bukan di SQL functions.
+-- Lihat fungsi rpc_create_deposit() dan rpc_get_deposit_eligible_sessions()
+-- di api/api.php untuk implementasi aktual.

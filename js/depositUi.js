@@ -347,10 +347,20 @@ const depositUi = {
     }
     if (sess?.block_reason) {
       const reason = String(sess.block_reason).toLowerCase();
+      const isCrossShift = reason.includes('shift lain');
       const isPending = reason.includes('menunggu') || reason.includes('pending');
       const isConfirmed = reason.includes('selesai') || reason.includes('terkonfirmasi') || reason.includes('confirm');
       const isRejected = reason.includes('ditolak') || reason.includes('reject');
 
+      if (isCrossShift) {
+        return {
+          type: 'pending',
+          title: 'Ada setoran shift lain yang belum dikonfirmasi',
+          body: 'Setoran dari shift sebelumnya masih menunggu konfirmasi admin. Tunggu sampai disetujui atau ditolak sebelum membuat setoran baru.',
+          ctaLabel: null,
+          ctaAction: null
+        };
+      }
       if (isPending) {
         return {
           type: 'pending',
