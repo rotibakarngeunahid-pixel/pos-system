@@ -381,7 +381,6 @@ const POS = {
 
     setDisplay('shift-open-blocker', blocked);
     setDisplay('shift-opening-warning', !blocked);
-    setDisplay('shift-opening-cash-group', !blocked);
     // shift-open-deposit-wrap permanently hidden — setoran kini via tab Setoran
 
     const msgEl = document.getElementById('shift-open-blocker-msg');

@@ -339,7 +339,7 @@
                 title="Lihat Keranjang Ditahan">
                 <i data-lucide="layers" class="icon-sm"></i>
               </button>
-              <span id="held-cart-badge" class="held-badge hidden">0</span>
+              <span id="held-cart-badge" class="held-badge" style="display:none">0</span>
             </div>
             <button class="btn btn-ghost btn-sm text-danger" data-action="clear-cart">Hapus</button>
           </div>
@@ -424,7 +424,7 @@
             data-action="open-pending-transfers-modal"
             title="Terima stok dari outlet lain" style="position:relative;">
             <i data-lucide="inbox" class="icon-sm"></i> Terima Stok
-            <span id="pending-transfer-badge" style="display:none;position:absolute;top:-6px;right:-6px;background:var(--danger,#e53e3e);color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:800;display:none;align-items:center;justify-content:center;line-height:1;">0</span>
+            <span id="pending-transfer-badge" style="display:none;position:absolute;top:-6px;right:-6px;background:var(--danger,#e53e3e);color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:800;align-items:center;justify-content:center;line-height:1;">0</span>
           </button>
           <button class="btn btn-ghost btn-sm" data-action="open-transfer-history-modal"
             title="Riwayat transfer">
@@ -1110,7 +1110,7 @@
               <option value="pct">Persentase (%)</option>
               <option value="fixed">Nominal (Rp)</option>
             </select>
-            <div id="discount-value-wrap" class="hidden">
+            <div id="discount-value-wrap" style="display:none">
               <label class="form-label" id="discount-value-label">Nilai Diskon</label>
               <div class="flex gap-2 mt-1">
                 <input type="number" class="form-control" id="discount-value" placeholder="0" min="0"
@@ -1147,7 +1147,7 @@
           <div id="quick-amounts"></div>
         </div>
 
-        <div id="change-display" class="change-display hidden">
+        <div id="change-display" class="change-display" style="display:none">
           <span class="change-label">Kembalian</span>
           <span class="change-value" id="change-value">Rp 0</span>
         </div>
