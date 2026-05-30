@@ -1063,6 +1063,28 @@ function rpc_process_transaction(array $p): mixed {
         $total        = $subtotal - $discountAmount + $taxAmount + $feeAmount;
         $changeAmount = $paymentAmount - $total;
 
+        // Content-based duplicate detection: jika dalam 30 detik terakhir ada transaksi
+        // dengan branch/staff/session/total yang sama → kembalikan transaksi yang sudah ada.
+        // Ini melindungi dari kasus di mana dua klik menghasilkan clientTxId berbeda
+        // tetapi konten transaksinya identik.
+        $dupChk = $pdo->prepare("
+            SELECT id, subtotal, total, change_amount, discount_amount, tax_amount
+            FROM transactions
+            WHERE branch_id  = ?
+              AND staff_id   = ?
+              AND session_id = ?
+              AND total      = ?
+              AND status     = 'completed'
+              AND created_at >= NOW() - INTERVAL 30 SECOND
+            LIMIT 1
+        ");
+        $dupChk->execute([$branchId, $staffId, $sessionId, $total]);
+        $dupTx = $dupChk->fetch();
+        if ($dupTx) {
+            $pdo->rollBack();
+            return $dupTx;
+        }
+
         // Insert transaction
         $stmt = $pdo->prepare("
             INSERT INTO transactions

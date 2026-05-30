@@ -18,6 +18,7 @@ const POS = {
   _checkoutLock: false,
   _openShiftLock: false,
   _pendingTxIds: null,
+  _currentPaymentTxId: null,
   bomData:     null,   // { recipeMap: {variantId→recipeId}, recipeItemsMap: {recipeId→[items]} }
   stockCache:  null,   // Map<ingredientId, stock> — refreshed after each transaction
   toppingMap:  {},     // productId → [{id, name, price}]
@@ -2892,6 +2893,24 @@ const POS = {
     } catch (e) {
       this.selectPaymentMethod(document.querySelector('.payment-method-btn[data-method="cash"]'), 'cash');
     }
+    // Generate idempotency key once per payment modal open.
+    // confirmCheckout() reuses this key so setiap klik "Konfirmasi Bayar"
+    // pada modal yang sama menghasilkan clientTxId yang SAMA → backend hanya
+    // menyimpan 1 transaksi walaupun tombol diklik berkali-kali.
+    try {
+      this._currentPaymentTxId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = (Math.random() * 16) | 0;
+            return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+          });
+    } catch (e) {
+      this._currentPaymentTxId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
+    }
+
     openModal('modal-payment');
   },
 
@@ -3009,7 +3028,11 @@ const POS = {
     }
   },
 
-  closePaymentModal() { closeModal('modal-payment'); this._updatePaymentTotals(); },
+  closePaymentModal() {
+    closeModal('modal-payment');
+    this._currentPaymentTxId = null;
+    this._updatePaymentTotals();
+  },
 
   // ── Checkout ─────────────────────────────────────────────────
   async confirmCheckout() {
@@ -3017,12 +3040,26 @@ const POS = {
     if (this.loading || !this.cart.length) return;
     if (!this.session) { showToast('Buka shift terlebih dahulu sebelum checkout', 'warning'); return; }
 
+    // KUNCI DAN DISABLE TOMBOL SEBELUM OPERASI ASYNC APAPUN.
+    // Ini mencegah double-click masuk ke dalam fungsi karena ada jeda
+    // saat await getOwnOpenShift() berjalan.
+    this._checkoutLock = true;
+    const btn = document.getElementById('btn-confirm-pay');
+    if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
+
+    // Gunakan clientTxId yang sudah di-generate saat modal dibuka.
+    // Setiap klik tombol pada modal yang sama menggunakan UUID yang SAMA
+    // sehingga backend hanya menyimpan 1 transaksi (idempotent).
+    const clientTxId = this._currentPaymentTxId;
+
     // Hard guard: pastikan sesi di DB masih open (menghindari state frontend stale).
     try {
       const latestOwnSession = await this.getOwnOpenShift();
       if (!latestOwnSession) {
         this.session = null;
         showToast('Shift kas sudah ditutup. Buka shift kembali sebelum checkout.', 'warning');
+        this._checkoutLock = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
         await this.openShiftModal();
         return;
       }
@@ -3030,23 +3067,9 @@ const POS = {
     } catch (e) {
       console.error('confirmCheckout: gagal validasi shift', e);
       showToast('Gagal memvalidasi status shift. Coba lagi.', 'error');
+      this._checkoutLock = false;
+      if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
       return;
-    }
-
-    this._checkoutLock = true;
-
-    let clientTxId;
-    try {
-      clientTxId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') ? crypto.randomUUID() : null;
-    } catch (e) { clientTxId = null; }
-    // FIX: Fallback harus menghasilkan UUID v4 valid (format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
-    // agar tidak menyebabkan error "invalid input syntax for type uuid" di PostgreSQL
-    if (!clientTxId) {
-      clientTxId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = (Math.random() * 16) | 0;
-        const v = c === 'x' ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-      });
     }
 
     const subtotal = this.cartSubtotal();
@@ -3065,18 +3088,17 @@ const POS = {
       } catch(e) {
         showToast('Masukkan jumlah uang yang diterima', 'error');
         this._checkoutLock = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
         return;
       }
       if (received < total) {
         showToast('Uang tidak cukup!', 'error');
         this._checkoutLock = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
         return;
       }
     }
 
-    const btn = document.getElementById('btn-confirm-pay');
-
-    // FIX: Set loading true only while DB operations run, reset it BEFORE showing success popup
     this.loading = true;
     try {
       const stockCheck = await inventoryService.checkBOMStock({ cart: this.cart, branchId: this.branch.id });
@@ -3090,27 +3112,16 @@ const POS = {
         }
         this._checkoutLock = false;
         this.loading = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
         return;
       }
     } catch (e) {
       showToast('Gagal memeriksa stok', 'error');
       this._checkoutLock = false;
       this.loading = false;
-      return;
-    }
-
-    this._pendingTxIds = this._pendingTxIds || new Set();
-
-    if (this._pendingTxIds.has(clientTxId)) {
-      showToast('Transaksi sedang diproses...', 'warning');
-      this._checkoutLock = false;
-      this.loading = false;
       if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
       return;
     }
-    this._pendingTxIds.add(clientTxId);
-
-    if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
 
     const preCheckoutStock = new Map(this.stockCache || []);
 
@@ -3182,9 +3193,7 @@ const POS = {
       }
       showToast('Checkout gagal: ' + (err.message || 'Coba lagi'), 'error');
     } finally {
-      if (this._pendingTxIds) this._pendingTxIds.delete(clientTxId);
       this._checkoutLock = false;
-      // FIX: Only reset loading here if it wasn't already reset in the success path above
       if (this.loading) this.loading = false;
       if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
     }
@@ -3219,10 +3228,10 @@ const POS = {
     }
   },
 
-  // FIX: closeSuccessPopup now also ensures all locks are cleared
   closeSuccessPopup() {
     closeModal('modal-success-trx');
     this._checkoutLock = false;
+    this._currentPaymentTxId = null;
     this.loading = false;
     this.switchView('kasir');
     showToast('Siap untuk transaksi berikutnya', 'success');
@@ -3232,17 +3241,17 @@ const POS = {
     window.print();
     closeModal('modal-success-trx');
     this._checkoutLock = false;
+    this._currentPaymentTxId = null;
     this.loading = false;
     this.switchView('kasir');
     showToast('Siap untuk transaksi berikutnya', 'success');
   },
 
-  // FIX: startNewTransaction properly closes modal and resets state
   startNewTransaction() {
     closeModal('modal-receipt');
     closeModal('modal-success-trx');
-    // Ensure all locks are cleared so next transaction works
     this._checkoutLock = false;
+    this._currentPaymentTxId = null;
     this.loading = false;
     showToast('Siap untuk transaksi berikutnya', 'success');
   },
