@@ -93,7 +93,7 @@
       </form>
 
       <p class="text-center small text-muted mt-5">
-        &copy; 2025 Roti Bakar Ngeunah
+        &copy; 2026 Roti Bakar Ngeunah
       </p>
     </div>
   </div>
@@ -101,7 +101,7 @@
   <!-- 1. Lucide -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <!-- 2. File lokal — berurutan, synchronous -->
-  <script src="js/supabaseClient.js"></script>
+  <script src="js/apiClient.js"></script>
   <script src="js/auth.js?v=20260526-session-hardening-1"></script>
   <!-- 4. Inline logic — window.load menunggu SEMUA script di atas selesai -->
   <script>
@@ -124,8 +124,8 @@
         if (typeof db === 'undefined') {
           statusEl.className = 'fail';
           statusEl.innerHTML =
-            '❌ <strong>supabaseClient.js gagal di-load.</strong><br>' +
-            'Pastikan file <code>js/supabaseClient.js</code> ada dan path-nya benar.';
+            '❌ <strong>apiClient.js gagal di-load.</strong><br>' +
+            'Pastikan file <code>js/apiClient.js</code> ada dan path-nya benar.';
           return;
         }
 
@@ -142,7 +142,7 @@
               statusEl.className = 'fail';
               statusEl.innerHTML =
                 '❌ <strong>API Key ditolak (401).</strong><br>' +
-                'Periksa nilai <code>API_KEY</code> di <code>js/supabaseClient.js</code> ' +
+                'Periksa nilai <code>API_KEY</code> di <code>js/apiClient.js</code> ' +
                 'dan <code>API_SECRET_KEY</code> di <code>config.php</code> — harus sama persis.';
             } else if (msg.includes('table') || msg.includes('does not exist')) {
               statusEl.className = 'fail';

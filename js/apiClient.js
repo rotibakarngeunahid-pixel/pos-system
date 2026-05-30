@@ -1,5 +1,4 @@
 // ── RBN POS — API Client (cPanel/MySQL)
-// Menggantikan Supabase SDK, interface tetap sama persis
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GANTI dua baris ini dengan URL dan key dari config.php Anda
@@ -136,7 +135,7 @@ class QueryBuilder {
   }
 }
 
-// ── Main db object — drop-in replacement for Supabase client ─────────────────
+// ── Main db object ────────────────────────────────────────────────────────────
 const db = {
   from(table) {
     return new QueryBuilder(table);

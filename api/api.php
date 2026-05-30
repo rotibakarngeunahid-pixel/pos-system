@@ -1,7 +1,6 @@
 <?php
 // ══════════════════════════════════════════════════════════════════════════════
 // api.php — RBN POS REST API untuk cPanel/MySQL
-// Menggantikan Supabase PostgREST + RPC functions
 // ══════════════════════════════════════════════════════════════════════════════
 declare(strict_types=1);
 

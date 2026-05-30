@@ -226,11 +226,6 @@ const cashService = {
   },
 
   // ── Get paginated cash log list ───────────────────────────────
-  // BUG 1 FIX: use explicit FK aliases so PostgREST can disambiguate
-  // the two foreign keys from cash_logs to users (created_by and voided_by).
-  // Alias format: aliasName:tableName!constraintName(columns)
-  // If the query still fails, check actual FK constraint names with the SQL TODO above
-  // and update the constraint hint suffixes accordingly.
   async getLogs({ branchId, sessionId = null, dateFrom = null, dateTo = null, includeVoided = true, limit = 200 }) {
     // Fast path: try explicit FK aliasing (works if constraint names match)
     try {

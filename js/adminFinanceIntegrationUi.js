@@ -308,9 +308,9 @@ const adminDataIntegrationPortalUi = {
 
     } catch (e) {
       const hintMap = {
-        sales:   'Pastikan migration 049 sudah dijalankan di Supabase.',
-        cashout: 'Pastikan migration 039 sudah dijalankan di Supabase.',
-        summary: 'Pastikan migration 049 sudah dijalankan di Supabase.'
+        sales:   'Pastikan RPC get_transactions_summary sudah tersedia di api.php.',
+        cashout: 'Pastikan RPC get_cashout_summary sudah tersedia di api.php.',
+        summary: 'Pastikan RPC get_transactions_summary sudah tersedia di api.php.'
       };
       const hint = hintMap[tab] || '';
       const errHtml = `<tr><td colspan="20" class="empty-td" style="color:var(--danger);padding:20px">

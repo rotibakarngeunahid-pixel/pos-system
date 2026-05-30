@@ -213,7 +213,7 @@ const ADMIN = {
   // ── Master data ───────────────────────────────────────────────
   async loadMasterData() {
     // product_categories is loaded separately with a graceful fallback in case
-    // the table doesn't exist yet (run schema_v4.sql in Supabase SQL Editor to create it).
+    // the table doesn't exist yet (run cpanel_mysql_schema.sql in phpMyAdmin to create it).
     const [branchRes, productRes, ingRes, supRes] = await Promise.all([
       db.from('branches').select('*').order('name'),
       db.from('products').select('*').order('name'),
@@ -1241,7 +1241,7 @@ const ADMIN = {
         // Detect missing table — give actionable guidance
         const msg = error.message || '';
         if (msg.includes('product_categories') && (msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('relation'))) {
-          showToast('Tabel product_categories belum ada. Jalankan schema_v4.sql di Supabase SQL Editor terlebih dahulu.', 'error');
+          showToast('Tabel product_categories belum ada. Import cpanel_mysql_schema.sql via phpMyAdmin terlebih dahulu.', 'error');
         } else {
           showDbError(error, { action: 'menyimpan kategori produk', entity: 'Kategori produk' });
         }
@@ -2776,7 +2776,7 @@ const ADMIN = {
       { code: 'transfer', label: 'Transfer', icon: '', is_active: true }
     ];
 
-    // Try load from Supabase; fall back to localStorage or defaults
+    // Load payment methods from API; fall back to localStorage or defaults
     try {
       let { data, error } = await db.from('payment_methods').select('id, code, label, icon, fee_label, fee_percent, is_fee_enabled, is_active').order('id');
       const loadErrMsg = String(error?.message || '').toLowerCase();
@@ -2825,7 +2825,7 @@ const ADMIN = {
     // Keep a local copy for quick UI access (fallback)
     localStorage.setItem('pos_settings', JSON.stringify(s));
 
-    // Persist payment methods to Supabase: remove deleted, upsert existing
+    // Persist payment methods to database: remove deleted, upsert existing
     try {
       const methods = this.paymentMethods || [];
       // Fetch existing codes
@@ -3087,7 +3087,7 @@ const ADMIN = {
         showToast(`Reset selesai (${errors.length} error) — cek konsol browser`, 'warning');
         console.warn('[reset] Error detail:', errors);
       } else {
-        showToast('Reset gagal — cek permission RLS di Supabase Dashboard', 'error');
+        showToast('Reset gagal — cek permission di database atau log PHP', 'error');
         console.error('[reset] Semua tabel gagal:', errors);
       }
 

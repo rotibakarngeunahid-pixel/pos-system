@@ -1,6 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════════════════
 -- RBN POS — MySQL Schema untuk cPanel Hosting
--- Dikonversi dari PostgreSQL/Supabase ke MySQL/MariaDB
 -- Jalankan di phpMyAdmin atau MySQL console setelah membuat database
 -- ══════════════════════════════════════════════════════════════════════════════
 

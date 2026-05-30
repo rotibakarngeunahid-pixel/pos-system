@@ -5,7 +5,7 @@ const DEPOSIT_PROOF_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
 const DEPOSIT_PROOF_MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 // Upload endpoint: gunakan upload.php di direktori yang sama dengan api.php
-// API_BASE didefinisikan di supabaseClient.js, e.g. 'https://api.rotibakarngeunah.my.id/api/api.php'
+// API_BASE didefinisikan di apiClient.js
 function _depositUploadUrl() {
   return (typeof API_BASE !== 'undefined' ? API_BASE : '').replace('/api.php', '/upload.php');
 }
@@ -73,7 +73,7 @@ const depositService = {
       const { data, error } = await this.withTimeout(
         query,
         5000,
-        'Timeout memuat metode setoran dari SDK Supabase.'
+        'Timeout memuat metode setoran dari API.'
       );
       if (error) throw error;
       return data || [];
@@ -297,9 +297,7 @@ const depositService = {
   },
 
   async getAllDeposits({ branchId = null, status = null, dateFrom = null, dateTo = null, limit = 100 } = {}) {
-    // No embedded joins at all: every joined table with a bigint id column (users, branches)
-    // causes the Supabase SDK to overwrite cash_deposits.id (UUID) with that bigint in r.id.
-    // deposit_accounts.id is UUID but we still skip the join — caller resolves names client-side.
+    // No embedded joins — caller resolves names client-side to keep the query simple.
     let q = db.from('cash_deposits')
       .select(`
         id, branch_id, staff_id, session_id, reviewed_by, account_id,

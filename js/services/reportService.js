@@ -39,11 +39,6 @@ const reportService = {
   },
 
   // ── Product Performance ───────────────────────────────────────
-  // BUG 5E FIX: uses a single !inner join query (avoids URL length limits
-  // from thousands of transaction IDs in a two-step .in() approach).
-  // VOID FIX: apply JS-level status guard so that void transactions are
-  // excluded even if the PostgREST dot-notation filter on the joined table
-  // is unreliable in some versions.
   async getProductPerformance({ branchId, dateFrom, dateTo, paymentMethod, staffId }) {
     let q = db.from('transaction_items')
       .select(`
@@ -67,8 +62,7 @@ const reportService = {
     const map = {};
     for (const i of items) {
       const tx = i.transactions;
-      // JS-level guard: skip non-completed rows even if PostgREST dot-notation
-      // filter on the joined table didn't apply correctly in some versions.
+      // JS-level guard: skip non-completed rows.
       if (!tx || tx.status !== 'completed') continue;
 
       const key = `${i.product_name}||${i.variant_name}`;
