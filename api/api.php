@@ -181,13 +181,16 @@ function handleUpdate(string $table, array $body, array $params): void {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([...array_values($body), ...$whereValues]);
 
-    // Return updated rows if select param present
+    // Return updated rows if select param present — use full select plan to support JOINs
     if (isset($params['select'])) {
-        $selectCols = buildSelect($table, $params['select']);
-        [$wc, $wv] = buildWhere($params);
-        $rows = $pdo->prepare("SELECT $selectCols FROM `$table` $wc");
-        $rows->execute($wv);
-        $data = array_map(fn($r) => decodeJsonCols($r), $rows->fetchAll());
+        $selectTree = parseSelectList($params['select']);
+        $plan = buildSelectPlan($table, $selectTree);
+        [$wc, $wv] = buildWhere($params, $plan['context']);
+        $sql2 = "SELECT {$plan['selectSql']} FROM `$table` AS `{$plan['baseAlias']}` {$plan['joinSql']} $wc";
+        $rows2 = $pdo->prepare($sql2);
+        $rows2->execute($wv);
+        $data = array_map(fn($r) => decodeJsonCols($r), $rows2->fetchAll());
+        $data = hydrateJoinedRows($data, $plan['joinedRelations']);
         respond(200, isset($params['_single']) ? ($data[0] ?? null) : $data);
     }
     respond(200, ['updated' => $stmt->rowCount()]);
@@ -1140,6 +1143,17 @@ function rpc_get_branch_cash_position(array $p): mixed {
     $session->execute([$branchId]);
     $openSession = $session->fetch() ?: null;
 
+    $lastSessStmt = $pdo->prepare("
+        SELECT cs.id, cs.closed_at, u.name AS staff_name
+        FROM cashier_sessions cs
+        LEFT JOIN users u ON u.id = cs.staff_id
+        WHERE cs.branch_id = ? AND cs.status = 'closed' AND cs.closed_at IS NOT NULL
+        ORDER BY cs.closed_at DESC
+        LIMIT 1
+    ");
+    $lastSessStmt->execute([$branchId]);
+    $lastSess = $lastSessStmt->fetch() ?: null;
+
     return [
         'balance_id'             => $balance ? (int)$balance['id'] : null,
         'current_balance'        => $balance ? (float)$balance['current_balance'] : 0,
@@ -1155,8 +1169,12 @@ function rpc_get_branch_cash_position(array $p): mixed {
             'opening_cash' => (float)$openSession['opening_cash'],
             'opened_at'    => $openSession['opened_at'],
         ] : null,
-        'last_closed_by'  => $balance['last_closed_by'] ?? null,
-        'last_closed_at'  => null,
+        'last_closed_by'         => $balance['last_closed_by'] ?? null,
+        'last_closed_at'         => $lastSess['closed_at'] ?? null,
+        'last_closed_session'    => $lastSess ? [
+            'staff_name' => $lastSess['staff_name'],
+            'closed_at'  => $lastSess['closed_at'],
+        ] : null,
     ];
 }
 
@@ -1714,7 +1732,7 @@ function rpc_create_deposit(array $p): mixed {
     $cashBalance = $p['p_cash_balance_at_deposit'] ?? null;
 
     if ($amount <= 0) throw new Exception('Nominal setoran harus lebih dari 0');
-    if (fmod($amount, 50000) !== 0.0) throw new Exception('Nominal setoran harus kelipatan Rp 50.000');
+    if ((int)round($amount) % 50000 !== 0) throw new Exception('Nominal setoran harus kelipatan Rp 50.000');
 
     if ($sessionId) {
         $s = $pdo->prepare("SELECT status FROM cashier_sessions WHERE id=? LIMIT 1");
@@ -2301,34 +2319,39 @@ function rpc_refund_transaction(array $p): mixed {
     $by     = (int)($p['p_user_id'] ?? $p['p_refunded_by'] ?? 0);
     $refundAmount = isset($p['p_refund_amount']) ? (float)$p['p_refund_amount'] : null;
 
-    $tx = $pdo->prepare("SELECT * FROM transactions WHERE id=? LIMIT 1");
-    $tx->execute([$txId]);
-    $t = $tx->fetch();
-    if (!$t || $t['status'] !== 'completed') throw new Exception('Transaksi tidak ditemukan atau tidak bisa direfund');
-
-    // Validasi akses branch: staff hanya boleh refund transaksi outlet sendiri
+    // Validasi akses branch sebelum membuka transaksi DB
     if ($by) {
         $userStmt = $pdo->prepare("SELECT role, branch_id FROM users WHERE id=? LIMIT 1");
         $userStmt->execute([$by]);
         $userRow = $userStmt->fetch();
-        if ($userRow && !in_array($userRow['role'], ['admin', 'owner'], true)) {
-            if ((int)$userRow['branch_id'] !== (int)$t['branch_id']) {
-                throw new Exception('Anda tidak memiliki akses untuk refund transaksi outlet lain');
-            }
-        }
     }
 
-    $amount = $refundAmount && $refundAmount > 0 ? $refundAmount : (float)$t['total'];
-    $pdo->prepare("UPDATE transactions SET status='refunded' WHERE id=?")->execute([$txId]);
-    $pdo->prepare("INSERT INTO refund_transactions (transaction_id,reason,amount,refunded_by) VALUES (?,?,?,?)")
-        ->execute([$txId,$reason,$amount,$by]);
-    $refundId = (int)$pdo->lastInsertId();
+    $pdo->beginTransaction();
+    try {
+        $tx = $pdo->prepare("SELECT * FROM transactions WHERE id=? FOR UPDATE");
+        $tx->execute([$txId]);
+        $t = $tx->fetch();
+        if (!$t || $t['status'] !== 'completed') throw new Exception('Transaksi tidak ditemukan atau tidak bisa direfund');
 
-    // Catat ke cash_logs agar refund muncul di Riwayat Kas.
-    // Hanya untuk transaksi tunai (cash) karena hanya itu yang memengaruhi kas fisik.
-    if (strtolower((string)($t['payment_method'] ?? '')) === 'cash' && $amount > 0) {
-        $cat = $pdo->query("SELECT id FROM cash_categories WHERE name='Refund' AND type='out' LIMIT 1")->fetch();
-        try {
+        // Validasi akses branch: staff hanya boleh refund transaksi outlet sendiri
+        if ($by && isset($userRow) && $userRow) {
+            if (!in_array($userRow['role'], ['admin', 'owner'], true)) {
+                if ((int)$userRow['branch_id'] !== (int)$t['branch_id']) {
+                    throw new Exception('Anda tidak memiliki akses untuk refund transaksi outlet lain');
+                }
+            }
+        }
+
+        $amount = $refundAmount && $refundAmount > 0 ? $refundAmount : (float)$t['total'];
+        $pdo->prepare("UPDATE transactions SET status='refunded' WHERE id=?")->execute([$txId]);
+        $pdo->prepare("INSERT INTO refund_transactions (transaction_id,reason,amount,refunded_by) VALUES (?,?,?,?)")
+            ->execute([$txId,$reason,$amount,$by]);
+        $refundId = (int)$pdo->lastInsertId();
+
+        // Catat ke cash_logs agar refund muncul di Riwayat Kas.
+        // Hanya untuk transaksi tunai (cash) karena hanya itu yang memengaruhi kas fisik.
+        if (strtolower((string)($t['payment_method'] ?? '')) === 'cash' && $amount > 0) {
+            $cat = $pdo->query("SELECT id FROM cash_categories WHERE name='Refund' AND type='out' LIMIT 1")->fetch();
             $pdo->prepare("
                 INSERT INTO cash_logs
                   (branch_id, session_id, type, category_id, amount, note,
@@ -2343,10 +2366,14 @@ function rpc_refund_transaction(array $p): mixed {
                 $by ?: null,
                 $refundId,
             ]);
-        } catch (Throwable) { /* jangan gagalkan refund hanya karena log gagal */ }
-    }
+        }
 
-    return ['success'=>true,'refund_id'=>$refundId,'transaction_id'=>$txId,'status'=>'refunded'];
+        $pdo->commit();
+        return ['success'=>true,'refund_id'=>$refundId,'transaction_id'=>$txId,'status'=>'refunded'];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 
 // ── adjust_stock_atomic ───────────────────────────────────────────────────────
