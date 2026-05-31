@@ -699,20 +699,43 @@
         <!-- ── Tab: Mapping Bahan ── -->
         <div id="po-sync-tab-material-mapping" class="po-sync-tab" style="display:none;">
 
-          <!-- Form tambah -->
-          <div class="card" style="margin-bottom:20px;">
-            <div style="padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;gap:8px;">
-              <i data-lucide="plus-circle" class="icon-sm" style="color:var(--primary);"></i>
-              <strong style="font-size:14px;">Tambah Mapping Bahan Baru</strong>
-              <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">Sistem tidak menebak sendiri — semua mapping harus dibuat manual</span>
+          <!-- Panel: Saran Otomatis -->
+          <div class="card" style="margin-bottom:24px;">
+            <div style="padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <i data-lucide="cpu" class="icon-sm" style="color:var(--primary);"></i>
+              <div>
+                <div style="font-weight:700;font-size:14px;">Saran Mapping Otomatis</div>
+                <div style="font-size:12px;color:var(--text-muted);">Sistem mencocokkan nama bahan PO dengan bahan POS. Anda tinggal review dan klik Setujui.</div>
+              </div>
+              <button class="btn btn-primary btn-sm" data-admin-action="po-sync-load-suggestions" style="margin-left:auto;white-space:nowrap;">
+                <i data-lucide="sparkles" class="icon-sm"></i> Muat Saran
+              </button>
             </div>
-            <div style="padding:16px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+            <div id="po-sync-suggestions-area" style="padding:16px 20px;">
+              <div style="color:var(--text-muted);font-size:13px;">Klik <strong>Muat Saran</strong> untuk melihat saran mapping otomatis dari bahan PO yang belum terpetakan.</div>
+            </div>
+          </div>
+
+          <!-- Mapping yang sudah disetujui -->
+          <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
+            Mapping yang sudah disetujui
+          </div>
+          <div id="po-sync-material-mapping-list">
+            <div class="empty-state"><div class="empty-title">Memuat...</div></div>
+          </div>
+
+          <!-- Form tambah manual (collapsed by default) -->
+          <details style="margin-top:20px;">
+            <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);padding:10px 0;display:flex;align-items:center;gap:6px;">
+              <i data-lucide="plus" style="width:14px;height:14px;"></i> Tambah mapping manual (untuk bahan yang belum pernah di-sync)
+            </summary>
+            <div style="margin-top:12px;padding:16px;background:var(--bg-alt);border-radius:var(--r);display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
               <div class="form-group" style="margin:0;flex:2;min-width:180px;">
                 <label class="form-label">ID Material PO <span style="color:var(--danger)">*</span></label>
                 <input type="text" class="form-control" id="po-material-id-input" placeholder="UUID dari Supabase PO" />
               </div>
-              <div class="form-group" style="margin:0;flex:1;min-width:130px;">
-                <label class="form-label">Nama di PO <span style="color:var(--danger)">*</span></label>
+              <div class="form-group" style="margin:0;flex:1;min-width:120px;">
+                <label class="form-label">Nama di PO</label>
                 <input type="text" class="form-control" id="po-material-name-input" placeholder="Contoh: box" />
               </div>
               <div class="form-group" style="margin:0;flex:2;min-width:160px;">
@@ -721,15 +744,15 @@
                   <option value="">— Pilih Bahan —</option>
                 </select>
               </div>
-              <div class="form-group" style="margin:0;width:110px;">
+              <div class="form-group" style="margin:0;width:100px;">
                 <label class="form-label">Faktor ×</label>
                 <input type="number" class="form-control" id="po-material-conversion" value="1" min="0.0001" step="0.001" />
               </div>
-              <div class="form-group" style="margin:0;flex:1;min-width:140px;">
-                <label class="form-label">Catatan Konversi</label>
+              <div class="form-group" style="margin:0;flex:1;min-width:130px;">
+                <label class="form-label">Catatan</label>
                 <input type="text" class="form-control" id="po-material-conversion-note" placeholder="Mis: 1 karton = 24 pcs" />
               </div>
-              <div class="form-group" style="margin:0;min-width:130px;">
+              <div class="form-group" style="margin:0;min-width:120px;">
                 <label class="form-label">Cabang</label>
                 <select class="form-control" id="po-material-branch-select">
                   <option value="">— Semua Cabang —</option>
@@ -739,15 +762,7 @@
                 <i data-lucide="save" class="icon-sm"></i> Simpan
               </button>
             </div>
-          </div>
-
-          <!-- Daftar mapping -->
-          <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
-            Mapping yang sudah dibuat
-          </div>
-          <div id="po-sync-material-mapping-list">
-            <div class="empty-state"><div class="empty-title">Memuat...</div></div>
-          </div>
+          </details>
         </div>
 
         <!-- ── Tab: Bahan Diabaikan ── -->

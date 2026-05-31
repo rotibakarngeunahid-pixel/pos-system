@@ -123,6 +123,9 @@ const ADMIN = {
         case 'po-sync-deactivate-outlet-mapping': this.poSyncDeactivateOutletMapping(btn.dataset.id); break;
         case 'po-sync-deactivate-material-mapping': this.poSyncDeactivateMaterialMapping(btn.dataset.id); break;
         case 'po-sync-deactivate-ignored': this.poSyncDeactivateIgnored(btn.dataset.id); break;
+        case 'po-sync-load-suggestions': this.poSyncLoadSuggestions(); break;
+        case 'po-sync-approve-suggestion': this.poSyncApproveSuggestion(btn.dataset.matId, btn.dataset.matName); break;
+        case 'po-sync-ignore-suggestion': this.poSyncIgnoreSuggestion(btn.dataset.matId, btn.dataset.matName); break;
       }
     });
 
@@ -4716,6 +4719,173 @@ const ADMIN = {
       showToast('Status diabaikan dibatalkan', 'success');
       this.poSyncLoadIgnoredMaterials();
     } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  // ── Saran Mapping Otomatis ────────────────────────────────────
+  async poSyncLoadSuggestions() {
+    const area = document.getElementById('po-sync-suggestions-area');
+    if (!area) return;
+    area.innerHTML = '<div class="text-muted text-sm">Memuat saran...</div>';
+    try {
+      const { data, error } = await db.rpc('po_sync_get_suggestions', {});
+      if (error) throw error;
+
+      const suggestions = data?.suggestions || [];
+      const ingredients = data?.ingredients || [];
+
+      if (!suggestions.length) {
+        area.innerHTML = `<div style="padding:12px 0;color:var(--success,#16a34a);font-size:13px;display:flex;align-items:center;gap:8px;">
+          <i data-lucide="check-circle" style="width:16px;height:16px;"></i>
+          Semua bahan PO sudah terpetakan! Tidak ada saran baru.
+        </div>`;
+        if (window.lucide) lucide.createIcons();
+        return;
+      }
+
+      // Buat opsi dropdown ingredient (untuk override)
+      const ingOpts = ingredients.map(i =>
+        `<option value="${i.id}" data-unit="${escHtml(i.unit)}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`
+      ).join('');
+
+      // Render tabel saran
+      const confidenceLabel = (score) => {
+        if (score >= 85) return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:#dcfce7;color:#15803d;">✓ Cocok ${score}%</span>`;
+        if (score >= 50) return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:#fef9c3;color:#a16207;">~ Mirip ${score}%</span>`;
+        return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:#f3f4f6;color:#6b7280;">? Cek ${score}%</span>`;
+      };
+
+      area.innerHTML = `
+        <div style="margin-bottom:12px;font-size:13px;color:var(--text-muted);">
+          Ditemukan <strong>${suggestions.length}</strong> bahan PO yang belum terpetakan.
+          Periksa setiap baris, sesuaikan jika perlu, lalu klik <strong>Setujui</strong>.
+        </div>
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border,#e5e7eb);">
+              <th style="padding:8px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Nama Bahan di PO</th>
+              <th style="padding:8px 4px;text-align:center;color:var(--text-muted);">→</th>
+              <th style="padding:8px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Bahan POS (bisa diubah)</th>
+              <th style="padding:8px 12px;text-align:center;color:var(--text-muted);font-weight:600;">Faktor ×</th>
+              <th style="padding:8px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Kecocokan</th>
+              <th style="padding:8px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${suggestions.map((s, i) => {
+              const bestId   = s.best_match?.id || '';
+              const bestScore = s.best_match?.score || 0;
+              const bestName = s.best_match?.name || '';
+              const rowId = `sug-${i}`;
+              return `<tr style="border-bottom:1px solid var(--border,#e5e7eb);" id="${rowId}">
+                <td style="padding:10px 12px;">
+                  <div style="font-weight:600;">${escHtml(s.po_material_name)}</div>
+                  <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(s.po_material_id)}</div>
+                </td>
+                <td style="padding:10px 4px;text-align:center;color:var(--text-muted);">→</td>
+                <td style="padding:10px 12px;min-width:180px;">
+                  <select class="form-control" id="${rowId}-ing" style="font-size:13px;">
+                    <option value="">— Pilih Bahan POS —</option>
+                    ${ingredients.map(ing =>
+                      `<option value="${ing.id}" data-unit="${escHtml(ing.unit)}" ${ing.id == bestId ? 'selected' : ''}>${escHtml(ing.name)} (${escHtml(ing.unit)})</option>`
+                    ).join('')}
+                  </select>
+                  ${bestName ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Saran sistem: <em>${escHtml(bestName)}</em></div>` : ''}
+                </td>
+                <td style="padding:10px 12px;text-align:center;">
+                  <input type="number" class="form-control" id="${rowId}-factor" value="1" min="0.0001" step="0.001"
+                    style="width:80px;text-align:center;font-size:13px;" />
+                </td>
+                <td style="padding:10px 12px;">${confidenceLabel(bestScore)}</td>
+                <td style="padding:10px 12px;">
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn btn-sm" style="background:#16a34a;color:#fff;border:none;font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;"
+                      data-admin-action="po-sync-approve-suggestion"
+                      data-mat-id="${escHtml(s.po_material_id)}"
+                      data-mat-name="${escHtml(s.po_material_name)}"
+                      data-row-id="${rowId}">
+                      Setujui
+                    </button>
+                    <button class="btn btn-sm" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;"
+                      data-admin-action="po-sync-ignore-suggestion"
+                      data-mat-id="${escHtml(s.po_material_id)}"
+                      data-mat-name="${escHtml(s.po_material_name)}"
+                      data-row-id="${rowId}">
+                      Abaikan
+                    </button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        </div>`;
+      if (window.lucide) lucide.createIcons();
+    } catch(e) {
+      area.innerHTML = `<div style="color:var(--danger);font-size:13px;">Gagal memuat saran: ${escHtml(e.message)}</div>`;
+    }
+  },
+
+  async poSyncApproveSuggestion(matId, matName) {
+    // Baca nilai dari baris tabel
+    const btn = document.querySelector(`[data-admin-action="po-sync-approve-suggestion"][data-mat-id="${matId}"]`);
+    const rowId = btn?.dataset?.rowId;
+    const ingEl     = document.getElementById(`${rowId}-ing`);
+    const factorEl  = document.getElementById(`${rowId}-factor`);
+    const ingId     = parseInt(ingEl?.value || '0');
+    const factor    = parseFloat(factorEl?.value || '1');
+    const ingName   = ingEl?.options[ingEl.selectedIndex]?.text || '';
+
+    if (!ingId) { showToast('Pilih bahan POS terlebih dahulu', 'error'); return; }
+    if (factor <= 0) { showToast('Faktor konversi harus lebih dari 0', 'error'); return; }
+
+    try {
+      const { error } = await db.rpc('po_sync_save_material_mapping', {
+        p_po_material_id:    matId,
+        p_po_material_name:  matName,
+        p_pos_ingredient_id: ingId,
+        p_conversion_factor: factor,
+      });
+      if (error) throw error;
+
+      // Hilangkan baris dari tabel
+      const row = document.getElementById(rowId);
+      if (row) {
+        row.style.transition = 'opacity .3s';
+        row.style.opacity = '0';
+        setTimeout(() => row.remove(), 300);
+      }
+      showToast(`Mapping "${matName}" → "${ingName.split(' (')[0]}" disimpan`, 'success');
+      this.poSyncLoadMaterialMappings();
+    } catch(e) {
+      showToast('Gagal simpan: ' + e.message, 'error');
+    }
+  },
+
+  async poSyncIgnoreSuggestion(matId, matName) {
+    const reason = prompt(`Alasan mengabaikan "${matName}" dari stok POS:\n(kosongkan jika tidak perlu alasan)`);
+    if (reason === null) return; // user cancel
+    try {
+      const { error } = await db.rpc('po_sync_save_ignored_material', {
+        p_po_material_id:   matId,
+        p_po_material_name: matName,
+        p_reason:           reason || 'Tidak dihitung di POS',
+        p_is_active:        1,
+      });
+      if (error) throw error;
+
+      const btn    = document.querySelector(`[data-admin-action="po-sync-ignore-suggestion"][data-mat-id="${matId}"]`);
+      const rowId  = btn?.dataset?.rowId;
+      const row    = document.getElementById(rowId);
+      if (row) {
+        row.style.transition = 'opacity .3s';
+        row.style.opacity = '0';
+        setTimeout(() => row.remove(), 300);
+      }
+      showToast(`"${matName}" ditandai diabaikan dari stok POS`, 'success');
+    } catch(e) {
+      showToast('Gagal: ' + e.message, 'error');
+    }
   },
 
   async poSyncLoadRuns() {

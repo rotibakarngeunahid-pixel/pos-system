@@ -1301,6 +1301,7 @@ function adminRpcNames(): array {
         'po_sync_retry',
         'po_sync_get_pending_mappings',
         'po_sync_get_runs',
+        'po_sync_get_suggestions',
     ];
 }
 
@@ -5034,4 +5035,120 @@ function rpcInsertBranchCashLedger(
             $reason,$srcTable,$srcId
         ]);
     } catch (Throwable) { /* ignore duplicate */ }
+}
+
+// ── po_sync_get_suggestions ───────────────────────────────────────────────────
+// Menghasilkan saran mapping otomatis berdasarkan kemiripan nama bahan PO
+// dengan bahan POS. Admin masih harus approve sebelum mapping disimpan.
+//
+// Sumber bahan PO: po_stock_sync_items (butuh_mapping_admin) UNION po_ignored_materials
+// + bahan dari manual input (p_extra_materials JSON opsional).
+function rpc_po_sync_get_suggestions(array $p): mixed {
+    $pdo           = getDB();
+    $extraRaw      = $p['p_extra_materials'] ?? null;
+    $extraMaterials = [];
+    if ($extraRaw) {
+        $decoded = is_string($extraRaw) ? json_decode($extraRaw, true) : $extraRaw;
+        if (is_array($decoded)) $extraMaterials = $decoded;
+    }
+
+    // 1. Ambil semua bahan PO yang butuh mapping (dari sync items)
+    $matStmt = $pdo->query("
+        SELECT DISTINCT po_material_id, po_material_name
+        FROM po_stock_sync_items
+        WHERE sync_status = 'butuh_mapping_admin'
+          AND po_material_id IS NOT NULL
+          AND po_material_name IS NOT NULL
+        ORDER BY po_material_name
+    ");
+    $materials = $matStmt->fetchAll();
+
+    // Tambah bahan dari extra input (jika ada, tanpa duplikat)
+    $existingIds = array_column($materials, 'po_material_id');
+    foreach ($extraMaterials as $em) {
+        if (!empty($em['po_material_id']) && !in_array($em['po_material_id'], $existingIds, true)) {
+            $materials[] = [
+                'po_material_id'   => $em['po_material_id'],
+                'po_material_name' => $em['po_material_name'] ?? $em['po_material_id'],
+            ];
+            $existingIds[] = $em['po_material_id'];
+        }
+    }
+
+    // 2. Ambil semua ingredient aktif di POS
+    $ingStmt = $pdo->query("SELECT id, name, unit FROM ingredients WHERE COALESCE(is_active,1)=1 ORDER BY name");
+    $ingredients = $ingStmt->fetchAll();
+
+    // 3. Ambil mapping yang sudah ada (agar tidak disarankan ulang)
+    $mappedIds = [];
+    $mappedStmt = $pdo->query("SELECT po_material_id FROM po_material_pos_mappings WHERE is_active=1");
+    foreach ($mappedStmt->fetchAll() as $row) $mappedIds[] = $row['po_material_id'];
+
+    // 4. Hitung skor kemiripan per material
+    $results = [];
+    foreach ($materials as $mat) {
+        // Skip yang sudah punya mapping aktif
+        if (in_array($mat['po_material_id'], $mappedIds, true)) continue;
+
+        $matNameNorm = poNormalizeName($mat['po_material_name']);
+        $top = [];
+
+        foreach ($ingredients as $ing) {
+            $ingNameNorm = poNormalizeName($ing['name']);
+            $score = poCalcSimilarity($matNameNorm, $ingNameNorm);
+            if ($score > 0) {
+                $top[] = ['id' => $ing['id'], 'name' => $ing['name'], 'unit' => $ing['unit'], 'score' => $score];
+            }
+        }
+
+        // Sort by score desc, ambil top 3
+        usort($top, fn($a, $b) => $b['score'] - $a['score']);
+        $top = array_slice($top, 0, 3);
+
+        $results[] = [
+            'po_material_id'      => $mat['po_material_id'],
+            'po_material_name'    => $mat['po_material_name'],
+            'best_match'          => $top[0] ?? null,
+            'alternatives'        => array_slice($top, 1),
+            'already_mapped'      => false,
+        ];
+    }
+
+    return [
+        'suggestions'  => $results,
+        'ingredients'  => $ingredients,  // untuk dropdown pilih manual
+        'total_unmapped' => count($results),
+    ];
+}
+
+// Normalisasi nama: lowercase, trim, hapus karakter non-alfanumerik
+function poNormalizeName(string $name): string {
+    $name = strtolower(trim($name));
+    $name = preg_replace('/[^a-z0-9\s]/', ' ', $name);
+    $name = preg_replace('/\s+/', ' ', $name);
+    return trim($name);
+}
+
+// Hitung skor kemiripan 0-100 antara dua nama ternormalisasi
+function poCalcSimilarity(string $a, string $b): int {
+    if ($a === '' || $b === '') return 0;
+
+    // Exact match
+    if ($a === $b) return 100;
+
+    // Satu mengandung yang lain
+    if (str_contains($a, $b) || str_contains($b, $a)) return 85;
+
+    // Overlap kata
+    $aWords = array_filter(explode(' ', $a));
+    $bWords = array_filter(explode(' ', $b));
+    $overlap = count(array_intersect($aWords, $bWords));
+    if ($overlap > 0) {
+        $ratio = $overlap / max(count($aWords), count($bWords));
+        return (int)round($ratio * 70);
+    }
+
+    // similar_text PHP built-in sebagai fallback
+    similar_text($a, $b, $pct);
+    return $pct >= 50 ? (int)round($pct * 0.5) : 0;
 }
