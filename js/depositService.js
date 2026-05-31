@@ -10,6 +10,15 @@ function _depositUploadUrl() {
   return (typeof API_BASE !== 'undefined' ? API_BASE : '').replace('/api.php', '/upload.php');
 }
 
+function _depositUploadOrigin() {
+  try {
+    const base = (typeof window !== 'undefined' && window.location) ? window.location.href : undefined;
+    return new URL(_depositUploadUrl(), base).origin;
+  } catch {
+    return '';
+  }
+}
+
 const depositService = {
 
   async withTimeout(promise, ms, message) {
@@ -115,6 +124,30 @@ const depositService = {
       || /\btunai\b/.test(labelValue);
   },
 
+  normalizeUploadUrl(url) {
+    if (!url) return url;
+    const raw = String(url).trim();
+    if (!raw) return raw;
+
+    try {
+      const base = (typeof window !== 'undefined' && window.location) ? window.location.href : undefined;
+      const parsed = new URL(raw, base);
+      if (parsed.pathname.startsWith('/uploads/')) {
+        const uploadOrigin = _depositUploadOrigin();
+        if (uploadOrigin) {
+          return uploadOrigin + parsed.pathname + parsed.search + parsed.hash;
+        }
+      }
+      return parsed.href;
+    } catch {
+      return raw;
+    }
+  },
+
+  normalizeProofUrl(url) {
+    return this.normalizeUploadUrl(url);
+  },
+
   validateProofFile(file) {
     if (!file) throw new Error('Upload bukti setoran terlebih dahulu');
 
@@ -173,8 +206,10 @@ const depositService = {
 
     if (!result.url) throw new Error('Upload bukti gagal: server tidak mengembalikan URL');
 
+    const proofUrl = this.normalizeProofUrl(result.url);
+
     return {
-      url:        result.url,
+      url:        proofUrl,
       path:       result.path       || scope + '/' + file.name,
       fileName:   result.fileName   || file.name,
       fileType:   result.fileType   || file.type,
@@ -427,7 +462,7 @@ const depositService = {
     if (!upRes.ok) throw new Error('Upload QRIS gagal: HTTP ' + upRes.status);
     const upJson = await upRes.json();
     if (!upJson.success) throw new Error('Upload QRIS gagal: ' + (upJson.error || 'Unknown error'));
-    return upJson.url || null;
+    return this.normalizeUploadUrl(upJson.url || null);
   },
 
   async getSessionDepositSummary(sessionId) {

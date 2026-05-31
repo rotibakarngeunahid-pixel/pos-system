@@ -6,6 +6,29 @@
 
 require_once __DIR__ . '/config.php';
 
+function uploadPublicBaseUrl(): string {
+    if (defined('UPLOADS_BASE_URL') && UPLOADS_BASE_URL !== '') {
+        return UPLOADS_BASE_URL;
+    }
+
+    $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? ($_SERVER['HTTP_HOST'] ?? '');
+    $host = trim(explode(',', (string)$host)[0]);
+
+    $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? null;
+    if (!$proto) {
+        $isLocalHost = preg_match('/^(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?$/', $host) === 1;
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || !$isLocalHost ? 'https' : 'http';
+    }
+    $proto = strtolower(explode(',', (string)$proto)[0]);
+    if (!in_array($proto, ['http', 'https'], true)) $proto = 'https';
+
+    if ($host !== '') {
+        return $proto . '://' . $host;
+    }
+
+    return rtrim(SITE_URL, '/');
+}
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if (function_exists('isOriginAllowed') && isOriginAllowed($origin)) {
@@ -120,7 +143,7 @@ if (!move_uploaded_file($file['tmp_name'], $destPath)) {
 }
 
 // ── Return URL ────────────────────────────────────────────────────────────────
-$siteUrl  = defined('SITE_URL') ? SITE_URL : 'https://pos.rotibakarngeunah.my.id';
+$siteUrl  = uploadPublicBaseUrl();
 $fileUrl  = $siteUrl . '/uploads/' . $folder . '/' . $filename;
 $filePath = $folder . '/' . $filename;
 

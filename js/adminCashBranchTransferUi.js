@@ -273,7 +273,7 @@ const adminCashBranchTransferUi = {
         <div class="cbt-detail-row"><span>Jumlah</span><strong>${fmtRp(row.amount)}</strong></div>
         <div class="cbt-detail-row"><span>Waktu Request</span><strong>${fmtDt(row.requested_at)}</strong></div>
         ${row.notes ? `<div class="cbt-detail-row"><span>Catatan</span><strong>${escHtml(row.notes)}</strong></div>` : ''}
-        ${row.proof_url ? `<div class="cbt-detail-row"><span>Bukti</span><a href="${escHtml(row.proof_url)}" target="_blank" rel="noopener">${escHtml(row.proof_file_name || 'Lihat bukti')}</a></div>` : ''}
+        ${row.proof_url ? `<div class="cbt-detail-row"><span>Bukti</span><a href="${escHtml(depositService.normalizeProofUrl(row.proof_url))}" target="_blank" rel="noopener">${escHtml(row.proof_file_name || 'Lihat bukti')}</a></div>` : ''}
         ${row.confirmed_by_name ? `
           <div class="cbt-detail-row cbt-detail-divider"><span>Dikonfirmasi Oleh</span><strong>${escHtml(row.confirmed_by_name)}</strong></div>
           <div class="cbt-detail-row"><span>Waktu Konfirmasi</span><strong>${fmtDt(row.confirmed_at)}</strong></div>

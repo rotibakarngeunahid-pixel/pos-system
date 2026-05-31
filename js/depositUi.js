@@ -638,7 +638,7 @@ const depositUi = {
   },
 
   renderQrisAccountDetail(account) {
-    const qrisUrl = account.qris_image_url || '';
+    const qrisUrl = depositService.normalizeUploadUrl(account.qris_image_url || '');
 
     if (!qrisUrl || !this.isSafeHttpUrl(qrisUrl)) {
       return `<div class="deposit-method-config-error">
@@ -1204,8 +1204,9 @@ const depositUi = {
       const method = row.deposit_accounts?.label
         || row.method
         || 'Metode lama/tidak tersedia';
-      const proof = row.proof_url
-        ? `<a href="${this.esc(row.proof_url)}" target="_blank" rel="noopener">${this.esc(row.proof_file_name || 'Lihat bukti')}</a>`
+      const proofUrl = depositService.normalizeProofUrl(row.proof_url);
+      const proof = proofUrl
+        ? `<a href="${this.esc(proofUrl)}" target="_blank" rel="noopener">${this.esc(row.proof_file_name || 'Lihat bukti')}</a>`
         : '<span class="text-muted">Bukti belum tersedia</span>';
       const rejectRow = row.status === 'rejected' && row.reject_reason
         ? `<div><span>Alasan Penolakan</span><strong class="text-danger">${this.esc(row.reject_reason)}</strong></div>`
@@ -1626,8 +1627,9 @@ const depositUi = {
     if (badge) { badge.style.display = ''; badge.textContent = items.length; }
 
     body.innerHTML = items.map(item => {
-      const proofHtml = item.proof_url
-        ? `<a class="deposit-incoming-proof" href="${this.esc(item.proof_url)}" target="_blank" rel="noopener">Lihat Bukti</a>`
+      const proofUrl = depositService.normalizeProofUrl(item.proof_url);
+      const proofHtml = proofUrl
+        ? `<a class="deposit-incoming-proof" href="${this.esc(proofUrl)}" target="_blank" rel="noopener">Lihat Bukti</a>`
         : '';
       return `
         <div class="deposit-incoming-item">

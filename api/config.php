@@ -32,6 +32,7 @@ define('DB_PASS',        getenv('DB_PASS')        ?: '');
 define('DB_CHARSET',     'utf8mb4');
 define('API_SECRET_KEY', getenv('API_SECRET_KEY') ?: '');
 define('SITE_URL',       getenv('SITE_URL')       ?: 'https://pos.rotibakarngeunah.my.id');
+define('UPLOADS_BASE_URL', rtrim(getenv('UPLOADS_BASE_URL') ?: '', '/'));
 
 // Domain frontend yang boleh akses API ini
 define('ALLOWED_ORIGINS', [

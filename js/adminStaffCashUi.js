@@ -506,8 +506,9 @@ const adminStaffCashUi = {
         rejected: { text: 'Ditolak', cls: 'badge-danger' }
       }[d.status] || { text: d.status || '-', cls: '' };
       const method = escHtml(d.deposit_account_name_snapshot || 'Metode lama/tidak tersedia');
-      const proof = d.proof_url
-        ? `<a class="deposit-admin-proof-link" href="${escHtml(d.proof_url)}" target="_blank" rel="noopener">${escHtml(d.proof_file_name || 'Lihat Bukti')}</a>`
+      const proofUrl = depositService.normalizeProofUrl(d.proof_url);
+      const proof = proofUrl
+        ? `<a class="deposit-admin-proof-link" href="${escHtml(proofUrl)}" target="_blank" rel="noopener">${escHtml(d.proof_file_name || 'Lihat Bukti')}</a>`
         : '<span class="text-muted">Bukti belum tersedia</span>';
       const sessionBadge = String(d.session_id || '') === String(this._activeDetail?.session?.id || '')
         ? '<span class="badge badge-success" style="font-size:10px">Sesi ini</span>'

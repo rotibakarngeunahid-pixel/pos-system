@@ -289,7 +289,8 @@ const adminDepositUi = {
 
     const label = row.proof_file_name ? 'Lihat Bukti' : 'Lihat';
     const title = row.proof_file_name ? ` title="${escHtml(row.proof_file_name)}"` : '';
-    return `<a class="deposit-admin-proof-link" href="${escHtml(row.proof_url)}" target="_blank" rel="noopener"${title}>
+    const proofUrl = depositService.normalizeProofUrl(row.proof_url);
+    return `<a class="deposit-admin-proof-link" href="${escHtml(proofUrl)}" target="_blank" rel="noopener"${title}>
       <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle"></i> ${escHtml(label)}
     </a>`;
   },
@@ -929,8 +930,9 @@ const adminDepositUi = {
 
   renderQrisPreview(url) {
     if (!this.el.qrisPreview) return;
+    const safeUrl = depositService.normalizeUploadUrl(url || '');
     this.el.qrisPreview.innerHTML = url
-      ? `<img src="${escHtml(url)}" alt="Preview QRIS" class="img-preview" style="max-width:160px;margin-top:8px">`
+      ? `<img src="${escHtml(safeUrl)}" alt="Preview QRIS" class="img-preview" style="max-width:160px;margin-top:8px">`
       : '';
   },
 
