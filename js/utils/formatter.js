@@ -87,7 +87,12 @@ const fmt = {
     if (witaDate.getHours() < this.BUSINESS_DAY_CUTOFF_HOUR) {
       witaDate.setDate(witaDate.getDate() - 1);
     }
-    return witaDate.toISOString().slice(0, 10);
+    // Gunakan komponen tanggal lokal (bukan toISOString) agar tidak terpengaruh UTC offset.
+    // toISOString() mengembalikan UTC sehingga antara jam 00:00-07:59 WITA hasilnya salah (1 hari mundur).
+    const y = witaDate.getFullYear();
+    const m = String(witaDate.getMonth() + 1).padStart(2, '0');
+    const d = String(witaDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   },
 
   // Menghasilkan WITA literal yang cocok dengan data tersimpan di MySQL.
