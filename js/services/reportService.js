@@ -72,7 +72,7 @@ const reportService = {
         qty:     0,
         revenue: 0
       };
-      map[key].qty     += i.quantity;
+      map[key].qty     += parseInt(i.quantity, 10) || 0;
       map[key].revenue += parseFloat(i.subtotal || 0);
     }
 
