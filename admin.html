@@ -724,9 +724,12 @@
               <option value="">Semua Kasir</option>
             </select>
           </div>
-          <div class="pb-1">
+          <div class="pb-1" style="display:flex;gap:8px">
             <button class="btn btn-primary" data-admin-action="run-report">
               <i data-lucide="search" class="icon-sm"></i> Tampilkan
+            </button>
+            <button class="btn btn-outline" id="btn-export-report" data-admin-action="export-report" title="Export ke CSV" disabled>
+              <i data-lucide="download" class="icon-sm"></i> Export CSV
             </button>
           </div>
         </div>

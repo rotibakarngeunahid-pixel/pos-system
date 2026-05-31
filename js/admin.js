@@ -14,6 +14,7 @@ const ADMIN = {
   _allProducts:    [],    // cache for client-side product search/filter
   _copyMenuPreview:    null,
   _copyMenuSubmitting: false,
+  _reportData:         null,
 
   // ── Init ─────────────────────────────────────────────────────
   async init() {
@@ -68,6 +69,7 @@ const ADMIN = {
         case 'set-trx-quick-filter': this.setTrxQuickFilter(btn.dataset.filter, btn); break;
         case 'run-report': this.runReport(this.currentReportTab || 'sales'); break;
         case 'switch-report-tab': this.switchReportTab(btn.dataset.tab, btn); break;
+        case 'export-report': this.exportReportCsv(); break;
         case 'save-receipt-settings': this.saveReceiptSettings(); break;
         case 'render-receipt-preview': this.renderReceiptPreview(); break;
         case 'add-payment-method': this.addPaymentMethod(); break;
@@ -1903,11 +1905,15 @@ const ADMIN = {
 
     if (!dateFrom || !dateTo) { showToast('Pilih rentang tanggal', 'warning'); return; }
 
+    const exportBtn = document.getElementById('btn-export-report');
+    if (exportBtn) exportBtn.disabled = true;
+
     try {
       if (tab === 'sales') {
         const el = document.getElementById('report-sales-body');
         el.innerHTML = '<tr><td colspan="8" class="empty-td">Memuat...</td></tr>';
         const data = await reportService.getSalesReport({ branchId, dateFrom, dateTo, paymentMethod, staffId });
+        this._reportData = { tab, data, dateFrom, dateTo };
 
         // Summary cards — only completed transactions
         document.getElementById('report-stat-revenue').textContent     = fRp(data.totalRevenue);
@@ -1954,6 +1960,7 @@ const ADMIN = {
         const el = document.getElementById('report-products-body');
         el.innerHTML = '<tr><td colspan="6" class="empty-td">Memuat...</td></tr>';
         const data = await reportService.getProductPerformance({ branchId, dateFrom, dateTo, paymentMethod, staffId });
+        this._reportData = { tab, data, dateFrom, dateTo };
 
         if (!data.length) {
           document.getElementById('report-prod-stat-unique').textContent = '0';
@@ -2017,6 +2024,7 @@ const ADMIN = {
         const el = document.getElementById('report-inv-usage-body');
         el.innerHTML = '<tr><td colspan="3" class="empty-td">Memuat...</td></tr>';
         const data = await reportService.getInventoryUsage({ branchId, dateFrom, dateTo });
+        this._reportData = { tab, data, dateFrom, dateTo };
         el.innerHTML = data.length
           ? data.map((r, i) => `
               <tr>
@@ -2026,9 +2034,71 @@ const ADMIN = {
               </tr>`).join('')
           : '<tr><td colspan="3" class="empty-td">Tidak ada data pemakaian</td></tr>';
       }
+
+      if (exportBtn) exportBtn.disabled = false;
     } catch (e) {
       showToast('Gagal memuat laporan: ' + e.message, 'error');
     }
+  },
+
+  exportReportCsv() {
+    if (!this._reportData) return;
+    const { tab, data, dateFrom, dateTo } = this._reportData;
+
+    const csvCell = v => {
+      const s = String(v ?? '');
+      return s.includes(',') || s.includes('"') || s.includes('\n')
+        ? '"' + s.replace(/"/g, '""') + '"'
+        : s;
+    };
+    const csvRow  = cols => cols.map(csvCell).join(',');
+
+    let rows = [], filename = '';
+
+    if (tab === 'sales') {
+      const showVoid = document.getElementById('report-show-void')?.checked;
+      const isVoided = t => t.status === 'void' || t.status === 'voided';
+      const txList = showVoid
+        ? [...data.transactions, ...data.voidedTransactions]
+        : data.transactions;
+      rows.push(csvRow(['No','Waktu','Cabang','Kasir','Metode Bayar','Diskon','Status','Total']));
+      txList.forEach((t, i) => rows.push(csvRow([
+        i + 1,
+        fDate(t.created_at),
+        t.branches?.name || '',
+        t.users?.name || '',
+        t.payment_method || 'cash',
+        t.discount_amount || 0,
+        isVoided(t) ? 'VOID' : 'Selesai',
+        t.total || 0,
+      ])));
+      filename = `laporan-penjualan_${dateFrom}_${dateTo}.csv`;
+
+    } else if (tab === 'products') {
+      const totalQty = data.reduce((s, p) => s + p.qty, 0);
+      rows.push(csvRow(['No','Produk','Varian','Qty Terjual','Revenue','% Total']));
+      data.forEach((p, i) => rows.push(csvRow([
+        i + 1,
+        p.product,
+        p.variant || '',
+        p.qty,
+        p.revenue,
+        totalQty ? ((p.qty / totalQty) * 100).toFixed(1) : '0.0',
+      ])));
+      filename = `laporan-produk_${dateFrom}_${dateTo}.csv`;
+
+    } else if (tab === 'inv-usage') {
+      rows.push(csvRow(['No','Bahan','Total Pemakaian','Satuan']));
+      data.forEach((r, i) => rows.push(csvRow([i + 1, r.name, r.totalUsed, r.unit || ''])));
+      filename = `laporan-bahan_${dateFrom}_${dateTo}.csv`;
+    }
+
+    const bom  = '﻿'; // UTF-8 BOM agar Excel terbaca dengan benar
+    const blob = new Blob([bom + rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
   },
 
   // ── Inventory Logs ────────────────────────────────────────────
