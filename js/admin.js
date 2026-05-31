@@ -1118,7 +1118,15 @@ const ADMIN = {
         fd.append('file', file);
         fd.append('folder', 'products');
         const UPLOAD_URL = API_BASE.replace('/api.php', '/upload.php');
-        const upRes  = await fetch(UPLOAD_URL, { method: 'POST', headers: { 'X-API-Key': API_KEY }, body: fd });
+        const sessionToken = typeof getRbnSessionToken === 'function' ? getRbnSessionToken() : '';
+        const upRes  = await fetch(UPLOAD_URL, {
+          method: 'POST',
+          headers: {
+            'X-API-Key': API_KEY,
+            ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+          },
+          body: fd
+        });
         const upJson = await upRes.json();
         if (upJson.success && upJson.url) {
           imageUrl = upJson.url;

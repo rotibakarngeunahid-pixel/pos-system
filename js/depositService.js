@@ -184,9 +184,13 @@ const depositService = {
     try {
       const uploadUrl = _depositUploadUrl();
       const uploadKey = typeof API_KEY !== 'undefined' ? API_KEY : '';
+      const sessionToken = typeof getRbnSessionToken === 'function' ? getRbnSessionToken() : '';
       res = await fetch(uploadUrl, {
         method: 'POST',
-        headers: { 'X-API-Key': uploadKey },
+        headers: {
+          'X-API-Key': uploadKey,
+          ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+        },
         body: formData
       });
     } catch (networkErr) {
@@ -474,7 +478,15 @@ const depositService = {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('folder', 'qris');
-    const upRes = await fetch(UPLOAD_URL, { method: 'POST', headers: { 'X-API-Key': API_KEY }, body: fd });
+    const sessionToken = typeof getRbnSessionToken === 'function' ? getRbnSessionToken() : '';
+    const upRes = await fetch(UPLOAD_URL, {
+      method: 'POST',
+      headers: {
+        'X-API-Key': API_KEY,
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+      },
+      body: fd
+    });
     if (!upRes.ok) throw new Error('Upload QRIS gagal: HTTP ' + upRes.status);
     const upJson = await upRes.json();
     if (!upJson.success) throw new Error('Upload QRIS gagal: ' + (upJson.error || 'Unknown error'));

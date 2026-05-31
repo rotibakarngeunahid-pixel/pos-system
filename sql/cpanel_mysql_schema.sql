@@ -45,6 +45,34 @@ CREATE TABLE IF NOT EXISTS `app_sessions` (
   INDEX `idx_user_expires` (`user_id`, `expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+  `id`          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `user_id`     BIGINT NULL,
+  `user_name`   VARCHAR(255) NULL,
+  `user_role`   VARCHAR(50) NULL,
+  `branch_id`   BIGINT NULL,
+  `action`      VARCHAR(100) NOT NULL,
+  `table_name`  VARCHAR(100) NULL,
+  `old_data`    JSON NULL,
+  `new_data`    JSON NULL,
+  `ip_address`  VARCHAR(45) NULL,
+  `user_agent`  VARCHAR(255) NULL,
+  `created_at`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_audit_user_time` (`user_id`, `created_at`),
+  INDEX `idx_audit_branch_time` (`branch_id`, `created_at`),
+  INDEX `idx_audit_action_time` (`action`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `api_rate_limits` (
+  `id`           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `action_key`   VARCHAR(80) NOT NULL,
+  `identity_key` VARCHAR(128) NOT NULL,
+  `ip_address`   VARCHAR(45) NULL,
+  `created_at`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_rate_action_identity_time` (`action_key`, `identity_key`, `created_at`),
+  INDEX `idx_rate_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ── product_categories ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `product_categories` (
   `id`         INT AUTO_INCREMENT PRIMARY KEY,

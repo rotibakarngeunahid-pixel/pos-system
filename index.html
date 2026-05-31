@@ -101,8 +101,8 @@
   <!-- 1. Lucide -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <!-- 2. File lokal — berurutan, synchronous -->
-  <script src="js/apiClient.js"></script>
-  <script src="js/auth.js?v=20260526-session-hardening-1"></script>
+  <script src="js/apiClient.js?v=20260601-security-hardening-1"></script>
+  <script src="js/auth.js?v=20260601-security-hardening-1"></script>
   <!-- 4. Inline logic — window.load menunggu SEMUA script di atas selesai -->
   <script>
     window.addEventListener('load', function () {
@@ -130,7 +130,7 @@
         }
 
         try {
-          const { data, error } = await db.from('users').select('id').limit(1);
+          const { data, error } = await db.rpc('rbn_health');
 
           if (error) {
             const msg    = (error.message || '').toLowerCase();
@@ -165,7 +165,7 @@
           }
 
           statusEl.classList.add('hidden');
-          console.log('[RBN] DB connection OK, rows:', data?.length ?? 0);
+          console.log('[RBN] DB connection OK:', data?.server_time || 'ok');
 
         } catch (e) {
           console.error('[RBN] Fetch error:', e);

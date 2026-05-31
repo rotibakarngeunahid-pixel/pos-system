@@ -162,7 +162,6 @@ const POS = {
         case 'refresh-ingredient-log': POS.loadIngredientLogData(false); break;
         case 'ingredient-log-load-more': POS.loadIngredientLogData(true); break;
         case 'view-log-trx': POS.viewLogTransaction(Number(btn.dataset.id), btn); break;
-        case 'edit-item-price': POS.editItemPrice(Number(btn.dataset.id)); break;
         // FIX: close-success-popup handler properly resets all locks
         case 'close-success-popup': POS.closeSuccessPopup(); break;
         case 'print-receipt-close': POS.printReceiptAndClose(); break;
@@ -1404,7 +1403,7 @@ const POS = {
         <div class="flex items-center justify-between p-3 border-b">
           <div>
             <div class="fw-600">${escapeHtml(h.label)}</div>
-            <div class="text-xs text-muted">${h.cart.reduce((s,c)=>s+c.quantity,0)} pcs · ${formatRupiah(h.cart.reduce((s,c)=>s+((c.customPrice??c.price)+(c.toppings||[]).reduce((ts,t)=>ts+t.price,0))*c.quantity,0))}</div>
+            <div class="text-xs text-muted">${h.cart.reduce((s,c)=>s+c.quantity,0)} pcs · ${formatRupiah(h.cart.reduce((s,c)=>s+(c.price+(c.toppings||[]).reduce((ts,t)=>ts+t.price,0))*c.quantity,0))}</div>
           </div>
           <div class="flex gap-2">
             <button class="btn btn-primary btn-sm" data-action="resume-cart" data-index="${i}">Ambil</button>
@@ -1500,9 +1499,8 @@ const POS = {
 
     itemsEl.innerHTML = this.cart.map(item => {
       const toppingTotal = (item.toppings || []).reduce((s, t) => s + t.price, 0);
-      const basePrice    = item.customPrice ?? item.price;
+      const basePrice    = item.price;
       const effPrice     = basePrice + toppingTotal;
-      const isCustom     = item.customPrice != null;
       const toppingHtml  = item.toppings?.length
         ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${item.toppings.map(t => escapeHtml(t.name) + (t.price > 0 ? ' (+' + formatRupiah(t.price) + ')' : '')).join(', ')}</div>`
         : '';
@@ -1513,10 +1511,7 @@ const POS = {
           <div class="cart-item-variant">${escapeHtml(item.variantName)}</div>
           ${toppingHtml}
           <div class="cart-item-price" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px">
-            <button class="cart-price-btn" data-action="edit-item-price" data-id="${item.cartItemId}" title="Ubah harga">
-              ${formatRupiah(effPrice)}<i data-lucide="pencil" style="width:10px;height:10px;margin-left:3px;opacity:.6;"></i>
-            </button>
-            ${isCustom ? `<span style="font-size:9px;background:var(--warning-bg);color:var(--warning);padding:1px 5px;border-radius:4px;font-weight:700;">Custom</span>` : ''}
+            <span class="cart-price-static">${formatRupiah(effPrice)}</span>
           </div>
         </div>
         <div class="cart-item-qty">
@@ -1547,7 +1542,7 @@ const POS = {
 
   cartSubtotal() {
     return this.cart.reduce((s, i) => {
-      const base         = i.customPrice ?? i.price;
+      const base         = i.price;
       const toppingTotal = (i.toppings || []).reduce((ts, t) => ts + t.price, 0);
       return s + (base + toppingTotal) * i.quantity;
     }, 0);
@@ -2834,9 +2829,9 @@ const POS = {
 
     document.getElementById('payment-items-summary').innerHTML = this.cart.map(i => {
       const toppingTotal = (i.toppings || []).reduce((s, t) => s + t.price, 0);
-      const ep = (i.customPrice ?? i.price) + toppingTotal;
+      const ep = i.price + toppingTotal;
       const toppingLabel = i.toppings?.length ? ` <span style="font-size:10px;color:var(--text-muted);">[${i.toppings.map(t=>escapeHtml(t.name)).join(', ')}]</span>` : '';
-      const customLabel  = i.customPrice != null ? ' <span style="font-size:10px;color:var(--warning);font-weight:700;">[custom]</span>' : '';
+      const customLabel  = '';
       return `<div class="payment-summary-row">
         <span>${escapeHtml(i.productName)} (${escapeHtml(i.variantName)}) ×${i.quantity}${toppingLabel}${customLabel}</span>
         <span>${formatRupiah(ep * i.quantity)}</span>
@@ -3132,7 +3127,7 @@ const POS = {
         const toppingNote  = i.toppings?.length ? ` [${i.toppings.map(t=>t.name).join(', ')}]` : '';
         return {
           ...i,
-          price:    (i.customPrice ?? i.price) + toppingTotal,
+          price:    i.price + toppingTotal,
           variantName: i.variantName + toppingNote
         };
       });
@@ -3282,7 +3277,7 @@ const POS = {
       <div class="receipt-divider"></div>
       ${cart.map(i=>{
         const toppingTotal = (i.toppings||[]).reduce((s,t)=>s+t.price,0);
-        const ep = (i.customPrice ?? i.price) + toppingTotal;
+        const ep = i.price + toppingTotal;
         return `
         <div class="receipt-item-row"><span class="receipt-item-name">${escapeHtml(i.productName)} ${escapeHtml(i.variantName)}</span></div>
         ${(i.toppings||[]).length ? `<div class="receipt-item-row" style="padding-left:8px;font-size:10px;color:#777"><span>Topping: ${i.toppings.map(t=>escapeHtml(t.name)+(t.price>0?' (+'+formatRupiah(t.price)+')':'')).join(', ')}</span></div>` : ''}

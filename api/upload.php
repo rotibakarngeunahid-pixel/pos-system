@@ -36,7 +36,7 @@ if (function_exists('isOriginAllowed') && isOriginAllowed($origin)) {
 }
 // Jika origin tidak diizinkan, tidak kirim CORS header — browser akan menolak otomatis.
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
+header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Session-Token');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
@@ -55,12 +55,54 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+function uploadSessionUser(): ?array {
+    $token = trim((string)($_SERVER['HTTP_X_SESSION_TOKEN'] ?? ''));
+    if ($token === '' || strlen($token) < 32 || strlen($token) > 256) return null;
+    $hash = hash('sha256', $token);
+    try {
+        $pdo = getDB();
+        $stmt = $pdo->prepare("
+            SELECT u.id,u.name,u.role,u.branch_id
+            FROM app_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+              AND s.expires_at > NOW()
+              AND COALESCE(u.is_active,1)=1
+            LIMIT 1
+        ");
+        $stmt->execute([$hash]);
+        $row = $stmt->fetch();
+        if (!$row) return null;
+        $pdo->prepare("UPDATE app_sessions SET last_seen_at = NOW() WHERE token_hash = ?")->execute([$hash]);
+        return [
+            'id' => (int)$row['id'],
+            'name' => $row['name'],
+            'role' => $row['role'],
+            'branch_id' => $row['branch_id'] !== null ? (int)$row['branch_id'] : null,
+        ];
+    } catch (Throwable) {
+        return null;
+    }
+}
+
 // ── Validasi folder ───────────────────────────────────────────────────────────
 $folder = $_POST['folder'] ?? 'products';
 $allowed_folders = ['products', 'qris', 'bukti_setoran'];
 if (!in_array($folder, $allowed_folders, true)) {
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => 'Folder tidak valid']);
+    exit;
+}
+
+$sessionUser = uploadSessionUser();
+if (!$sessionUser) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'error' => 'Session tidak valid atau sudah kedaluwarsa']);
+    exit;
+}
+if (in_array($folder, ['products', 'qris'], true) && !in_array($sessionUser['role'], ['admin', 'owner'], true)) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'Upload folder ini membutuhkan akses admin']);
     exit;
 }
 
@@ -73,6 +115,7 @@ if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
 }
 
 $file = $_FILES['file'];
+$originalExt = strtolower(pathinfo((string)($file['name'] ?? ''), PATHINFO_EXTENSION));
 
 // Batas ukuran: 2MB untuk produk, 5MB untuk qris dan bukti setoran
 $maxSize = ($folder === 'products') ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
@@ -80,8 +123,9 @@ $maxSize = ($folder === 'products') ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
 // Tipe file yang diizinkan per folder
 $isDepositFolder = ($folder === 'bukti_setoran');
 $allowed_types   = $isDepositFolder
-    ? ['image/jpeg', 'image/png', 'application/pdf']
-    : ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    ? ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+    : ['image/jpeg', 'image/png', 'image/webp'];
+$allowed_exts = $isDepositFolder ? ['jpg','jpeg','png','webp','pdf'] : ['jpg','jpeg','png','webp'];
 
 if ($file['size'] > $maxSize) {
     http_response_code(400);
@@ -93,9 +137,14 @@ if ($file['size'] > $maxSize) {
 $finfo    = new finfo(FILEINFO_MIME_TYPE);
 $mimeType = $finfo->file($file['tmp_name']);
 if (!in_array($mimeType, $allowed_types, true)) {
-    $allowed_label = $isDepositFolder ? 'JPG, PNG, atau PDF' : 'JPG, PNG, WEBP, atau GIF';
+    $allowed_label = $isDepositFolder ? 'JPG, PNG, WEBP, atau PDF' : 'JPG, PNG, atau WEBP';
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => 'Tipe file tidak diizinkan. Gunakan ' . $allowed_label . '.']);
+    exit;
+}
+if (!in_array($originalExt, $allowed_exts, true)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'error' => 'Ekstensi file tidak diizinkan']);
     exit;
 }
 
@@ -104,7 +153,6 @@ $extMap = [
     'image/jpeg'      => 'jpg',
     'image/png'       => 'png',
     'image/webp'      => 'webp',
-    'image/gif'       => 'gif',
     'application/pdf' => 'pdf',
 ];
 $ext = $extMap[$mimeType] ?? 'jpg';

@@ -5,6 +5,18 @@
 const API_BASE = 'https://api.rotibakarngeunah.my.id/api/api.php';
 const API_KEY  = 'rbn2026xK9mPqL3vWnHjRtYcBfDsAeUo'; // harus sama persis dengan config.php
 
+function getRbnSessionToken() {
+  try {
+    const raw = localStorage.getItem('rbn_session');
+    if (!raw) return '';
+    const session = JSON.parse(raw);
+    if (session?.expires_at && new Date(session.expires_at) < new Date()) return '';
+    return session?.session_token || '';
+  } catch {
+    return '';
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class QueryBuilder {
@@ -111,6 +123,8 @@ class QueryBuilder {
         'X-API-Key':    API_KEY,
       },
     };
+    const sessionToken = getRbnSessionToken();
+    if (sessionToken) opts.headers['X-Session-Token'] = sessionToken;
     if (this._body !== null) opts.body = JSON.stringify(this._body);
 
     try {
@@ -143,10 +157,17 @@ const db = {
 
   async rpc(name, params = {}) {
     try {
+      const sessionToken = getRbnSessionToken();
+      const body = { ...params };
+      if (sessionToken && !body.p_session_token) body.p_session_token = sessionToken;
       const res  = await fetch(`${API_BASE}/rpc/${name}`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
-        body:    JSON.stringify(params),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY,
+          ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+        },
+        body:    JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) {

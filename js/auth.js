@@ -91,6 +91,12 @@ const auth = {
 
   // ── Logout ───────────────────────────────────────────────
   logout() {
+    try {
+      const s = this.getSession();
+      if (s?.session_token && typeof db !== 'undefined') {
+        db.rpc('rbn_logout', { p_session_token: s.session_token }).catch(() => {});
+      }
+    } catch { /* ignore logout network errors */ }
     this.clearSession();
     window.location.href = 'index.html';
   },

@@ -9,12 +9,25 @@ ob_start();
 
 require_once __DIR__ . '/config.php';
 
+class ApiHttpException extends Exception {
+    public int $status;
+    public string $apiCode;
+
+    public function __construct(int $status, string $message, string $apiCode = 'ERROR') {
+        parent::__construct($message);
+        $this->status = $status;
+        $this->apiCode = $apiCode;
+    }
+}
+
 // Handler error global — semua PHP error → JSON
 set_exception_handler(function(Throwable $e) {
     ob_clean();
-    http_response_code(500);
+    $status = ($e instanceof ApiHttpException) ? $e->status : 500;
+    $code   = ($e instanceof ApiHttpException) ? $e->apiCode : 'SERVER_ERROR';
+    http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['error' => ['message' => $e->getMessage(), 'code' => '500', 'file' => basename($e->getFile()), 'line' => $e->getLine()]]);
+    echo json_encode(['error' => ['message' => $status >= 500 ? 'Terjadi kesalahan server' : $e->getMessage(), 'code' => $code]]);
     exit;
 });
 set_error_handler(function(int $errno, string $errstr) {
@@ -29,7 +42,7 @@ if (isOriginAllowed($origin)) {
 }
 // Jika origin tidak diizinkan, tidak kirim CORS header — browser akan menolak otomatis.
 header('Access-Control-Allow-Methods: GET, POST, PATCH, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-Key, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Session-Token, Authorization');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
@@ -48,7 +61,9 @@ $method  = $_SERVER['REQUEST_METHOD'];
 $uri     = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri     = rtrim(preg_replace('#^.*?/api\.php#', '', $uri), '/');
 $parts   = array_values(array_filter(explode('/', $uri)));
-$body    = json_decode(file_get_contents('php://input'), true) ?? [];
+$rawBody = file_get_contents('php://input');
+$body    = $rawBody !== '' ? json_decode($rawBody, true) : [];
+if (!is_array($body)) $body = [];
 $params  = parseQueryParamsPreserveDots($_SERVER['QUERY_STRING'] ?? '');
 
 // /rpc/function_name
@@ -76,10 +91,16 @@ $allowedTables = [
     'branch_cash_balances','branch_cash_ledger',
     'cash_branch_transfers','toppings','product_toppings','api_keys',
     'onboarding_assignments','onboarding_step_completions','app_sessions',
-    'cash_session_adjustments','branch_ingredient_assignments',
+    'cash_session_adjustments','branch_ingredient_assignments','audit_logs',
 ];
 if (!in_array($table, $allowedTables, true)) {
     respond(400, ['error' => ['message' => "Tabel '$table' tidak diizinkan"]]);
+}
+
+try {
+    [$params, $body] = authorizeTableRequest($table, $method, $params, $body);
+} catch (ApiHttpException $e) {
+    respond($e->status, ['error' => ['message' => $e->getMessage(), 'code' => $e->apiCode]]);
 }
 
 switch ($method) {
@@ -94,6 +115,353 @@ switch ($method) {
 // ══════════════════════════════════════════════════════════════════════════════
 // TABLE CRUD HANDLERS
 // ══════════════════════════════════════════════════════════════════════════════
+
+function denyHttp(int $status, string $message, string $code = 'FORBIDDEN'): void {
+    throw new ApiHttpException($status, $message, $code);
+}
+
+function requestIp(): string {
+    $forwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+    if ($forwarded) {
+        $first = trim(explode(',', $forwarded)[0]);
+        if ($first !== '') return substr($first, 0, 45);
+    }
+    return substr((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 0, 45);
+}
+
+function requestSessionToken(array $params = []): string {
+    $token = trim((string)($_SERVER['HTTP_X_SESSION_TOKEN'] ?? ''));
+    if ($token === '') $token = trim((string)($params['p_session_token'] ?? $params['session_token'] ?? ''));
+    $auth = trim((string)($_SERVER['HTTP_AUTHORIZATION'] ?? ''));
+    if ($token === '' && str_starts_with(strtolower($auth), 'session ')) {
+        $token = trim(substr($auth, 8));
+    }
+    return $token;
+}
+
+function currentSessionUser(array $params = []): ?array {
+    static $cache = [];
+    $token = requestSessionToken($params);
+    if ($token === '' || strlen($token) < 32 || strlen($token) > 256) return null;
+
+    $hash = hash('sha256', $token);
+    if (array_key_exists($hash, $cache)) return $cache[$hash];
+
+    $pdo = getDB();
+    $stmt = $pdo->prepare("
+        SELECT u.id,u.name,u.role,u.branch_id,u.is_active,s.expires_at
+        FROM app_sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = ?
+          AND s.expires_at > NOW()
+          AND COALESCE(u.is_active,1)=1
+        LIMIT 1
+    ");
+    $stmt->execute([$hash]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        $cache[$hash] = null;
+        return null;
+    }
+
+    try { $pdo->prepare("UPDATE app_sessions SET last_seen_at = NOW() WHERE token_hash = ?")->execute([$hash]); } catch (Throwable) {}
+    $cache[$hash] = [
+        'id'        => (int)$row['id'],
+        'name'      => $row['name'],
+        'role'      => $row['role'],
+        'branch_id' => $row['branch_id'] !== null ? (int)$row['branch_id'] : null,
+        'is_active' => (bool)(int)($row['is_active'] ?? 1),
+    ];
+    return $cache[$hash];
+}
+
+function requireSessionUser(array $params = [], ?array $roles = null): array {
+    $user = currentSessionUser($params);
+    if (!$user) denyHttp(401, 'Session tidak valid atau sudah kedaluwarsa', 'SESSION_INVALID');
+    if ($roles && !in_array($user['role'], $roles, true)) {
+        denyHttp(403, 'Akses ditolak', 'FORBIDDEN');
+    }
+    return $user;
+}
+
+function isAdminUser(array $user): bool {
+    return in_array($user['role'] ?? '', ['admin','owner'], true);
+}
+
+function userCanAccessBranch(array $user, int $branchId): bool {
+    if (!$branchId) return false;
+    if (isAdminUser($user)) return true;
+    if (($user['role'] ?? '') === 'staff') {
+        return empty($user['branch_id']) || (int)$user['branch_id'] === $branchId;
+    }
+    return false;
+}
+
+function requireBranchAccess(array $user, int $branchId): void {
+    if (!userCanAccessBranch($user, $branchId)) {
+        denyHttp(403, 'Anda tidak memiliki akses ke cabang ini', 'BRANCH_FORBIDDEN');
+    }
+}
+
+function extractEqParam(array $params, string $column): mixed {
+    if (!array_key_exists($column, $params)) return null;
+    $expr = is_array($params[$column]) ? ($params[$column][0] ?? null) : $params[$column];
+    if (!is_string($expr) || !str_starts_with($expr, 'eq.')) return null;
+    return substr($expr, 3);
+}
+
+function forceEqParam(array $params, string $column, int|string $value): array {
+    $expected = (string)$value;
+    if (array_key_exists($column, $params)) {
+        $exprs = is_array($params[$column]) ? $params[$column] : [$params[$column]];
+        foreach ($exprs as $expr) {
+            if (!is_string($expr) || !str_starts_with($expr, 'eq.') || (string)normalizeSqlValue(substr($expr, 3)) !== $expected) {
+                denyHttp(403, 'Filter akses tidak valid', 'SCOPE_FORBIDDEN');
+            }
+        }
+    }
+    $params[$column] = 'eq.' . $expected;
+    return $params;
+}
+
+function rateLimitAction(string $action, int $limit, int $windowSeconds, ?string $identity = null): void {
+    try {
+        $pdo = getDB();
+        if (!dbColumnExists($pdo, 'api_rate_limits', 'action_key')) return;
+        $identity = substr($identity ?: requestIp(), 0, 128);
+        $action   = substr($action, 0, 80);
+        $since    = date('Y-m-d H:i:s', time() - $windowSeconds);
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM api_rate_limits
+            WHERE action_key = ? AND identity_key = ? AND created_at >= ?
+        ");
+        $stmt->execute([$action, $identity, $since]);
+        if ((int)$stmt->fetchColumn() >= $limit) {
+            denyHttp(429, 'Terlalu banyak request. Coba lagi beberapa saat.', 'RATE_LIMITED');
+        }
+        $pdo->prepare("INSERT INTO api_rate_limits (action_key,identity_key,ip_address) VALUES (?,?,?)")
+            ->execute([$action, $identity, requestIp()]);
+        if (mt_rand(1, 50) === 1) {
+            $pdo->exec("DELETE FROM api_rate_limits WHERE created_at < DATE_SUB(NOW(), INTERVAL 1 DAY) LIMIT 1000");
+        }
+    } catch (ApiHttpException $e) {
+        throw $e;
+    } catch (Throwable) {
+        // Rate limit table is added by migration 061; older DBs should keep running.
+    }
+}
+
+function auditLog(?array $user, string $action, ?string $tableName = null, mixed $oldData = null, mixed $newData = null, ?int $branchId = null): void {
+    try {
+        $pdo = getDB();
+        if (!dbColumnExists($pdo, 'audit_logs', 'action')) return;
+        $stmt = $pdo->prepare("
+            INSERT INTO audit_logs
+              (user_id,user_name,user_role,branch_id,action,table_name,old_data,new_data,ip_address,user_agent)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        ");
+        $stmt->execute([
+            $user['id'] ?? null,
+            $user['name'] ?? null,
+            $user['role'] ?? null,
+            $branchId,
+            substr($action, 0, 100),
+            $tableName,
+            $oldData === null ? null : json_encode($oldData, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR),
+            $newData === null ? null : json_encode($newData, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR),
+            requestIp(),
+            substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+        ]);
+    } catch (Throwable) {}
+}
+
+function staffReadableTables(): array {
+    return [
+        'branches','products','product_variants','product_categories',
+        'branch_products','branch_variant_prices','payment_methods',
+        'cashier_sessions','transactions','transaction_items',
+        'cash_categories','cash_logs','ingredients','recipes','recipe_items',
+        'branch_inventory','inventory_logs',
+        'deposit_accounts','cash_deposits','branch_cash_balances',
+        'toppings','product_toppings',
+        'branch_ingredient_assignments','users',
+    ];
+}
+
+function investorReadableTables(): array {
+    return ['payment_methods','users'];
+}
+
+function scopeReadParamsForUser(array $user, string $table, array $params): array {
+    if (isAdminUser($user)) return $params;
+    $selectRaw = strtolower((string)($params['select'] ?? ''));
+    if (str_contains($selectRaw, 'password') || str_contains($selectRaw, 'token_hash') || str_contains($selectRaw, 'key_value')) {
+        denyHttp(403, 'Kolom sensitif tidak boleh diakses', 'COLUMN_FORBIDDEN');
+    }
+
+    if ($user['role'] === 'investor') {
+        if (!in_array($table, investorReadableTables(), true)) denyHttp(403, 'Akses tabel ditolak', 'TABLE_FORBIDDEN');
+        if ($table === 'users') return forceEqParam($params, 'id', (int)$user['id']);
+        return $params;
+    }
+
+    if ($user['role'] !== 'staff' || !in_array($table, staffReadableTables(), true)) {
+        denyHttp(403, 'Akses tabel ditolak', 'TABLE_FORBIDDEN');
+    }
+
+    if ($table === 'users') {
+        $select = strtolower((string)($params['select'] ?? ''));
+        if ($select === '*' || str_contains($select, 'password')) {
+            denyHttp(403, 'Kolom user sensitif tidak boleh diakses', 'COLUMN_FORBIDDEN');
+        }
+        return forceEqParam($params, 'id', (int)$user['id']);
+    }
+
+    if ($table === 'transaction_items' && !empty($user['branch_id'])) {
+        $txId = extractEqParam($params, 'transaction_id');
+        if (!$txId) denyHttp(403, 'Filter transaksi wajib diisi', 'SCOPE_REQUIRED');
+        $pdo = getDB();
+        $stmt = $pdo->prepare("SELECT branch_id FROM transactions WHERE id=? LIMIT 1");
+        $stmt->execute([(int)$txId]);
+        $branchId = (int)($stmt->fetchColumn() ?: 0);
+        requireBranchAccess($user, $branchId);
+        return $params;
+    }
+
+    $branchScoped = [
+        'branch_products','branch_variant_prices','cashier_sessions','transactions',
+        'cash_logs','branch_inventory','inventory_logs','cash_deposits',
+        'branch_cash_balances',
+    ];
+    if (!empty($user['branch_id']) && in_array($table, $branchScoped, true) && dbColumnExists(getDB(), $table, 'branch_id')) {
+        $params = forceEqParam($params, 'branch_id', (int)$user['branch_id']);
+    }
+
+    return $params;
+}
+
+function sanitizeUserSelectParams(array $params): array {
+    $select = trim((string)($params['select'] ?? '*'));
+    $lower = strtolower($select);
+    if ($lower === '*' || $lower === '') {
+        $params['select'] = 'id,name,role,branch_id,is_active,onboarding_status,created_at,deleted_at';
+    } elseif (str_contains($lower, 'password')) {
+        denyHttp(403, 'Kolom password tidak boleh diakses via API', 'COLUMN_FORBIDDEN');
+    }
+    return $params;
+}
+
+function validateCashLogWrite(array $user, string $method, array $params, array $body): array {
+    $pdo = getDB();
+    if ($method === 'POST') {
+        $rows = isset($body[0]) ? $body : [$body];
+        foreach ($rows as &$row) {
+            if (!is_array($row)) denyHttp(400, 'Payload kas tidak valid', 'VALIDATION_ERROR');
+            $branchId = (int)($row['branch_id'] ?? 0);
+            requireBranchAccess($user, $branchId);
+            $amount = (float)($row['amount'] ?? 0);
+            if ($amount <= 0 || $amount > 100000000) denyHttp(400, 'Nominal kas tidak valid', 'VALIDATION_ERROR');
+            if (!in_array($row['type'] ?? '', ['in','out'], true)) denyHttp(400, 'Tipe kas tidak valid', 'VALIDATION_ERROR');
+
+            if (!isAdminUser($user)) {
+                $row['created_by'] = (int)$user['id'];
+                $row['reference_type'] = $row['reference_type'] ?? 'manual';
+                if (!in_array($row['reference_type'], ['manual', null, ''], true)) {
+                    denyHttp(403, 'Staff hanya boleh membuat kas manual', 'FORBIDDEN');
+                }
+                unset($row['is_void'], $row['void_reason'], $row['void_by'], $row['void_at']);
+            }
+
+            if (!empty($row['session_id'])) {
+                $sess = $pdo->prepare("SELECT branch_id,staff_id,status FROM cashier_sessions WHERE id=? LIMIT 1");
+                $sess->execute([(int)$row['session_id']]);
+                $s = $sess->fetch();
+                if (!$s || (int)$s['branch_id'] !== $branchId || $s['status'] !== 'open') {
+                    denyHttp(400, 'Session kas tidak valid', 'VALIDATION_ERROR');
+                }
+                if (!isAdminUser($user) && (int)$s['staff_id'] !== (int)$user['id']) {
+                    denyHttp(403, 'Session kas bukan milik user', 'FORBIDDEN');
+                }
+            }
+        }
+        unset($row);
+        rateLimitAction('cash_log_create', 30, 60, 'user:' . $user['id']);
+        return isset($body[0]) ? $rows : $rows[0];
+    }
+
+    if ($method === 'PATCH') {
+        $id = extractEqParam($params, 'id');
+        if (!$id) denyHttp(400, 'Update kas wajib pakai id', 'VALIDATION_ERROR');
+        $stmt = $pdo->prepare("SELECT * FROM cash_logs WHERE id=? LIMIT 1");
+        $stmt->execute([(int)$id]);
+        $old = $stmt->fetch();
+        if (!$old) denyHttp(404, 'Log kas tidak ditemukan', 'NOT_FOUND');
+        requireBranchAccess($user, (int)$old['branch_id']);
+
+        if (!isAdminUser($user)) {
+            $allowed = ['is_void','void_reason','void_by','void_at'];
+            foreach (array_keys($body) as $key) {
+                if (!in_array($key, $allowed, true)) denyHttp(403, 'Staff hanya boleh void kas manual', 'FORBIDDEN');
+            }
+            if ((int)($old['is_void'] ?? 0) === 1) denyHttp(400, 'Log kas sudah di-void', 'VALIDATION_ERROR');
+            if (!in_array($old['reference_type'] ?? 'manual', ['manual', null, ''], true)) {
+                denyHttp(403, 'Staff tidak boleh void log sistem', 'FORBIDDEN');
+            }
+            if ((int)($old['created_by'] ?? 0) !== (int)$user['id']) {
+                denyHttp(403, 'Staff hanya boleh void kas yang dibuat sendiri', 'FORBIDDEN');
+            }
+            $reason = trim((string)($body['void_reason'] ?? ''));
+            if (strlen($reason) < 3) denyHttp(400, 'Alasan void wajib diisi', 'VALIDATION_ERROR');
+            $body = [
+                'is_void' => 1,
+                'void_reason' => $reason,
+                'void_by' => (int)$user['id'],
+                'void_at' => date('Y-m-d H:i:s'),
+            ];
+        }
+        auditLog($user, 'cash_log_update', 'cash_logs', $old, $body, (int)$old['branch_id']);
+        rateLimitAction('cash_log_update', 30, 60, 'user:' . $user['id']);
+        return $body;
+    }
+
+    denyHttp(403, 'Metode kas tidak diizinkan', 'FORBIDDEN');
+}
+
+function authorizeTableRequest(string $table, string $method, array $params, array $body): array {
+    $user = requireSessionUser($params);
+
+    if ($table === 'app_sessions') {
+        denyHttp(403, 'Tabel session tidak boleh diakses langsung', 'TABLE_FORBIDDEN');
+    }
+    if ($table === 'users') {
+        $params = sanitizeUserSelectParams($params);
+    }
+
+    if ($method === 'GET') {
+        return [scopeReadParamsForUser($user, $table, $params), $body];
+    }
+
+    if ($table === 'audit_logs') {
+        denyHttp(403, 'Tabel sistem tidak boleh diubah langsung', 'TABLE_FORBIDDEN');
+    }
+
+    if (!isAdminUser($user)) {
+        if ($user['role'] === 'staff' && $table === 'cash_logs' && in_array($method, ['POST','PATCH'], true)) {
+            return [$params, validateCashLogWrite($user, $method, $params, $body)];
+        }
+        denyHttp(403, 'Aksi ini membutuhkan akses admin', 'FORBIDDEN');
+    }
+
+    $sensitiveActions = [
+        'POST' => 'insert',
+        'PUT' => 'upsert',
+        'PATCH' => 'update',
+        'DELETE' => 'delete',
+    ];
+    rateLimitAction('table_' . strtolower($method) . '_' . $table, 60, 60, 'user:' . $user['id']);
+    auditLog($user, $table . '_' . ($sensitiveActions[$method] ?? strtolower($method)), $table, null, $body, null);
+    return [$params, $body];
+}
 
 function handleSelect(string $table, array $params): void {
     try {
@@ -135,7 +503,7 @@ function handleSelect(string $table, array $params): void {
             respond(200, $rows);
         }
     } catch (Throwable $e) {
-        respond(500, ['error' => ['message' => $e->getMessage(), 'code' => 'DB_ERROR']]);
+        respond(500, ['error' => ['message' => 'Terjadi kesalahan database', 'code' => 'DB_ERROR']]);
     }
 }
 
@@ -164,7 +532,7 @@ function handleInsert(string $table, array $body, array $params): void {
     $wantSelect = isset($params['select']) || isset($params['_single']);
     respond(201, $wantSelect ? (count($inserted) === 1 ? $inserted[0] : $inserted) : $inserted);
     } catch (Throwable $e) {
-        respond(500, ['error' => ['message' => $e->getMessage(), 'code' => 'DB_ERROR']]);
+        respond(500, ['error' => ['message' => 'Terjadi kesalahan database', 'code' => 'DB_ERROR']]);
     }
 }
 
@@ -194,7 +562,7 @@ function handleUpdate(string $table, array $body, array $params): void {
     }
     respond(200, ['updated' => $stmt->rowCount()]);
     } catch (Throwable $e) {
-        respond(500, ['error' => ['message' => $e->getMessage(), 'code' => 'DB_ERROR']]);
+        respond(500, ['error' => ['message' => 'Terjadi kesalahan database', 'code' => 'DB_ERROR']]);
     }
 }
 
@@ -218,7 +586,7 @@ function handleUpsert(string $table, array $body, array $params): void {
     }
     respond(201, ['upserted' => count($rows)]);
     } catch (Throwable $e) {
-        respond(500, ['error' => ['message' => $e->getMessage(), 'code' => 'DB_ERROR']]);
+        respond(500, ['error' => ['message' => 'Terjadi kesalahan database', 'code' => 'DB_ERROR']]);
     }
 }
 
@@ -231,7 +599,7 @@ function handleDelete(string $table, array $params): void {
     $stmt->execute($whereValues);
     respond(200, ['deleted' => $stmt->rowCount()]);
     } catch (Throwable $e) {
-        respond(500, ['error' => ['message' => $e->getMessage(), 'code' => 'DB_ERROR']]);
+        respond(500, ['error' => ['message' => 'Terjadi kesalahan database', 'code' => 'DB_ERROR']]);
     }
 }
 
@@ -795,6 +1163,14 @@ function prepareRow(string $table, array $row): array {
     if (in_array($table, $uuidTables, true) && empty($row['id'])) {
         $row['id'] = uuid4();
     }
+    if ($table === 'users' && isset($row['password']) && trim((string)$row['password']) !== '') {
+        $password = (string)$row['password'];
+        $info = password_get_info($password);
+        $looksCryptHash = str_starts_with($password, '$2') || str_starts_with($password, '$1$') || str_starts_with($password, '$5$') || str_starts_with($password, '$6$');
+        if (($info['algo'] ?? 0) === 0 && !$looksCryptHash) {
+            $row['password'] = password_hash($password, PASSWORD_BCRYPT);
+        }
+    }
     return encodeStructuredColumns($row);
 }
 
@@ -877,20 +1253,113 @@ function respond(int $status, mixed $data, array $extraHeaders = []): void {
 // RPC HANDLERS
 // ══════════════════════════════════════════════════════════════════════════════
 
+function publicRpcNames(): array {
+    return [
+        'pos_login',
+        'rbn_validate_session',
+        'rbn_health',
+        'get_transactions_api',
+        'get_sales_integration',
+        'get_kas_keluar_integration',
+        'get_integration_summary',
+    ];
+}
+
+function adminRpcNames(): array {
+    return [
+        'admin_force_close_branch_cash_session',
+        'admin_set_branch_cash_balance',
+        'get_admin_branch_cash_positions',
+        'get_admin_cash_sessions',
+        'admin_create_manual_deposit',
+        'confirm_deposit',
+        'get_admin_cash_branch_transfers',
+        'admin_save_investor_access',
+        'rbn_admin_list_api_keys',
+        'admin_preview_branch_menu_copy',
+        'admin_copy_branch_menu',
+        'get_all_transfers_admin',
+        'rbn_require_admin_session',
+        'sync_investor_payment_methods',
+    ];
+}
+
+function authorizeRpcRequest(string $name, array $params): array {
+    if (in_array($name, publicRpcNames(), true)) {
+        if ($name === 'pos_login') rateLimitAction('rpc_login', 20, 300, 'ip:' . requestIp());
+        if (str_contains($name, 'integration') || $name === 'get_transactions_api') {
+            rateLimitAction('rpc_integration_' . $name, 120, 60, 'ip:' . requestIp());
+        }
+        return [$params, null];
+    }
+
+    $roles = in_array($name, adminRpcNames(), true) ? ['admin','owner'] : null;
+    $user = requireSessionUser($params, $roles);
+    $params['_auth_user'] = $user;
+    if (($user['role'] ?? '') === 'investor' && !str_starts_with($name, 'investor_')) {
+        denyHttp(403, 'Akses investor tidak diizinkan untuk RPC ini', 'FORBIDDEN');
+    }
+
+    if (isset($params['p_admin_id'])) {
+        if (!isAdminUser($user)) denyHttp(403, 'Akses admin diperlukan', 'FORBIDDEN');
+        $params['p_admin_id'] = (int)$user['id'];
+    }
+    if (isset($params['p_staff_id']) && !isAdminUser($user) && (int)$params['p_staff_id'] !== (int)$user['id']) {
+        denyHttp(403, 'staff_id tidak sesuai session', 'FORBIDDEN');
+    }
+    if (isset($params['p_user_id']) && !isAdminUser($user) && (int)$params['p_user_id'] !== (int)$user['id']) {
+        denyHttp(403, 'user_id tidak sesuai session', 'FORBIDDEN');
+    }
+
+    if (($user['role'] ?? '') !== 'investor') {
+        foreach (['p_branch_id','p_from_branch_id'] as $branchParam) {
+            if (!empty($params[$branchParam])) requireBranchAccess($user, (int)$params[$branchParam]);
+        }
+    }
+
+    $rateRules = [
+        'process_transaction' => [20, 60],
+        'close_cash_session_apply_branch_balance' => [10, 60],
+        'open_cash_session_from_branch_balance' => [10, 60],
+        'create_deposit' => [15, 60],
+        'create_cash_branch_transfer' => [15, 60],
+        'void_transaction' => [20, 60],
+        'refund_transaction' => [20, 60],
+        'adjust_stock_atomic' => [60, 60],
+        'transfer_stock_atomic' => [30, 60],
+    ];
+    if (isset($rateRules[$name])) {
+        [$limit, $window] = $rateRules[$name];
+        rateLimitAction('rpc_' . $name, $limit, $window, 'user:' . $user['id']);
+    }
+
+    return [$params, $user];
+}
+
 function handleRpc(string $name, array $params): void {
     $fn = 'rpc_' . $name;
     if (!function_exists($fn)) {
         respond(404, ['error' => ['message' => "RPC '$name' tidak ditemukan", 'code' => 'PGRST202']]);
     }
     try {
+        [$params, $authUser] = authorizeRpcRequest($name, $params);
         $result = $fn($params);
         respond(200, $result);
+    } catch (ApiHttpException $e) {
+        respond($e->status, ['error' => ['message' => $e->getMessage(), 'code' => $e->apiCode]]);
     } catch (Throwable $e) {
-        respond(400, ['error' => ['message' => $e->getMessage(), 'code' => 'P0001']]);
+        $msg = $e instanceof PDOException ? 'Terjadi kesalahan database' : $e->getMessage();
+        respond(400, ['error' => ['message' => $msg, 'code' => 'P0001']]);
     }
 }
 
 // ── pos_login ─────────────────────────────────────────────────────────────────
+function rpc_rbn_health(array $p): mixed {
+    $pdo = getDB();
+    $stmt = $pdo->query("SELECT 1");
+    return ['success' => ((int)$stmt->fetchColumn()) === 1, 'server_time' => date('c')];
+}
+
 function rpc_pos_login(array $p): mixed {
     $pdo  = getDB();
     $name = trim($p['p_name'] ?? '');
@@ -922,6 +1391,7 @@ function rpc_pos_login(array $p): mixed {
     if (!$user) {
         // Catat percobaan gagal (username tidak ditemukan)
         try { $pdo->prepare("INSERT INTO login_attempts (username,ip_address,success) VALUES (?,?,0)")->execute([$name,$ip]); } catch (Throwable) {}
+        auditLog(null, 'login_failed', 'users', null, ['username'=>$name,'reason'=>'not_found'], null);
         return null;
     }
 
@@ -940,6 +1410,7 @@ function rpc_pos_login(array $p): mixed {
     if (!$valid) {
         // Catat percobaan gagal
         try { $pdo->prepare("INSERT INTO login_attempts (username,ip_address,success) VALUES (?,?,0)")->execute([$name,$ip]); } catch (Throwable) {}
+        auditLog(['id'=>(int)$user['id'],'name'=>$user['name'],'role'=>$user['role'],'branch_id'=>$user['branch_id'] ?? null], 'login_failed', 'users', null, ['username'=>$name,'reason'=>'bad_password'], $user['branch_id'] ? (int)$user['branch_id'] : null);
         return null;
     }
 
@@ -965,6 +1436,8 @@ function rpc_pos_login(array $p): mixed {
 
     $pdo->prepare("INSERT INTO app_sessions (token_hash, user_id, expires_at) VALUES (?,?,?)")
         ->execute([$tokenHash, $user['id'], $expiresAt]);
+
+    auditLog(['id'=>(int)$user['id'],'name'=>$user['name'],'role'=>$user['role'],'branch_id'=>$user['branch_id'] ?? null], 'login_success', 'users', null, ['session_expires_at'=>$expiresAt], $user['branch_id'] ? (int)$user['branch_id'] : null);
 
     return [
         'id'            => (int)$user['id'],
@@ -1009,6 +1482,18 @@ function rpc_rbn_validate_session(array $p): mixed {
 }
 
 // ── process_transaction ───────────────────────────────────────────────────────
+function rpc_rbn_logout(array $p): mixed {
+    $token = requestSessionToken($p);
+    $user = $p['_auth_user'] ?? currentSessionUser($p);
+    if ($token !== '') {
+        try {
+            getDB()->prepare("DELETE FROM app_sessions WHERE token_hash=?")->execute([hash('sha256', $token)]);
+        } catch (Throwable) {}
+    }
+    auditLog($user, 'logout', 'app_sessions', null, null, $user['branch_id'] ?? null);
+    return ['success' => true];
+}
+
 function transactionItemSignatureList(array $items): array {
     $out = [];
     foreach ($items as $item) {
@@ -1035,6 +1520,130 @@ function transactionCartMatches(PDO $pdo, int $transactionId, array $cart): bool
     return transactionItemSignatureList($stmt->fetchAll()) === transactionItemSignatureList($cart);
 }
 
+function normalizePaymentMethod(PDO $pdo, string $paymentMethod): string {
+    $code = strtolower(trim($paymentMethod));
+    if ($code === '') throw new Exception('Metode pembayaran wajib diisi');
+    if (!preg_match('/^[a-z0-9_\-]{2,50}$/', $code)) throw new Exception('Metode pembayaran tidak valid');
+
+    try {
+        $stmt = $pdo->prepare("SELECT code FROM payment_methods WHERE LOWER(code)=? AND COALESCE(is_active,1)=1 LIMIT 1");
+        $stmt->execute([$code]);
+        $dbCode = $stmt->fetchColumn();
+        if ($dbCode) return strtolower((string)$dbCode);
+    } catch (Throwable) {}
+
+    $fallback = ['cash','qris','gofood','grabfood','shopeefood','qpon','transfer','bca','mandiri','bni','bri','gopay','ovo','dana','shopeepay'];
+    if (in_array($code, $fallback, true)) return $code;
+    throw new Exception('Metode pembayaran tidak terdaftar atau tidak aktif');
+}
+
+function normalizeClientTxId(?string $clientTxId): ?string {
+    $clientTxId = trim((string)$clientTxId);
+    if ($clientTxId === '') return null;
+    if (strlen($clientTxId) > 100 || !preg_match('/^[A-Za-z0-9._:-]+$/', $clientTxId)) {
+        throw new Exception('client_tx_id tidak valid');
+    }
+    return $clientTxId;
+}
+
+function resolveTransactionCartFromDb(PDO $pdo, int $branchId, array $cart): array {
+    $normalized = [];
+    $subtotal = 0.0;
+
+    foreach ($cart as $item) {
+        if (!is_array($item)) throw new Exception('Item transaksi tidak valid');
+        $productId = (int)($item['product_id'] ?? $item['productId'] ?? 0);
+        $variantId = !empty($item['variant_id'] ?? $item['variantId'] ?? null) ? (int)($item['variant_id'] ?? $item['variantId']) : null;
+        $qty = (int)($item['quantity'] ?? 1);
+        if ($productId <= 0) throw new Exception('Produk transaksi tidak valid');
+        if ($qty <= 0 || $qty > 999) throw new Exception('Qty item transaksi tidak valid');
+
+        $prodStmt = $pdo->prepare("
+            SELECT p.id,p.name,p.price,p.default_price,p.has_variants,p.is_active,
+                   bp.id AS branch_product_id, bp.is_active AS branch_is_active
+            FROM products p
+            LEFT JOIN branch_products bp ON bp.product_id = p.id AND bp.branch_id = ?
+            WHERE p.id = ?
+            LIMIT 1
+        ");
+        $prodStmt->execute([$branchId, $productId]);
+        $product = $prodStmt->fetch();
+        if (!$product || (int)($product['is_active'] ?? 1) !== 1) throw new Exception('Produk tidak aktif atau tidak ditemukan');
+        if (empty($product['branch_product_id']) || (int)($product['branch_is_active'] ?? 0) !== 1) {
+            throw new Exception('Produk tidak aktif untuk cabang ini');
+        }
+
+        $productName = $product['name'];
+        $variantName = null;
+        $basePrice = $product['default_price'] !== null ? (float)$product['default_price'] : (float)$product['price'];
+
+        if ($variantId) {
+            $varStmt = $pdo->prepare("
+                SELECT v.id,v.name,v.price,v.is_active,COALESCE(bvp.price, v.price) AS effective_price
+                FROM product_variants v
+                LEFT JOIN branch_variant_prices bvp ON bvp.variant_id = v.id AND bvp.branch_id = ?
+                WHERE v.id = ? AND v.product_id = ?
+                LIMIT 1
+            ");
+            $varStmt->execute([$branchId, $variantId, $productId]);
+            $variant = $varStmt->fetch();
+            if (!$variant || (int)($variant['is_active'] ?? 1) !== 1) throw new Exception('Varian tidak aktif atau tidak ditemukan');
+            $variantName = $variant['name'];
+            $basePrice = (float)$variant['effective_price'];
+        } elseif ((int)($product['has_variants'] ?? 0) === 1) {
+            throw new Exception('Varian produk wajib dipilih');
+        }
+
+        $toppingTotal = 0.0;
+        $toppingNames = [];
+        $toppings = $item['toppings'] ?? [];
+        if (is_array($toppings) && $toppings) {
+            $ids = [];
+            foreach ($toppings as $top) {
+                $tid = is_array($top) ? (int)($top['id'] ?? 0) : (int)$top;
+                if ($tid > 0) $ids[$tid] = $tid;
+            }
+            if ($ids) {
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $topStmt = $pdo->prepare("
+                    SELECT t.id,t.name,t.price
+                    FROM toppings t
+                    JOIN product_toppings pt ON pt.topping_id = t.id
+                    WHERE pt.product_id = ?
+                      AND t.id IN ($placeholders)
+                      AND COALESCE(t.is_active,1)=1
+                ");
+                $topStmt->execute(array_merge([$productId], array_values($ids)));
+                $rows = $topStmt->fetchAll();
+                if (count($rows) !== count($ids)) throw new Exception('Topping tidak valid untuk produk ini');
+                foreach ($rows as $topRow) {
+                    $toppingTotal += (float)$topRow['price'];
+                    $toppingNames[] = $topRow['name'];
+                }
+            }
+        }
+
+        if ($toppingNames) {
+            $variantName = trim((string)$variantName . ' [' . implode(', ', $toppingNames) . ']');
+        }
+
+        $linePrice = $basePrice + $toppingTotal;
+        if ($linePrice < 0) throw new Exception('Harga item tidak valid');
+        $lineSubtotal = $linePrice * $qty;
+        $normalized[] = [
+            'product_id'   => $productId,
+            'variant_id'   => $variantId,
+            'product_name' => $productName,
+            'variant_name' => $variantName,
+            'quantity'     => $qty,
+            'price'        => $linePrice,
+        ];
+        $subtotal += $lineSubtotal;
+    }
+
+    return [$normalized, $subtotal];
+}
+
 function rpc_process_transaction(array $p): mixed {
     $pdo = getDB();
     $pdo->beginTransaction();
@@ -1049,13 +1658,19 @@ function rpc_process_transaction(array $p): mixed {
         $taxAmount     = (float)($p['p_tax_amount']      ?? 0);
         $feeAmount     = (float)($p['p_fee_amount']      ?? 0);
         $notes         = $p['p_notes']          ?? null;
-        $clientTxId    = $p['p_client_tx_id']   ?? null;
+        $clientTxId    = normalizeClientTxId($p['p_client_tx_id']   ?? null);
+        $authUser      = $p['_auth_user'] ?? null;
 
         if (!is_array($cart) || !$cart || !$branchId || !$staffId || !$paymentMethod)
             throw new Exception('Parameter transaksi tidak lengkap');
         if ($discountAmount < 0 || $taxAmount < 0 || $feeAmount < 0 || $paymentAmount < 0) {
             throw new Exception('Nominal transaksi tidak boleh negatif');
         }
+        if ($authUser && !isAdminUser($authUser)) {
+            if ((int)$authUser['id'] !== $staffId) throw new Exception('staff_id tidak sesuai session');
+            requireBranchAccess($authUser, $branchId);
+        }
+        $paymentMethod = normalizePaymentMethod($pdo, (string)$paymentMethod);
 
         // Wajib ada sesi kas yang masih aktif untuk staff + outlet yang sama.
         if (!$sessionId) {
@@ -1083,28 +1698,8 @@ function rpc_process_transaction(array $p): mixed {
             if ($existing) { $pdo->rollBack(); return $existing; }
         }
 
-        // Calculate totals and normalize cart keys from both frontend styles.
-        $subtotal = 0;
-        $normalizedCart = [];
-        foreach ($cart as $item) {
-            if (!is_array($item)) throw new Exception('Item transaksi tidak valid');
-            $qty   = (int)($item['quantity'] ?? 1);
-            $price = (float)($item['price'] ?? 0);
-            if ($qty <= 0) throw new Exception('Qty item transaksi harus lebih dari 0');
-            if ($price < 0) throw new Exception('Harga item transaksi tidak boleh negatif');
-
-            $row = [
-                'product_id'   => $item['product_id']   ?? $item['productId']   ?? null,
-                'variant_id'   => $item['variant_id']   ?? $item['variantId']   ?? null,
-                'product_name' => $item['product_name'] ?? $item['productName'] ?? null,
-                'variant_name' => $item['variant_name'] ?? $item['variantName'] ?? null,
-                'quantity'     => $qty,
-                'price'        => $price,
-            ];
-            $normalizedCart[] = $row;
-            $subtotal += $price * $qty;
-        }
-        $cart = $normalizedCart;
+        // Hitung ulang cart dari database. Harga/nama/subtotal dari frontend diabaikan.
+        [$cart, $subtotal] = resolveTransactionCartFromDb($pdo, $branchId, $cart);
         if ($discountAmount > $subtotal) throw new Exception('Diskon tidak boleh melebihi subtotal');
         $total        = $subtotal - $discountAmount + $taxAmount + $feeAmount;
         if ($total < 0) throw new Exception('Total transaksi tidak boleh negatif');
@@ -1149,11 +1744,21 @@ function rpc_process_transaction(array $p): mixed {
                notes,status,client_tx_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'completed',?)
         ");
-        $stmt->execute([
-            $branchId,$staffId,$sessionId,$paymentMethod,$paymentAmount,
-            $subtotal,$discountAmount,$taxAmount,$feeAmount,$total,$changeAmount,
-            $notes,$clientTxId
-        ]);
+        try {
+            $stmt->execute([
+                $branchId,$staffId,$sessionId,$paymentMethod,$paymentAmount,
+                $subtotal,$discountAmount,$taxAmount,$feeAmount,$total,$changeAmount,
+                $notes,$clientTxId
+            ]);
+        } catch (PDOException $e) {
+            if ($clientTxId && ($e->getCode() === '23000' || str_contains(strtolower($e->getMessage()), 'duplicate'))) {
+                $chk = $pdo->prepare("SELECT id,subtotal,total,payment_amount,change_amount,discount_amount,tax_amount,fee_amount,status,client_tx_id FROM transactions WHERE client_tx_id = ? LIMIT 1");
+                $chk->execute([$clientTxId]);
+                $existing = $chk->fetch();
+                if ($existing) { $pdo->rollBack(); return $existing; }
+            }
+            throw $e;
+        }
         $txId = (int)$pdo->lastInsertId();
 
         // Insert items
@@ -1163,25 +1768,12 @@ function rpc_process_transaction(array $p): mixed {
             VALUES (?,?,?,?,?,?,?,?)
         ");
         foreach ($cart as $item) {
-            $productName = $item['product_name'];
-            // Fallback: if product_name is missing, look it up from products table
-            if (!$productName && !empty($item['product_id'])) {
-                $r = $pdo->prepare("SELECT name FROM products WHERE id = ? LIMIT 1");
-                $r->execute([$item['product_id']]);
-                $productName = $r->fetchColumn() ?: null;
-            }
-            $variantName = $item['variant_name'];
-            if (!$variantName && !empty($item['variant_id'])) {
-                $r = $pdo->prepare("SELECT name FROM product_variants WHERE id = ? LIMIT 1");
-                $r->execute([$item['variant_id']]);
-                $variantName = $r->fetchColumn() ?: null;
-            }
             $itemStmt->execute([
                 $txId,
                 $item['product_id'],
                 $item['variant_id'],
-                $productName,
-                $variantName,
+                $item['product_name'],
+                $item['variant_name'],
                 $item['quantity'], $item['price'], $item['price'] * $item['quantity']
             ]);
         }
@@ -1198,6 +1790,7 @@ function rpc_process_transaction(array $p): mixed {
         }
 
         $pdo->commit();
+        auditLog($authUser, 'transaction_create', 'transactions', null, ['id'=>$txId,'total'=>$total,'payment_method'=>$paymentMethod], $branchId);
         return [
             'id'              => $txId,
             'subtotal'        => $subtotal,
@@ -1347,6 +1940,7 @@ function rpc_open_cash_session_from_branch_balance(array $p): mixed {
     $staffId   = (int)($p['p_staff_id']      ?? 0);
     $physCash  = isset($p['p_physical_cash']) ? (float)$p['p_physical_cash'] : null;
     $varReason = $p['p_variance_reason'] ?? null;
+    $authUser  = $p['_auth_user'] ?? null;
 
     $pdo->beginTransaction();
     try {
@@ -1392,6 +1986,7 @@ function rpc_open_cash_session_from_branch_balance(array $p): mixed {
             'Buka kas dari saldo cabang','cashier_sessions',(string)$sessionId);
 
         $pdo->commit();
+        auditLog($authUser, 'cash_session_open', 'cashier_sessions', null, ['id'=>$sessionId,'opening_cash'=>$openingCash], $branchId);
         return [
             'id'                  => $sessionId,
             'branch_id'           => $branchId,
@@ -1412,6 +2007,7 @@ function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
     $closingCash= (float)($p['p_closing_cash'] ?? 0);
     $staffId    = (int)($p['p_staff_id']    ?? 0);
     $closingNote= trim($p['p_closing_note'] ?? '');
+    $authUser   = $p['_auth_user'] ?? null;
     if (!$sessionId) throw new Exception('session_id wajib diisi');
     if (!$staffId) throw new Exception('staff_id wajib diisi');
     if ($closingCash < 0) throw new Exception('Kas akhir tidak boleh negatif');
@@ -1465,6 +2061,7 @@ function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
             $ledgerNote,'cashier_sessions',(string)$sessionId);
 
         $pdo->commit();
+        auditLog($authUser, 'cash_session_close', 'cashier_sessions', $session, ['closing_cash'=>$closingCash,'expected_cash'=>$expectedCash], $branchId);
         return [
             'id'             => $sessionId,
             'status'         => 'closed',
@@ -1512,6 +2109,7 @@ function rpc_admin_force_close_branch_cash_session(array $p): mixed {
         'p_closing_cash' => $closingCash,
         'p_staff_id'     => $sd['staff_id'],
         'p_closing_note' => $note,
+        '_auth_user'     => $p['_auth_user'] ?? null,
     ]);
 }
 
@@ -2507,6 +3105,8 @@ function rpc_void_transaction(array $p): mixed {
     $txId  = (int)($p['p_transaction_id'] ?? 0);
     $reason= trim($p['p_reason'] ?? '');
     $by    = (int)($p['p_user_id'] ?? $p['p_voided_by'] ?? 0);
+    $authUser = $p['_auth_user'] ?? null;
+    if (!$by && $authUser) $by = (int)$authUser['id'];
     if (!$reason) throw new Exception('Alasan void wajib diisi');
 
     $pdo->beginTransaction();
@@ -2515,6 +3115,12 @@ function rpc_void_transaction(array $p): mixed {
         $tx->execute([$txId]);
         $t = $tx->fetch();
         if (!$t || $t['status'] !== 'completed') throw new Exception('Transaksi tidak ditemukan atau sudah divoid');
+        if ($authUser) requireBranchAccess($authUser, (int)$t['branch_id']);
+        if ($authUser && !isAdminUser($authUser)) {
+            $sess = $pdo->prepare("SELECT id FROM cashier_sessions WHERE id=? AND staff_id=? AND status='open' LIMIT 1");
+            $sess->execute([(int)($t['session_id'] ?? 0), (int)$authUser['id']]);
+            if (!$sess->fetch()) throw new Exception('Staff hanya boleh void transaksi pada shift aktif miliknya');
+        }
 
         // Validasi akses branch: staff hanya boleh void transaksi outlet sendiri
         if ($by) {
@@ -2534,6 +3140,7 @@ function rpc_void_transaction(array $p): mixed {
             ->execute([$reason,$by,$txId]);
 
         $pdo->commit();
+        auditLog($authUser, 'transaction_void', 'transactions', $t, ['reason'=>$reason,'voided_by'=>$by], (int)$t['branch_id']);
         return ['success'=>true,'transaction_id'=>$txId,'status'=>'voided'];
     } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
 }
@@ -2545,6 +3152,8 @@ function rpc_refund_transaction(array $p): mixed {
     $reason = trim($p['p_reason'] ?? '');
     $by     = (int)($p['p_user_id'] ?? $p['p_refunded_by'] ?? 0);
     $refundAmount = isset($p['p_refund_amount']) ? (float)$p['p_refund_amount'] : null;
+    $authUser = $p['_auth_user'] ?? null;
+    if (!$by && $authUser) $by = (int)$authUser['id'];
 
     // Validasi akses branch sebelum membuka transaksi DB
     if ($by) {
@@ -2559,6 +3168,12 @@ function rpc_refund_transaction(array $p): mixed {
         $tx->execute([$txId]);
         $t = $tx->fetch();
         if (!$t || $t['status'] !== 'completed') throw new Exception('Transaksi tidak ditemukan atau tidak bisa direfund');
+        if ($authUser) requireBranchAccess($authUser, (int)$t['branch_id']);
+        if ($authUser && !isAdminUser($authUser)) {
+            $sess = $pdo->prepare("SELECT id FROM cashier_sessions WHERE id=? AND staff_id=? AND status='open' LIMIT 1");
+            $sess->execute([(int)($t['session_id'] ?? 0), (int)$authUser['id']]);
+            if (!$sess->fetch()) throw new Exception('Staff hanya boleh refund transaksi pada shift aktif miliknya');
+        }
 
         // Validasi akses branch: staff hanya boleh refund transaksi outlet sendiri
         if ($by && isset($userRow) && $userRow) {
@@ -2596,6 +3211,7 @@ function rpc_refund_transaction(array $p): mixed {
         }
 
         $pdo->commit();
+        auditLog($authUser, 'transaction_refund', 'transactions', $t, ['reason'=>$reason,'amount'=>$amount,'refunded_by'=>$by], (int)$t['branch_id']);
         return ['success'=>true,'refund_id'=>$refundId,'transaction_id'=>$txId,'status'=>'refunded'];
     } catch (Throwable $e) {
         $pdo->rollBack();
