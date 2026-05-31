@@ -1988,6 +1988,42 @@ body, .body { font-size: 14px; font-weight: 400; }
   color: var(--success);
 }
 
+.manual-cash-position {
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg-alt);
+}
+.manual-cash-position strong {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+}
+.manual-cash-position span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.manual-cash-position.is-warning {
+  border-color: rgba(249, 115, 22, 0.45);
+  background: var(--warning-bg);
+}
+.manual-cash-position.is-warning strong {
+  color: var(--warning);
+}
+.manual-cash-position.is-error {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: var(--danger-bg);
+}
+.manual-cash-position.is-error strong {
+  color: var(--danger);
+}
+
 .manual-proof-group {
   position: relative;
 }

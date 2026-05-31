@@ -230,6 +230,19 @@ const depositService = {
     return this._getEligibleSessionsFallback({ branchId, staffId, limit });
   },
 
+  async getBranchCashPosition({ branchId } = {}) {
+    const normalizedBranchId = Number(branchId);
+    if (!Number.isInteger(normalizedBranchId) || normalizedBranchId <= 0) {
+      throw new Error('Cabang wajib dipilih');
+    }
+
+    const { data, error } = await db.rpc('get_branch_cash_position', {
+      p_branch_id: normalizedBranchId
+    });
+    if (error) throw new Error(error.message || 'Gagal memuat posisi kas outlet');
+    return data || null;
+  },
+
   async _getEligibleSessionsFallback({ branchId, staffId, limit = 10 } = {}) {
     const { data: sessions, error: sessErr } = await db
       .from('cashier_sessions')
@@ -374,11 +387,11 @@ const depositService = {
     return true;
   },
 
-  async createManualDeposit({ adminId, branchId, staffId, sessionId, accountId, amount, proofFile = null, method = null, notes = null }) {
+  async createManualDeposit({ adminId, branchId, staffId = null, sessionId = null, accountId, amount, proofFile = null, method = null, notes = null }) {
     const normalizedAdminId = Number(adminId);
     const normalizedBranchId = Number(branchId);
-    const normalizedStaffId = Number(staffId);
-    const normalizedSessionId = Number(sessionId);
+    const normalizedStaffId = staffId == null || staffId === '' ? null : Number(staffId);
+    const normalizedSessionId = sessionId == null || sessionId === '' ? null : Number(sessionId);
     const normalizedAccountId = String(accountId || '').trim();
     const proofRequired = method ? !this.isCashDepositMethod(method) : false;
 
@@ -389,11 +402,11 @@ const depositService = {
     if (!Number.isInteger(normalizedBranchId) || normalizedBranchId <= 0) {
       throw new Error('Cabang wajib dipilih');
     }
-    if (!Number.isInteger(normalizedStaffId) || normalizedStaffId <= 0) {
-      throw new Error('Staff wajib dipilih');
+    if (normalizedStaffId !== null && (!Number.isInteger(normalizedStaffId) || normalizedStaffId <= 0)) {
+      throw new Error('Staff tidak valid');
     }
-    if (!Number.isInteger(normalizedSessionId) || normalizedSessionId <= 0) {
-      throw new Error('Pilih shift tertutup terlebih dahulu sebelum setoran tunai');
+    if (normalizedSessionId !== null && (!Number.isInteger(normalizedSessionId) || normalizedSessionId <= 0)) {
+      throw new Error('Shift tidak valid');
     }
     if (!normalizedAccountId) throw new Error('Pilih metode setoran terlebih dahulu');
     if (proofRequired && !proofFile) throw new Error('Upload bukti setoran terlebih dahulu.');
@@ -422,7 +435,10 @@ const depositService = {
     if (error) {
       const msg = String(error.message || '').toLowerCase();
       if (error.code === '42883' || msg.includes('function') || msg.includes('does not exist')) {
-        throw new Error('Fitur input manual setoran perlu migrasi terbaru. Jalankan migrasi 030 lalu coba lagi.');
+        throw new Error('Fitur input manual setoran perlu migrasi terbaru. Jalankan migrasi 060 lalu coba lagi.');
+      }
+      if (msg.includes('staff_id') && (msg.includes('null') || msg.includes('cannot be null'))) {
+        throw new Error('Database perlu migrasi 060 agar setoran manual admin tidak wajib staff.');
       }
       throw error;
     }

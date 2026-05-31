@@ -720,11 +720,9 @@ const adminStaffCashUi = {
       return;
     }
 
-    // Prefill branch, staff, dan session_id dari row Sesi Kas.
+    // Prefill cabang saja; setoran manual admin memakai posisi kas outlet.
     depositUi.openManualDepositModal({
-      prefillBranchId: row.branch_id,
-      prefillStaffId: row.staff_id,
-      prefillSessionId: row.session_id
+      prefillBranchId: row.branch_id
     });
   },
 

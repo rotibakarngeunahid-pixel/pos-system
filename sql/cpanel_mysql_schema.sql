@@ -367,10 +367,11 @@ CREATE TABLE IF NOT EXISTS `deposit_accounts` (
 CREATE TABLE IF NOT EXISTS `cash_deposits` (
   `id`                CHAR(36) NOT NULL PRIMARY KEY,
   `branch_id`         BIGINT NOT NULL,
-  `staff_id`          BIGINT NOT NULL,
+  `staff_id`          BIGINT,
   `session_id`        BIGINT,
   `account_id`        CHAR(36),
   `amount`            DECIMAL(15,2) NOT NULL,
+  `cash_balance_at_deposit` DECIMAL(15,2),
   `method`            VARCHAR(50),
   `proof_url`         TEXT,
   `proof_file_name`   VARCHAR(255),

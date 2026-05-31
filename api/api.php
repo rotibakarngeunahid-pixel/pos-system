@@ -1867,23 +1867,87 @@ function rpc_admin_create_manual_deposit(array $p): mixed {
     $pdo      = getDB();
     $adminId  = (int)($p['p_admin_id']  ?? 0);
     $branchId = (int)($p['p_branch_id'] ?? 0);
-    $staffId  = (int)($p['p_staff_id']  ?? 0);
+    $staffId  = !empty($p['p_staff_id']) ? (int)$p['p_staff_id'] : null;
     $sessionId = !empty($p['p_session_id']) ? (int)$p['p_session_id'] : null;
     $accountId = $p['p_deposit_account_id'] ?? $p['p_account_id'] ?? null;
     $amount   = (float)($p['p_amount']  ?? 0);
     $notes    = $p['p_notes'] ?? null;
-    $method   = $p['p_method'] ?? 'cash';
+    $method   = $p['p_method'] ?? null;
     $proofUrl = $p['p_proof_url'] ?? null;
 
     $admin = $pdo->prepare("SELECT role FROM users WHERE id=? LIMIT 1");
     $admin->execute([$adminId]);
     $ar = $admin->fetch();
     if (!$ar || !in_array($ar['role'],['admin','owner'])) throw new Exception('Hanya admin/owner');
+    if (!$branchId) throw new Exception('Cabang wajib dipilih');
+    if (!$accountId) throw new Exception('Metode setoran wajib dipilih');
     if ($amount <= 0) throw new Exception('Nominal setoran harus lebih dari 0');
+    if ((int)round($amount) % 50000 !== 0) throw new Exception('Nominal setoran harus kelipatan Rp 50.000');
 
     $pdo->beginTransaction();
     try {
+        $branchStmt = $pdo->prepare("SELECT id FROM branches WHERE id=? AND COALESCE(is_active,1)=1 LIMIT 1");
+        $branchStmt->execute([$branchId]);
+        if (!$branchStmt->fetch()) throw new Exception('Cabang tidak aktif atau tidak ditemukan');
+
+        $accountStmt = $pdo->prepare("
+            SELECT id, label, type
+            FROM deposit_accounts
+            WHERE id=?
+              AND COALESCE(is_active,1)=1
+              AND (branch_id IS NULL OR branch_id=?)
+            LIMIT 1
+        ");
+        $accountStmt->execute([$accountId, $branchId]);
+        $account = $accountStmt->fetch();
+        if (!$account) throw new Exception('Metode setoran tidak aktif untuk cabang ini');
+        if (is_array($method)) $method = $method['type'] ?? $method['label'] ?? null;
+        if ($method === null || $method === '') $method = $account['type'] ?? 'manual';
+        $method = substr((string)$method, 0, 50);
+
+        if ($sessionId) {
+            $s = $pdo->prepare("SELECT branch_id, staff_id, status FROM cashier_sessions WHERE id=? LIMIT 1");
+            $s->execute([$sessionId]);
+            $sess = $s->fetch();
+            if (!$sess || (int)$sess['branch_id'] !== $branchId || $sess['status'] !== 'closed') {
+                throw new Exception('Shift setoran tidak valid untuk cabang ini');
+            }
+            if ($staffId === null && !empty($sess['staff_id'])) $staffId = (int)$sess['staff_id'];
+        }
+
+        $openStmt = $pdo->prepare("SELECT id FROM cashier_sessions WHERE branch_id=? AND status='open' LIMIT 1");
+        $openStmt->execute([$branchId]);
+        if ($openStmt->fetch()) {
+            throw new Exception('Masih ada shift aktif di outlet ini. Tutup shift terlebih dahulu sebelum setoran manual.');
+        }
+
+        $pendingStmt = $pdo->prepare("
+            SELECT id, amount
+            FROM cash_deposits
+            WHERE branch_id=? AND status='pending'
+            FOR UPDATE
+        ");
+        $pendingStmt->execute([$branchId]);
+        $pendingAmount = 0.0;
+        foreach ($pendingStmt->fetchAll() as $pendingRow) {
+            $pendingAmount += (float)$pendingRow['amount'];
+        }
+
+        $balStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
+        $balStmt->execute([$branchId]);
+        $bal = $balStmt->fetch();
+        $before = $bal ? (float)$bal['current_balance'] : 0.0;
+        $available = max(0.0, $before - $pendingAmount);
+        if ($amount > $available) {
+            throw new Exception(
+                'Saldo kas outlet tidak mencukupi. ' .
+                'Tersedia: Rp ' . number_format($available, 0, ',', '.') .
+                ', nominal setoran: Rp ' . number_format($amount, 0, ',', '.')
+            );
+        }
+
         $id = uuid4();
+        $after = $before - $amount;
         $row = [
             'id' => $id,
             'branch_id' => $branchId,
@@ -1897,6 +1961,7 @@ function rpc_admin_create_manual_deposit(array $p): mixed {
             'reviewed_by' => $adminId,
         ];
         if (dbColumnExists($pdo, 'cash_deposits', 'reviewed_at')) $row['reviewed_at'] = date('Y-m-d H:i:s');
+        if (dbColumnExists($pdo, 'cash_deposits', 'cash_balance_at_deposit')) $row['cash_balance_at_deposit'] = $before;
         $row['account_id'] = $accountId;
         foreach (['proof_file_name','proof_file_type','proof_file_size','proof_uploaded_at'] as $suffix) {
             $param = 'p_' . $suffix;
@@ -1917,25 +1982,23 @@ function rpc_admin_create_manual_deposit(array $p): mixed {
         }
 
         // Kurangi saldo kas outlet
-        $balStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
-        $balStmt->execute([$branchId]);
-        $bal = $balStmt->fetch();
-        if ($bal) {
-            $before = (float)$bal['current_balance'];
-            $after  = max(0, $before - $amount);
-            $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW() WHERE branch_id=?")
-                ->execute([$after,$branchId]);
-            rpcInsertBranchCashLedger($pdo,$branchId,$staffId,$adminId,
-                $sessionId,null,
-                'deposit_approved','out',$amount,$before,$after,
-                'Setoran manual dikonfirmasi admin','cash_deposits',$id);
+        if (!$bal) {
+            $pdo->prepare("INSERT INTO branch_cash_balances (branch_id,current_balance,version,updated_by) VALUES (?,?,1,?)")
+                ->execute([$branchId,$after,$adminId]);
+        } else {
+            $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_by=?,updated_at=NOW() WHERE branch_id=?")
+                ->execute([$after,$adminId,$branchId]);
         }
+        rpcInsertBranchCashLedger($pdo,$branchId,$staffId,$adminId,
+            $sessionId,null,
+            'deposit_approved','out',$amount,$before,$after,
+            'Setoran manual dikonfirmasi admin','cash_deposits',$id);
         if (dbColumnExists($pdo, 'cash_deposits', 'balance_applied_at')) {
             $pdo->prepare("UPDATE cash_deposits SET balance_applied_at=NOW() WHERE id=?")->execute([$id]);
         }
 
         $pdo->commit();
-        return ['id'=>$id,'status'=>'confirmed','amount'=>$amount];
+        return ['id'=>$id,'status'=>'confirmed','amount'=>$amount,'balance_before'=>$before,'balance_after'=>$after];
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
@@ -2010,7 +2073,8 @@ function rpc_confirm_deposit(array $p): mixed {
                 $after  = $before - $depositAmt;
                 $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW() WHERE branch_id=?")
                     ->execute([$after,$deposit['branch_id']]);
-                rpcInsertBranchCashLedger($pdo,(int)$deposit['branch_id'],(int)$deposit['staff_id'],$adminId,
+                $ledgerStaffId = !empty($deposit['staff_id']) ? (int)$deposit['staff_id'] : null;
+                rpcInsertBranchCashLedger($pdo,(int)$deposit['branch_id'],$ledgerStaffId,$adminId,
                     $deposit['session_id'] !== null ? (int)$deposit['session_id'] : null,null,
                     'deposit_approved','out',(float)$deposit['amount'],$before,$after,
                     'Setoran diapprove','cash_deposits',$depositId);

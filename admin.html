@@ -1043,7 +1043,7 @@
         <div class="card" style="margin-top:12px">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>#</th><th>Waktu</th><th>Staff</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas</th><th>Metode</th><th>Catatan</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
+              <thead><tr><th>#</th><th>Waktu</th><th>Staff/Admin</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas</th><th>Metode</th><th>Catatan</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
               <tbody id="deposits-table-body"><tr><td colspan="10" class="empty-td">Memuat...</td></tr></tbody>
               <tfoot id="deposits-table-foot"></tfoot>
             </table>
@@ -2034,17 +2034,12 @@ atau tidak aktif."
             <select class="form-control" id="manual-deposit-branch"></select>
           </div>
           <div class="form-group">
-            <label class="form-label">Staff *</label>
-            <select class="form-control" id="manual-deposit-staff"></select>
-            <span class="form-hint" id="manual-deposit-staff-hint"></span>
+            <label class="form-label">Posisi Kas Terakhir</label>
+            <div class="manual-cash-position" id="manual-deposit-cash-card">
+              <strong id="manual-deposit-cash-balance">Pilih cabang</strong>
+              <span id="manual-deposit-cash-hint">Posisi kas outlet akan dimuat otomatis.</span>
+            </div>
           </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Shift Tertutup *</label>
-          <select class="form-control" id="manual-deposit-session" disabled>
-            <option value="">Pilih cabang dan staff terlebih dahulu</option>
-          </select>
-          <span class="form-hint" id="manual-deposit-session-hint">Setoran hanya bisa dibuat untuk shift yang sudah ditutup.</span>
         </div>
         <div class="grid-2-col-s3">
           <div class="form-group">
@@ -2058,6 +2053,7 @@ atau tidak aktif."
               <span class="input-prefix">Rp</span>
               <input type="text" class="form-control" id="manual-deposit-amount" inputmode="numeric" autocomplete="off" placeholder="0" />
             </div>
+            <span class="form-hint" id="manual-deposit-amount-hint"></span>
           </div>
         </div>
         <div class="form-group manual-proof-group">
@@ -2954,9 +2950,9 @@ atau tidak aktif."
   <script src="js/services/reportService.js"></script>
   <script src="js/services/transactionService.js?v=20260520-branch-cash-outlet-1"></script>
   <script src="js/services/rbnDataEvents.js"></script>
-  <script src="js/depositService.js?v=20260519-deposit-confirm-fix-1"></script>
+  <script src="js/depositService.js?v=20260531-admin-manual-branch-cash-1"></script>
   <script src="js/cashBranchTransferService.js?v=20260527-antar-outlet-1"></script>
-  <script src="js/adminDepositUi.js?v=20260520-branch-cash-deposit-1"></script>
+  <script src="js/adminDepositUi.js?v=20260531-admin-manual-branch-cash-1"></script>
   <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-outlet-1"></script>
   <script src="js/adminCashBranchTransferUi.js?v=20260528-admin-cbt-approve-1"></script>
   <script src="js/adminFinanceIntegrationUi.js?v=20260526-api-key-hardening-1"></script>
