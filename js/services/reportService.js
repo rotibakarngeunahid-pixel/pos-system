@@ -65,12 +65,15 @@ const reportService = {
       // JS-level guard: skip non-completed rows.
       if (!tx || tx.status !== 'completed') continue;
 
-      const key = `${i.product_name}||${i.variant_name}`;
+      const productName = (i.product_name || '').trim() || '(Produk Tidak Tercatat)';
+      const variantName = (i.variant_name || '').trim() || null;
+      const key = `${productName}||${variantName}`;
       if (!map[key]) map[key] = {
-        product: i.product_name,
-        variant: i.variant_name,
-        qty:     0,
-        revenue: 0
+        product:      productName,
+        variant:      variantName,
+        qty:          0,
+        revenue:      0,
+        _unrecorded:  !i.product_name,
       };
       map[key].qty     += parseInt(i.quantity, 10) || 0;
       map[key].revenue += parseFloat(i.subtotal || 0);

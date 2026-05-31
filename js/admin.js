@@ -1972,9 +1972,10 @@ const ADMIN = {
           const totalQty = data.reduce((s, p) => s + p.qty, 0);
           const totalRev = data.reduce((s, p) => s + p.revenue, 0);
 
-          // Aggregate by product name for top-cards
+          // Aggregate by product name for top-cards — exclude unrecorded rows
           const prodMap = {};
           for (const p of data) {
+            if (p._unrecorded) continue;
             if (!prodMap[p.product]) prodMap[p.product] = { name: p.product, qty: 0, revenue: 0 };
             prodMap[p.product].qty     += p.qty;
             prodMap[p.product].revenue += p.revenue;
@@ -2004,8 +2005,21 @@ const ADMIN = {
               </div>
             </div>`;
 
-          el.innerHTML = data.map((p, i) => {
-            const pct   = totalQty ? ((p.qty / totalQty) * 100).toFixed(1) : '0.0';
+          // Rank counter only for recorded products
+          let rankIdx = 0;
+          el.innerHTML = data.map((p) => {
+            const pct = totalQty ? ((p.qty / totalQty) * 100).toFixed(1) : '0.0';
+            if (p._unrecorded) {
+              return `<tr style="opacity:0.5;font-style:italic">
+                <td><span style="color:var(--text-muted)">—</span></td>
+                <td style="color:var(--text-muted)">${escHtml(p.product)}</td>
+                <td style="color:var(--text-muted)">—</td>
+                <td>${p.qty.toLocaleString('id-ID')} pcs</td>
+                <td>${fRp(p.revenue)}</td>
+                <td style="color:var(--text-muted)">${pct}%</td>
+              </tr>`;
+            }
+            const i = rankIdx++;
             const badge = i < 3
               ? `<span class="prod-rank-badge" style="background:${rankColors[i]}20;color:${rankColors[i]};border-color:${rankColors[i]}40">#${i + 1}</span>`
               : `<span style="color:var(--text-muted)">${i + 1}</span>`;
