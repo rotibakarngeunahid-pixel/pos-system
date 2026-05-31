@@ -113,7 +113,32 @@ const ADMIN = {
         case 'refresh-transfer-monitoring': this.loadTransferMonitoring(); break;
         case 'admin-confirm-transfer': this.adminConfirmTransfer(Number(btn.dataset.id)); break;
         case 'admin-reject-transfer': this.adminRejectTransfer(Number(btn.dataset.id)); break;
+        // PO sync actions
+        case 'po-sync-refresh': this.loadPoSyncSection(); break;
+        case 'po-sync-load-pending': this.poSyncLoadPendingMappings(); break;
+        case 'po-sync-load-runs': this.poSyncLoadRuns(); break;
+        case 'po-sync-save-outlet-mapping': this.poSyncSaveOutletMapping(); break;
+        case 'po-sync-save-material-mapping': this.poSyncSaveMaterialMapping(); break;
+        case 'po-sync-save-ignored-material': this.poSyncSaveIgnoredMaterial(); break;
+        case 'po-sync-deactivate-outlet-mapping': this.poSyncDeactivateOutletMapping(btn.dataset.id); break;
+        case 'po-sync-deactivate-material-mapping': this.poSyncDeactivateMaterialMapping(btn.dataset.id); break;
+        case 'po-sync-deactivate-ignored': this.poSyncDeactivateIgnored(btn.dataset.id); break;
       }
+    });
+
+    // PO sync tab switching
+    document.addEventListener('click', (e) => {
+      const tabBtn = e.target.closest('[data-po-sync-tab]');
+      if (!tabBtn) return;
+      const tabName = tabBtn.dataset.poSyncTab;
+      document.querySelectorAll('[data-po-sync-tab]').forEach(b => b.classList.remove('active'));
+      tabBtn.classList.add('active');
+      document.querySelectorAll('.po-sync-tab').forEach(t => t.style.display = 'none');
+      const panel = document.getElementById(`po-sync-tab-${tabName}`);
+      if (panel) panel.style.display = '';
+      if (tabName === 'outlet-mapping') this.poSyncLoadOutletMappings();
+      if (tabName === 'material-mapping') this.poSyncLoadMaterialMappings();
+      if (tabName === 'ignored-materials') this.poSyncLoadIgnoredMaterials();
     });
     document.addEventListener('change', (e) => {
       const node = e.target.closest('[data-admin-change]');
@@ -382,7 +407,8 @@ const ADMIN = {
       'branch-cash': 'Kas Outlet',      'cash-branch-transfers': 'Setoran Antar Outlet',
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
       'finance-integration': 'Portal Integrasi Data',
-      'transfer-monitoring': 'Monitoring Transfer Stok'
+      'transfer-monitoring': 'Monitoring Transfer Stok',
+      'po-sync': 'Sinkronisasi PO → Stok POS'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
     this.currentSection = section;
@@ -415,6 +441,7 @@ const ADMIN = {
         break;
       case 'finance-integration':   this.loadFinanceIntegration(); break;
       case 'transfer-monitoring':   this.loadTransferMonitoring(); break;
+      case 'po-sync':               this.loadPoSyncSection();      break;
     }
   },
 
@@ -4358,6 +4385,279 @@ const ADMIN = {
       showToast('Key disalin ke clipboard!', 'success');
     } catch(e) {
       showToast('Gagal menyalin. Salin manual dari tabel.', 'warning');
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PO SYNC MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async loadPoSyncSection() {
+    // Isi dropdown cabang di semua form
+    const { data: branches } = await db.from('branches').select('id, name').order('name');
+    const branchOpts = (branches || []).map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
+    const branchOptsWithEmpty = `<option value="">— Global —</option>` + branchOpts;
+    const branchOptsRequired  = `<option value="">— Pilih Cabang —</option>` + branchOpts;
+
+    ['po-outlet-branch-select', 'po-material-branch-select', 'po-ignored-branch-select'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = id === 'po-outlet-branch-select' ? branchOptsRequired : branchOptsWithEmpty;
+    });
+
+    // Isi dropdown ingredients
+    const { data: ings } = await db.from('ingredients').select('id, name, unit').eq('is_active', true).order('name');
+    const ingOpts = `<option value="">— Pilih Bahan —</option>` + (ings || []).map(i => `<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`).join('');
+    const ingEl = document.getElementById('po-material-ingredient-select');
+    if (ingEl) ingEl.innerHTML = ingOpts;
+
+    // Load data tab yang aktif
+    const activeTab = document.querySelector('[data-po-sync-tab].active')?.dataset?.poSyncTab || 'pending-mappings';
+    if (activeTab === 'outlet-mapping') this.poSyncLoadOutletMappings();
+    else if (activeTab === 'material-mapping') this.poSyncLoadMaterialMappings();
+    else if (activeTab === 'ignored-materials') this.poSyncLoadIgnoredMaterials();
+  },
+
+  async poSyncLoadPendingMappings() {
+    const status = document.getElementById('po-sync-pending-status-filter')?.value || 'butuh_mapping_admin';
+    const container = document.getElementById('po-sync-pending-list');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
+    try {
+      const { data, error } = await db.rpc('po_sync_get_pending_mappings', { p_status: status, p_limit: 100 });
+      if (error) throw error;
+      if (!data?.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-title">Tidak ada item dengan status ini</div></div>';
+        return;
+      }
+      container.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Nama Bahan PO</th><th>ID Material PO</th><th>Status</th><th>Cabang</th><th>Qty</th><th>Error</th><th>Diperbarui</th>
+      </tr></thead><tbody>
+        ${data.map(r => `<tr>
+          <td>${escHtml(r.po_material_name || '—')}</td>
+          <td><small class="text-muted">${escHtml(r.po_material_id || '—')}</small></td>
+          <td><span class="badge badge-${r.sync_status === 'gagal_sinkron' ? 'danger' : r.sync_status === 'rollback_butuh_review_admin' ? 'warning' : 'info'}">${escHtml(r.sync_status)}</span></td>
+          <td>${escHtml(r.branch_name || '—')}</td>
+          <td>${r.po_qty_received ?? '—'}</td>
+          <td style="max-width:250px;font-size:12px;color:var(--danger)">${escHtml(r.error_message || '')}</td>
+          <td style="font-size:12px;">${r.updated_at ? r.updated_at.slice(0,16) : ''}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    } catch(e) {
+      container.innerHTML = `<div class="empty-state text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
+    }
+  },
+
+  async poSyncLoadOutletMappings() {
+    const container = document.getElementById('po-sync-outlet-mapping-list');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
+    try {
+      const { data, error } = await db.from('po_outlet_branch_mappings').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      if (!data?.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada mapping outlet</div></div>';
+        return;
+      }
+      container.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Outlet PO</th><th>ID Outlet PO</th><th>Cabang POS</th><th>Status</th><th>Aksi</th>
+      </tr></thead><tbody>
+        ${data.map(r => `<tr>
+          <td>${escHtml(r.po_outlet_name)}</td>
+          <td><small class="text-muted">${escHtml(r.po_outlet_id)}</small></td>
+          <td>${escHtml(r.pos_branch_name)}</td>
+          <td>${r.is_active ? '<span class="badge badge-success">Aktif</span>' : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
+          <td>${r.is_active ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-outlet-mapping" data-id="${r.id}">Nonaktifkan</button>` : ''}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    } catch(e) {
+      container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
+    }
+  },
+
+  async poSyncSaveOutletMapping() {
+    const outletId   = document.getElementById('po-outlet-id-input')?.value?.trim();
+    const outletName = document.getElementById('po-outlet-name-input')?.value?.trim();
+    const branchId   = parseInt(document.getElementById('po-outlet-branch-select')?.value || '0');
+    if (!outletId || !branchId) { showToast('ID Outlet dan Cabang POS wajib diisi', 'error'); return; }
+    try {
+      const { error } = await db.rpc('po_sync_save_outlet_mapping', {
+        p_po_outlet_id: outletId, p_po_outlet_name: outletName || outletId, p_pos_branch_id: branchId
+      });
+      if (error) throw error;
+      showToast('Mapping outlet disimpan', 'success');
+      document.getElementById('po-outlet-id-input').value = '';
+      document.getElementById('po-outlet-name-input').value = '';
+      this.poSyncLoadOutletMappings();
+    } catch(e) { showToast('Gagal simpan: ' + e.message, 'error'); }
+  },
+
+  async poSyncDeactivateOutletMapping(id) {
+    if (!id || !confirm('Nonaktifkan mapping outlet ini?')) return;
+    try {
+      const { error } = await db.from('po_outlet_branch_mappings').update({ is_active: false }).eq('id', parseInt(id));
+      if (error) throw error;
+      showToast('Mapping dinonaktifkan', 'success');
+      this.poSyncLoadOutletMappings();
+    } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async poSyncLoadMaterialMappings() {
+    const container = document.getElementById('po-sync-material-mapping-list');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
+    try {
+      const { data, error } = await db.from('po_material_pos_mappings').select('*, branches(name), ingredients(name, unit)').order('created_at', { ascending: false });
+      if (error) throw error;
+      if (!data?.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada mapping bahan</div></div>';
+        return;
+      }
+      container.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Nama Bahan PO</th><th>Bahan POS</th><th>Faktor Konversi</th><th>Cabang</th><th>Tipe</th><th>Status</th><th>Aksi</th>
+      </tr></thead><tbody>
+        ${data.map(r => `<tr>
+          <td>${escHtml(r.po_material_name)}<br><small class="text-muted">${escHtml(r.po_material_id)}</small></td>
+          <td>${escHtml(r.pos_ingredient_name)}</td>
+          <td>${r.conversion_factor}${r.conversion_note ? `<br><small class="text-muted">${escHtml(r.conversion_note)}</small>` : ''}</td>
+          <td>${r.branches?.name || '<em>Global</em>'}</td>
+          <td>${escHtml(r.match_type)}</td>
+          <td>${r.is_active ? '<span class="badge badge-success">Aktif</span>' : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
+          <td>${r.is_active ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-material-mapping" data-id="${r.id}">Nonaktifkan</button>` : ''}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    } catch(e) {
+      container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
+    }
+  },
+
+  async poSyncSaveMaterialMapping() {
+    const materialId     = document.getElementById('po-material-id-input')?.value?.trim();
+    const materialName   = document.getElementById('po-material-name-input')?.value?.trim();
+    const ingredientId   = parseInt(document.getElementById('po-material-ingredient-select')?.value || '0');
+    const convFactor     = parseFloat(document.getElementById('po-material-conversion')?.value || '1');
+    const convNote       = document.getElementById('po-material-conversion-note')?.value?.trim();
+    const branchId       = document.getElementById('po-material-branch-select')?.value || '';
+    if (!materialId || !ingredientId) { showToast('ID Material PO dan Bahan POS wajib diisi', 'error'); return; }
+    if (convFactor <= 0) { showToast('Faktor konversi harus lebih dari 0', 'error'); return; }
+    try {
+      const { error } = await db.rpc('po_sync_save_material_mapping', {
+        p_po_material_id: materialId,
+        p_po_material_name: materialName || materialId,
+        p_pos_ingredient_id: ingredientId,
+        p_conversion_factor: convFactor,
+        p_conversion_note: convNote || null,
+        ...(branchId ? { p_pos_branch_id: parseInt(branchId) } : {}),
+      });
+      if (error) throw error;
+      showToast('Mapping bahan disimpan', 'success');
+      ['po-material-id-input','po-material-name-input','po-material-conversion-note'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      document.getElementById('po-material-conversion').value = '1';
+      this.poSyncLoadMaterialMappings();
+    } catch(e) { showToast('Gagal simpan: ' + e.message, 'error'); }
+  },
+
+  async poSyncDeactivateMaterialMapping(id) {
+    if (!id || !confirm('Nonaktifkan mapping bahan ini? Sync berikutnya akan butuh mapping ulang.')) return;
+    try {
+      const { error } = await db.from('po_material_pos_mappings').update({ is_active: false }).eq('id', parseInt(id));
+      if (error) throw error;
+      showToast('Mapping bahan dinonaktifkan', 'success');
+      this.poSyncLoadMaterialMappings();
+    } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async poSyncLoadIgnoredMaterials() {
+    const container = document.getElementById('po-sync-ignored-list');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
+    try {
+      const { data, error } = await db.from('po_ignored_materials').select('*, branches(name)').order('created_at', { ascending: false });
+      if (error) throw error;
+      if (!data?.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada bahan yang diabaikan</div></div>';
+        return;
+      }
+      container.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Nama Bahan PO</th><th>Cabang</th><th>Alasan</th><th>Status</th><th>Aksi</th>
+      </tr></thead><tbody>
+        ${data.map(r => `<tr>
+          <td>${escHtml(r.po_material_name)}<br><small class="text-muted">${escHtml(r.po_material_id)}</small></td>
+          <td>${r.branches?.name || '<em>Global</em>'}</td>
+          <td>${escHtml(r.reason || '—')}</td>
+          <td>${r.is_active ? '<span class="badge badge-warning">Diabaikan</span>' : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
+          <td>${r.is_active ? `<button class="btn btn-outline btn-sm" data-admin-action="po-sync-deactivate-ignored" data-id="${r.id}">Batalkan</button>` : ''}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    } catch(e) {
+      container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
+    }
+  },
+
+  async poSyncSaveIgnoredMaterial() {
+    const materialId   = document.getElementById('po-ignored-material-id')?.value?.trim();
+    const materialName = document.getElementById('po-ignored-material-name')?.value?.trim();
+    const reason       = document.getElementById('po-ignored-material-reason')?.value?.trim();
+    const branchId     = document.getElementById('po-ignored-branch-select')?.value || '';
+    if (!materialId) { showToast('ID Material PO wajib diisi', 'error'); return; }
+    try {
+      const { error } = await db.rpc('po_sync_save_ignored_material', {
+        p_po_material_id:   materialId,
+        p_po_material_name: materialName || materialId,
+        p_reason:           reason || null,
+        p_is_active:        1,
+        ...(branchId ? { p_pos_branch_id: parseInt(branchId) } : {}),
+      });
+      if (error) throw error;
+      showToast('Bahan ditandai diabaikan', 'success');
+      ['po-ignored-material-id','po-ignored-material-name','po-ignored-material-reason'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      this.poSyncLoadIgnoredMaterials();
+    } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async poSyncDeactivateIgnored(id) {
+    if (!id || !confirm('Batalkan status diabaikan? Bahan ini akan kembali butuh mapping.')) return;
+    try {
+      const { error } = await db.from('po_ignored_materials').update({ is_active: false }).eq('id', parseInt(id));
+      if (error) throw error;
+      showToast('Status diabaikan dibatalkan', 'success');
+      this.poSyncLoadIgnoredMaterials();
+    } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async poSyncLoadRuns() {
+    const poId      = document.getElementById('po-sync-runs-po-id')?.value?.trim();
+    const container = document.getElementById('po-sync-runs-list');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
+    try {
+      const rpcParams = { p_limit: 30, ...(poId ? { p_po_id: poId } : {}) };
+      const { data, error } = await db.rpc('po_sync_get_runs', rpcParams);
+      if (error) throw error;
+      if (!data?.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada riwayat sync</div></div>';
+        return;
+      }
+      container.innerHTML = `<table class="data-table"><thead><tr>
+        <th>ID PO</th><th>Trigger</th><th>Status</th><th>Ringkasan</th><th>Waktu</th>
+      </tr></thead><tbody>
+        ${data.map(r => {
+          const sum = typeof r.summary === 'string' ? JSON.parse(r.summary || '{}') : (r.summary || {});
+          const statusClass = { success: 'success', partial_success: 'warning', failed: 'danger', pending: 'secondary' }[r.status] || 'secondary';
+          return `<tr>
+            <td style="font-size:12px;">${escHtml(r.po_id)}</td>
+            <td>${escHtml(r.trigger_type)}</td>
+            <td><span class="badge badge-${statusClass}">${escHtml(r.status)}</span></td>
+            <td>✅${sum.success ?? 0} ⏭${sum.skipped ?? 0} ❌${sum.errors ?? 0}</td>
+            <td style="font-size:12px;">${r.started_at ? r.started_at.slice(0,16) : ''}</td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>`;
+    } catch(e) {
+      container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
     }
   },
 };

@@ -431,7 +431,7 @@
             <i data-lucide="history" class="icon-sm"></i>
           </button>
           <button class="btn btn-outline btn-sm" data-action="open-stock-adjust-modal">
-            <i data-lucide="package" class="icon-sm"></i> Ubah Stok
+            <i data-lucide="arrow-down-circle" class="icon-sm"></i> Stok Keluar
           </button>
           <button class="btn btn-outline btn-sm" data-action="load-inventory-summary" title="Refresh">
             <i data-lucide="refresh-cw" class="icon-sm"></i>
@@ -1031,29 +1031,21 @@
   </div>
 
   <!-- ══════════════════════════════════════════
-       MODAL: Tambah / Koreksi Stok
+       MODAL: Stok Keluar (Staff)
   ══════════════════════════════════════════ -->
   <div class="modal-overlay" id="modal-stock-adjust">
     <div class="modal modal-sm">
       <div class="modal-header">
-        <span class="modal-title"><i data-lucide="package" class="icon-sm"></i> Penyesuaian Stok</span>
+        <span class="modal-title"><i data-lucide="arrow-down-circle" class="icon-sm"></i> Stok Keluar</span>
         <button class="modal-close" data-action="close-modal" data-modal-id="modal-stock-adjust">✕</button>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div style="padding:8px 10px;background:var(--bg-alt);border-radius:var(--r-sm);font-size:11px;color:var(--text-muted);border-left:3px solid var(--warning,#d97706);">
+          Stok masuk hanya dari pembelian (Purchase Order). Untuk transfer, gunakan tombol <strong>Kirim Stok</strong>.
+        </div>
         <div class="form-group" style="margin:0;">
           <label class="form-label">Bahan Baku *</label>
           <select class="form-control" id="stock-adj-ingredient"></select>
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">Jenis Penyesuaian</label>
-          <select class="form-control" id="stock-adj-type">
-            <option value="in">Stok Masuk (Pembelian / Tambah)</option>
-            <option value="out">Stok Keluar (Koreksi / Susut)</option>
-            <option value="opname">Opname (Hitung Fisik)</option>
-          </select>
-          <div style="margin-top:6px;padding:8px 10px;background:var(--bg-alt);border-radius:var(--r-sm);font-size:11px;color:var(--text-muted);border-left:3px solid var(--primary);">
-            <strong>Kirim stok ke outlet lain?</strong> Gunakan tombol <strong>Kirim Stok</strong> di atas. Untuk menerima kiriman, gunakan tombol <strong>Terima Stok</strong>.
-          </div>
         </div>
         <div class="form-group" style="margin:0;">
           <label class="form-label">Jumlah *</label>
@@ -1061,9 +1053,10 @@
             min="0.01" step="0.01" inputmode="decimal" />
         </div>
         <div class="form-group" style="margin:0;">
-          <label class="form-label">Catatan <span class="text-muted" style="font-weight:400;">(opsional)</span></label>
+          <label class="form-label">Alasan / Keterangan *</label>
           <input type="text" class="form-control" id="stock-adj-notes"
-            placeholder="Contoh: Beli di pasar, restock pagi..." />
+            placeholder="Contoh: Rusak, expire, terpakai operasional..." />
+          <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Wajib diisi.</div>
         </div>
       </div>
       <div class="modal-footer">

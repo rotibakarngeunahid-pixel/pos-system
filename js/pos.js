@@ -2216,7 +2216,7 @@ const POS = {
     container.insertAdjacentHTML('beforeend', rows.join(''));
   },
 
-  // ── Stock Adjust (Koreksi manual: masuk, keluar, opname) ────────
+  // ── Stok Keluar Staff (hanya out, catatan wajib) ─────────────
   async openStockAdjustModal() {
     if (!this.branch) return;
     const invRes = await db.from('branch_inventory')
@@ -2242,18 +2242,20 @@ const POS = {
 
     document.getElementById('stock-adj-qty').value   = '';
     document.getElementById('stock-adj-notes').value = '';
-    document.getElementById('stock-adj-type').value  = 'in';
     openModal('modal-stock-adjust');
   },
 
   async submitStockAdjust() {
     const ingredientId = parseInt(document.getElementById('stock-adj-ingredient').value);
     const qty          = safeNum(document.getElementById('stock-adj-qty').value, 'Jumlah');
-    const type         = document.getElementById('stock-adj-type').value;
     const notes        = (document.getElementById('stock-adj-notes').value || '').trim();
 
     if (!ingredientId || !qty || qty <= 0) {
       showToast('Pilih bahan baku dan isi jumlah dengan benar', 'error');
+      return;
+    }
+    if (!notes || notes.length < 3) {
+      showToast('Alasan / keterangan wajib diisi (minimal 3 karakter)', 'error');
       return;
     }
 
@@ -2265,17 +2267,17 @@ const POS = {
         branchId:      this.branch.id,
         ingredientId,
         qty,
-        type,
-        referenceType: 'manual',
-        notes:         notes || null,
+        type:          'out',
+        referenceType: 'stok_keluar_staff',
+        notes,
         createdBy:     this.user.id
       });
-      showToast('Stok berhasil diperbarui', 'success');
+      showToast('Stok keluar berhasil dicatat', 'success');
       closeModal('modal-stock-adjust');
       this.loadInventorySummary();
       this.refreshStockCache();
     } catch(e) {
-      showToast('Gagal memperbarui stok: ' + e.message, 'error');
+      showToast('Gagal mencatat stok keluar: ' + e.message, 'error');
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check" class="icon-sm"></i> Simpan'; if (window.lucide) lucide.createIcons(); }
     }

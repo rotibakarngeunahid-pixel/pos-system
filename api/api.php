@@ -92,6 +92,9 @@ $allowedTables = [
     'cash_branch_transfers','toppings','product_toppings','api_keys',
     'onboarding_assignments','onboarding_step_completions','app_sessions',
     'cash_session_adjustments','branch_ingredient_assignments','audit_logs',
+    // PO sync integration tables
+    'po_outlet_branch_mappings','po_material_pos_mappings','po_ignored_materials',
+    'po_stock_sync_runs','po_stock_sync_items','po_stock_sync_errors',
 ];
 if (!in_array($table, $allowedTables, true)) {
     respond(400, ['error' => ['message' => "Tabel '$table' tidak diizinkan"]]);
@@ -907,6 +910,16 @@ function inferFkCol(string $mainTable, string $relTable): ?string {
         'inventory_logs:branches'            => 'branch_id',
         'inventory_logs:ingredients'         => 'ingredient_id',
         'inventory_logs:users'               => 'created_by',
+        // PO sync tables
+        'po_outlet_branch_mappings:branches'       => 'pos_branch_id',
+        'po_material_pos_mappings:branches'        => 'pos_branch_id',
+        'po_material_pos_mappings:ingredients'     => 'pos_ingredient_id',
+        'po_ignored_materials:branches'            => 'pos_branch_id',
+        'po_stock_sync_runs:users'                 => 'triggered_by',
+        'po_stock_sync_items:branches'             => 'pos_branch_id',
+        'po_stock_sync_items:ingredients'          => 'pos_ingredient_id',
+        'po_stock_sync_items:po_stock_sync_runs'   => 'sync_run_id',
+        'po_stock_sync_errors:po_stock_sync_runs'  => 'sync_run_id',
         // stock_transfers
         'stock_transfers:branches'           => 'from_branch_id',
         'stock_transfer_items:stock_transfers' => 'transfer_id',
@@ -1281,6 +1294,20 @@ function adminRpcNames(): array {
         'get_all_transfers_admin',
         'rbn_require_admin_session',
         'sync_investor_payment_methods',
+        // PO sync admin actions
+        'po_sync_save_outlet_mapping',
+        'po_sync_save_material_mapping',
+        'po_sync_save_ignored_material',
+        'po_sync_retry',
+        'po_sync_get_pending_mappings',
+        'po_sync_get_runs',
+    ];
+}
+
+// RPC khusus sistem PO yang boleh dipanggil via API key (tanpa session user)
+function systemRpcNames(): array {
+    return [
+        'sync_purchase_order_to_inventory',
     ];
 }
 
@@ -1290,6 +1317,13 @@ function authorizeRpcRequest(string $name, array $params): array {
         if (str_contains($name, 'integration') || $name === 'get_transactions_api') {
             rateLimitAction('rpc_integration_' . $name, 120, 60, 'ip:' . requestIp());
         }
+        return [$params, null];
+    }
+
+    // System RPC: dipanggil oleh server purchase_order menggunakan API key saja (tanpa session user).
+    // API key sudah divalidasi di bagian atas api.php.
+    if (in_array($name, systemRpcNames(), true)) {
+        $params['_auth_user'] = ['role' => 'system', 'id' => 0, 'branch_id' => null];
         return [$params, null];
     }
 
@@ -3231,6 +3265,33 @@ function rpc_adjust_stock_atomic(array $p): mixed {
     $referenceType = $p['p_reference_type'] ?? null;
     $referenceId   = $p['p_reference_id'] ?? null;
 
+    // ── Validasi role ──────────────────────────────────────────────────────────
+    $authUser = $p['_auth_user'] ?? null;
+    $role     = $authUser['role'] ?? '';
+    $isAdmin  = in_array($role, ['admin', 'owner'], true);
+    $isStaff  = $role === 'staff';
+    $isSystem = $role === '' || $role === 'system'; // sync dari PO pakai API key langsung
+
+    if ($isStaff) {
+        if ($type !== 'out') {
+            denyHttp(403, 'Staff tidak memiliki izin untuk input stok masuk. Stok masuk hanya dapat dilakukan oleh admin atau otomatis dari purchase order.', 'STAFF_STOCK_IN_FORBIDDEN');
+        }
+        if (empty(trim((string)($note ?? '')))) {
+            denyHttp(400, 'Alasan stok keluar wajib diisi', 'NOTES_REQUIRED');
+        }
+        $referenceType = 'stok_keluar_staff';
+    } elseif ($isAdmin) {
+        if ($type === 'in' && empty(trim((string)($note ?? '')))) {
+            denyHttp(400, 'Catatan wajib diisi untuk stok masuk manual admin', 'NOTES_REQUIRED');
+        }
+        if ($type === 'opname' && empty(trim((string)($note ?? '')))) {
+            denyHttp(400, 'Catatan wajib diisi untuk opname', 'NOTES_REQUIRED');
+        }
+        if ($type === 'in' && $referenceType === 'manual') {
+            $referenceType = 'stok_masuk_manual_admin';
+        }
+    }
+
     // Branch ingredient mapping: jika bahan ini di-assign ke cabang tertentu,
     // hanya proses jika cabang saat ini termasuk dalam assignment-nya.
     $hasAny = $pdo->prepare("SELECT 1 FROM branch_ingredient_assignments WHERE ingredient_id=? LIMIT 1");
@@ -4354,6 +4415,600 @@ function rpc_get_admin_staff_cash_balances(array $p): mixed { return []; }
 function rpc_admin_set_staff_cash_balance(array $p): mixed { return ['success'=>true]; }
 function rpc_open_cash_session_from_balance(array $p): mixed { return rpc_open_cash_session_from_branch_balance($p); }
 function rpc_close_cash_session_apply_balance(array $p): mixed { return rpc_close_cash_session_apply_branch_balance($p); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PO STOCK INTEGRATION RPC FUNCTIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Helper: cari mapping bahan (branch-specific lebih prioritas dari global) ──
+function poFindMaterialMapping(PDO $pdo, string $materialId, int $branchId): ?array {
+    // Coba mapping khusus cabang dulu
+    $stmt = $pdo->prepare("
+        SELECT * FROM po_material_pos_mappings
+        WHERE po_material_id = ? AND pos_branch_id = ? AND is_active = 1
+        LIMIT 1
+    ");
+    $stmt->execute([$materialId, $branchId]);
+    $row = $stmt->fetch();
+    if ($row) return $row;
+
+    // Fallback ke mapping global (pos_branch_id IS NULL)
+    $stmt = $pdo->prepare("
+        SELECT * FROM po_material_pos_mappings
+        WHERE po_material_id = ? AND pos_branch_id IS NULL AND is_active = 1
+        LIMIT 1
+    ");
+    $stmt->execute([$materialId]);
+    return $stmt->fetch() ?: null;
+}
+
+// ── Helper: cek apakah bahan PO di-ignore untuk cabang ini ───────────────────
+function poIsMaterialIgnored(PDO $pdo, string $materialId, int $branchId): bool {
+    // Cek global dulu
+    $stmt = $pdo->prepare("
+        SELECT 1 FROM po_ignored_materials
+        WHERE po_material_id = ? AND pos_branch_id IS NULL AND is_active = 1
+        LIMIT 1
+    ");
+    $stmt->execute([$materialId]);
+    if ($stmt->fetch()) return true;
+
+    // Cek khusus cabang
+    $stmt = $pdo->prepare("
+        SELECT 1 FROM po_ignored_materials
+        WHERE po_material_id = ? AND pos_branch_id = ? AND is_active = 1
+        LIMIT 1
+    ");
+    $stmt->execute([$materialId, $branchId]);
+    return (bool)$stmt->fetch();
+}
+
+// ── Helper: resolve outlet_id → branch POS id ────────────────────────────────
+function poResolveBranch(PDO $pdo, string $outletId): ?array {
+    $stmt = $pdo->prepare("
+        SELECT pos_branch_id, pos_branch_name FROM po_outlet_branch_mappings
+        WHERE po_outlet_id = ? AND is_active = 1
+        LIMIT 1
+    ");
+    $stmt->execute([$outletId]);
+    return $stmt->fetch() ?: null;
+}
+
+// ── Helper: tulis log inventory + update stok dalam satu transaksi ────────────
+function poApplyStockDelta(
+    PDO $pdo,
+    int $branchId,
+    int $ingredientId,
+    float $delta,
+    string $poId,
+    string $poItemId,
+    string $noteText,
+    ?int $triggeredBy,
+    string $actionType
+): int {
+    // Kunci baris stok untuk UPDATE
+    $cur = $pdo->prepare("SELECT stock FROM branch_inventory WHERE branch_id=? AND ingredient_id=? FOR UPDATE");
+    $cur->execute([$branchId, $ingredientId]);
+    $row = $cur->fetch();
+    $before = $row ? (float)$row['stock'] : 0.0;
+    $after  = $before + $delta;
+
+    if ($row) {
+        $pdo->prepare("UPDATE branch_inventory SET stock=? WHERE branch_id=? AND ingredient_id=?")
+            ->execute([$after, $branchId, $ingredientId]);
+    } else {
+        $pdo->prepare("INSERT INTO branch_inventory (branch_id,ingredient_id,stock) VALUES (?,?,?)")
+            ->execute([$branchId, $ingredientId, max(0.0, $after)]);
+    }
+
+    $logRow = [
+        'branch_id'      => $branchId,
+        'ingredient_id'  => $ingredientId,
+        'type'           => $delta >= 0 ? 'in' : 'out',
+        'quantity'       => $delta,
+        'stock_before'   => $before,
+        'stock_after'    => $after,
+        'reference_type' => 'purchase_order',
+        'reference_id'   => $poId,
+        'notes'          => $noteText,
+        'created_by'     => $triggeredBy,
+        'action_type'    => $actionType,
+        'source_system'  => 'purchase_order',
+        'source_po_id'   => $poId,
+        'source_po_item_id' => $poItemId,
+        'actor_role'     => 'system',
+        'sync_status'    => 'sudah_disinkronkan',
+    ];
+    $logRow = array_filter($logRow, fn($v, $k) => dbColumnExists($pdo, 'inventory_logs', $k), ARRAY_FILTER_USE_BOTH);
+    insertDynamic($pdo, 'inventory_logs', $logRow);
+    return (int)$pdo->lastInsertId();
+}
+
+// ── Fungsi utama: sync PO ke stok POS ────────────────────────────────────────
+// Dipanggil oleh server purchase_order menggunakan API key (system RPC).
+//
+// p_po_id           : UUID PO dari Supabase
+// p_po_status       : status PO saat ini (received / received_partial / cancelled dll)
+// p_trigger_type    : po_received | po_revised | po_cancelled | manual_retry
+// p_triggered_by    : POS user id yang trigger (opsional)
+// p_items           : JSON array — setiap item berisi informasi lengkap dari Supabase
+//
+// Format p_items tiap elemen:
+// {
+//   "po_item_id"      : "uuid",
+//   "po_material_id"  : "uuid",
+//   "po_material_name": "Roti Tawar",
+//   "po_item_source"  : "ordered" | "adjustment",
+//   "qty_received"    : 10.0,       // 0 atau null = tidak ada penerimaan
+//   "outlet_id"       : "uuid",     // outlet utama PO (dipakai jika tdk ada distribusi)
+//   "outlet_name"     : "Pusat",
+//   "branch_distributions": [       // opsional — distribusi per cabang
+//     {"outlet_id": "uuid", "outlet_name": "Cabang A", "qty": 6.0},
+//     {"outlet_id": "uuid", "outlet_name": "Cabang B", "qty": 4.0}
+//   ]
+// }
+function rpc_sync_purchase_order_to_inventory(array $p): mixed {
+    $pdo         = getDB();
+    $poId        = trim((string)($p['p_po_id']       ?? ''));
+    $poStatus    = trim((string)($p['p_po_status']    ?? ''));
+    $triggerType = trim((string)($p['p_trigger_type'] ?? 'po_received'));
+    $triggeredBy = !empty($p['p_triggered_by']) ? (int)$p['p_triggered_by'] : null;
+    $itemsRaw    = $p['p_items'] ?? [];
+
+    if (!$poId) throw new Exception('p_po_id wajib diisi');
+    if (empty($itemsRaw)) throw new Exception('p_items wajib berisi minimal satu item');
+
+    $items = is_string($itemsRaw) ? json_decode($itemsRaw, true) : $itemsRaw;
+    if (!is_array($items)) throw new Exception('p_items harus berupa array JSON');
+
+    // Validasi status PO
+    $isCancelled = in_array($triggerType, ['po_cancelled'], true);
+    if (!$isCancelled && !in_array($poStatus, ['received', 'received_partial'], true)) {
+        throw new Exception("Sync tidak diizinkan untuk PO dengan status '$poStatus'. Hanya status received atau received_partial.");
+    }
+
+    // Buat sync run
+    $pdo->prepare("
+        INSERT INTO po_stock_sync_runs (po_id, trigger_type, status, triggered_by, triggered_by_role)
+        VALUES (?, ?, 'pending', ?, 'system')
+    ")->execute([$poId, $triggerType, $triggeredBy]);
+    $syncRunId = (int)$pdo->lastInsertId();
+
+    $successCount = 0;
+    $skippedCount = 0;
+    $errorCount   = 0;
+    $results      = [];
+
+    foreach ($items as $item) {
+        $poItemId       = (string)($item['po_item_id']       ?? '');
+        $materialId     = (string)($item['po_material_id']   ?? '');
+        $materialName   = (string)($item['po_material_name'] ?? '');
+        $itemSource     = (string)($item['po_item_source']   ?? 'ordered');
+        $qtyReceived    = (float)($item['qty_received']      ?? 0);
+        $outletId       = (string)($item['outlet_id']        ?? '');
+        $distributions  = is_array($item['branch_distributions'] ?? null) ? $item['branch_distributions'] : [];
+
+        if (!$poItemId || !$materialId) {
+            $results[] = ['po_item_id' => $poItemId, 'status' => 'gagal_sinkron', 'error' => 'po_item_id dan po_material_id wajib diisi'];
+            $errorCount++;
+            continue;
+        }
+
+        // Untuk cancel: target qty = 0
+        if ($isCancelled) $qtyReceived = 0.0;
+
+        // Tentukan target distribusi per cabang
+        $targetBranches = [];
+        if (!empty($distributions)) {
+            foreach ($distributions as $dist) {
+                $distOutletId = (string)($dist['outlet_id'] ?? '');
+                $distQty      = (float)($dist['qty']        ?? 0);
+                if (!$distOutletId) continue;
+                $branchRow = poResolveBranch($pdo, $distOutletId);
+                if (!$branchRow) {
+                    $results[] = ['po_item_id' => $poItemId, 'outlet_id' => $distOutletId, 'status' => 'butuh_alokasi_cabang', 'error' => "Outlet '$distOutletId' belum dipetakan ke branch POS"];
+                    $skippedCount++;
+                    // Upsert sync item sebagai butuh alokasi
+                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived * (empty($distributions) ? 1 : 1), null, null, null, 0, 0, null, 'butuh_alokasi_cabang', "Outlet '$distOutletId' belum dipetakan");
+                    continue;
+                }
+                if ($isCancelled) $distQty = 0.0; // akan di-handle oleh delta logic
+                $targetBranches[] = ['branch_id' => (int)$branchRow['pos_branch_id'], 'branch_name' => $branchRow['pos_branch_name'], 'outlet_id' => $distOutletId, 'qty' => $distQty];
+            }
+        } elseif ($outletId) {
+            $branchRow = poResolveBranch($pdo, $outletId);
+            if (!$branchRow) {
+                $results[] = ['po_item_id' => $poItemId, 'status' => 'butuh_alokasi_cabang', 'error' => "Outlet '$outletId' belum dipetakan ke branch POS"];
+                $skippedCount++;
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived, null, null, null, 0, 0, null, 'butuh_alokasi_cabang', "Outlet '$outletId' belum dipetakan");
+                continue;
+            }
+            $targetBranches[] = ['branch_id' => (int)$branchRow['pos_branch_id'], 'branch_name' => $branchRow['pos_branch_name'], 'outlet_id' => $outletId, 'qty' => $qtyReceived];
+        } else {
+            $results[] = ['po_item_id' => $poItemId, 'status' => 'butuh_alokasi_cabang', 'error' => 'Tidak ada informasi outlet/cabang untuk item ini'];
+            $skippedCount++;
+            poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived, null, null, null, 0, 0, null, 'butuh_alokasi_cabang', 'Tidak ada outlet');
+            continue;
+        }
+
+        // Proses setiap target cabang
+        foreach ($targetBranches as $tb) {
+            $branchId   = (int)$tb['branch_id'];
+            $branchQty  = (float)$tb['qty'];
+
+            // Cek ignored
+            if (poIsMaterialIgnored($pdo, $materialId, $branchId)) {
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'diabaikan_dari_stok_pos'];
+                $skippedCount++;
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, null, null, 0, 0, null, 'diabaikan_dari_stok_pos', null);
+                continue;
+            }
+
+            // Cari mapping bahan
+            $mapping = poFindMaterialMapping($pdo, $materialId, $branchId);
+            if (!$mapping) {
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'butuh_mapping_admin', 'error' => "Bahan '$materialName' belum dipetakan ke bahan POS"];
+                $skippedCount++;
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, null, null, 0, 0, null, 'butuh_mapping_admin', "Bahan '$materialName' belum dipetakan");
+                continue;
+            }
+
+            $ingredientId    = (int)$mapping['pos_ingredient_id'];
+            $ingredientName  = (string)$mapping['pos_ingredient_name'];
+            $convFactor      = (float)$mapping['conversion_factor'];
+            if ($convFactor <= 0) $convFactor = 1.0;
+
+            // Hitung target qty di POS setelah konversi satuan
+            $targetSyncQty = round($branchQty * $convFactor, 4);
+
+            // Ambil previous synced qty
+            $prevStmt = $pdo->prepare("
+                SELECT previous_synced_qty + COALESCE(delta_qty, 0) AS total_synced
+                FROM po_stock_sync_items
+                WHERE po_id=? AND po_item_id=? AND pos_branch_id=?
+                LIMIT 1
+            ");
+            $prevStmt->execute([$poId, $poItemId, $branchId]);
+            $prevRow        = $prevStmt->fetch();
+            $prevSyncedQty  = $prevRow ? (float)$prevRow['total_synced'] : 0.0;
+
+            $deltaQty = round($targetSyncQty - $prevSyncedQty, 4);
+
+            // Tidak ada yang perlu diubah
+            if (abs($deltaQty) < 0.0001) {
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'sudah_disinkronkan', 'delta' => 0];
+                $successCount++;
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'sudah_disinkronkan', null);
+                continue;
+            }
+
+            // Untuk cancel: cek stok cukup jika perlu rollback
+            if ($isCancelled && $deltaQty < 0) {
+                $stockCheck = $pdo->prepare("SELECT COALESCE(stock,0) FROM branch_inventory WHERE branch_id=? AND ingredient_id=?");
+                $stockCheck->execute([$branchId, $ingredientId]);
+                $currentStock = (float)($stockCheck->fetchColumn() ?? 0);
+                if ($currentStock + $deltaQty < 0) {
+                    $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'rollback_butuh_review_admin', 'error' => "Stok tidak cukup untuk rollback: stok=$currentStock, perlu dikurangi=" . abs($deltaQty)];
+                    $skippedCount++;
+                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'rollback_butuh_review_admin', "Stok tidak cukup: stok=$currentStock, perlu=" . abs($deltaQty));
+                    insertDynamic($pdo, 'po_stock_sync_errors', [
+                        'sync_run_id' => $syncRunId, 'po_id' => $poId, 'po_item_id' => $poItemId,
+                        'error_code' => 'ROLLBACK_INSUFFICIENT_STOCK',
+                        'error_message' => "Stok tidak cukup untuk rollback PO. Stok saat ini: $currentStock, perlu dikurangi: " . abs($deltaQty),
+                    ]);
+                    continue;
+                }
+            }
+
+            // Terapkan delta ke stok secara atomik
+            $pdo->beginTransaction();
+            try {
+                $actionType  = match($triggerType) {
+                    'po_cancelled' => 'po_cancelled',
+                    'po_revised'   => 'po_revised',
+                    default        => 'po_received',
+                };
+                $noteText = match($triggerType) {
+                    'po_cancelled' => "Rollback PO #{$poId}",
+                    'po_revised'   => "Revisi PO #{$poId}",
+                    default        => "PO #{$poId} diterima",
+                };
+                $logId = poApplyStockDelta($pdo, $branchId, $ingredientId, $deltaQty, $poId, $poItemId, $noteText, $triggeredBy, $actionType);
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, $logId, 'sudah_disinkronkan', null);
+                $pdo->commit();
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'sudah_disinkronkan', 'delta' => $deltaQty];
+                $successCount++;
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'gagal_sinkron', 'error' => $e->getMessage()];
+                $errorCount++;
+                try {
+                    insertDynamic($pdo, 'po_stock_sync_errors', [
+                        'sync_run_id' => $syncRunId, 'po_id' => $poId, 'po_item_id' => $poItemId,
+                        'error_code' => 'SYNC_ERROR', 'error_message' => $e->getMessage(),
+                    ]);
+                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'gagal_sinkron', $e->getMessage());
+                } catch (Throwable) {}
+            }
+        }
+    }
+
+    // Update status sync run
+    $finalStatus = match(true) {
+        $errorCount > 0 && $successCount === 0 => 'failed',
+        $errorCount > 0 || $skippedCount > 0   => 'partial_success',
+        default                                 => 'success',
+    };
+    $summary = json_encode(['success' => $successCount, 'skipped' => $skippedCount, 'errors' => $errorCount], JSON_UNESCAPED_UNICODE);
+    $pdo->prepare("UPDATE po_stock_sync_runs SET status=?, finished_at=NOW(), summary=? WHERE id=?")
+        ->execute([$finalStatus, $summary, $syncRunId]);
+
+    return ['sync_run_id' => $syncRunId, 'status' => $finalStatus, 'summary' => ['success' => $successCount, 'skipped' => $skippedCount, 'errors' => $errorCount], 'results' => $results];
+}
+
+// ── Helper: upsert po_stock_sync_items ────────────────────────────────────────
+function poUpsertSyncItem(
+    PDO $pdo,
+    int $syncRunId,
+    string $poId,
+    string $poItemId,
+    string $materialId,
+    string $materialName,
+    string $poStatus,
+    string $itemSource,
+    float $qtyReceived,
+    ?int $branchId,
+    ?int $ingredientId,
+    ?string $ingredientName,
+    float $targetSyncQty,
+    float $prevSyncedQty,
+    ?int $logId,
+    string $syncStatus,
+    ?string $errorMessage
+): void {
+    $idempotencyKey = "purchase_order:{$poId}:{$poItemId}:" . ($branchId ?? 'null');
+    $deltaQty = round($targetSyncQty - $prevSyncedQty, 4);
+
+    // Cek apakah record sudah ada
+    $existing = $pdo->prepare("SELECT id FROM po_stock_sync_items WHERE po_id=? AND po_item_id=? AND pos_branch_id<=>? LIMIT 1");
+    $existing->execute([$poId, $poItemId, $branchId]);
+    $existingRow = $existing->fetch();
+
+    if ($existingRow) {
+        $pdo->prepare("
+            UPDATE po_stock_sync_items SET
+              sync_run_id=?, po_material_id=?, po_material_name=?, po_status=?, po_item_source=?,
+              po_qty_received=?, pos_ingredient_id=?, pos_ingredient_name=?,
+              target_sync_qty=?, previous_synced_qty=?, delta_qty=?,
+              inventory_log_id=?, sync_status=?, error_message=?, idempotency_key=?, updated_at=NOW()
+            WHERE id=?
+        ")->execute([
+            $syncRunId, $materialId, $materialName, $poStatus, $itemSource,
+            $qtyReceived, $ingredientId, $ingredientName,
+            $targetSyncQty, $prevSyncedQty, $deltaQty,
+            $logId, $syncStatus, $errorMessage, $idempotencyKey,
+            $existingRow['id']
+        ]);
+    } else {
+        $pdo->prepare("
+            INSERT INTO po_stock_sync_items
+              (sync_run_id, po_id, po_item_id, po_material_id, po_material_name,
+               po_status, po_item_source, po_qty_received,
+               pos_branch_id, pos_ingredient_id, pos_ingredient_name,
+               target_sync_qty, previous_synced_qty, delta_qty,
+               inventory_log_id, sync_status, error_message, idempotency_key)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ")->execute([
+            $syncRunId, $poId, $poItemId, $materialId, $materialName,
+            $poStatus, $itemSource, $qtyReceived,
+            $branchId, $ingredientId, $ingredientName,
+            $targetSyncQty, $prevSyncedQty, $deltaQty,
+            $logId, $syncStatus, $errorMessage, $idempotencyKey
+        ]);
+    }
+}
+
+// ── Admin: simpan mapping outlet PO → branch POS ─────────────────────────────
+function rpc_po_sync_save_outlet_mapping(array $p): mixed {
+    $pdo          = getDB();
+    $poOutletId   = trim((string)($p['p_po_outlet_id']   ?? ''));
+    $poOutletName = trim((string)($p['p_po_outlet_name'] ?? ''));
+    $posBranchId  = (int)($p['p_pos_branch_id']          ?? 0);
+    $authUser     = $p['_auth_user'] ?? null;
+
+    if (!$poOutletId || !$posBranchId) throw new Exception('p_po_outlet_id dan p_pos_branch_id wajib diisi');
+
+    // Ambil nama branch
+    $branchStmt = $pdo->prepare("SELECT name FROM branches WHERE id=? LIMIT 1");
+    $branchStmt->execute([$posBranchId]);
+    $branchRow = $branchStmt->fetch();
+    if (!$branchRow) throw new Exception('Branch POS tidak ditemukan');
+
+    $createdBy = $authUser['id'] ?? null;
+
+    $existing = $pdo->prepare("SELECT id FROM po_outlet_branch_mappings WHERE po_outlet_id=? LIMIT 1");
+    $existing->execute([$poOutletId]);
+    if ($existing->fetch()) {
+        $pdo->prepare("
+            UPDATE po_outlet_branch_mappings SET
+              po_outlet_name=?, pos_branch_id=?, pos_branch_name=?, is_active=1, updated_at=NOW()
+            WHERE po_outlet_id=?
+        ")->execute([$poOutletName, $posBranchId, $branchRow['name'], $poOutletId]);
+    } else {
+        $pdo->prepare("
+            INSERT INTO po_outlet_branch_mappings
+              (po_outlet_id, po_outlet_name, pos_branch_id, pos_branch_name, created_by)
+            VALUES (?,?,?,?,?)
+        ")->execute([$poOutletId, $poOutletName, $posBranchId, $branchRow['name'], $createdBy]);
+    }
+    return ['success' => true];
+}
+
+// ── Admin: simpan mapping material PO → ingredient POS ───────────────────────
+function rpc_po_sync_save_material_mapping(array $p): mixed {
+    $pdo              = getDB();
+    $poMaterialId     = trim((string)($p['p_po_material_id']    ?? ''));
+    $poMaterialName   = trim((string)($p['p_po_material_name']  ?? ''));
+    $posIngredientId  = (int)($p['p_pos_ingredient_id']          ?? 0);
+    $posBranchId      = !empty($p['p_pos_branch_id']) ? (int)$p['p_pos_branch_id'] : null;
+    $conversionFactor = (float)($p['p_conversion_factor']         ?? 1.0);
+    $conversionNote   = trim((string)($p['p_conversion_note']    ?? ''));
+    $authUser         = $p['_auth_user'] ?? null;
+
+    if (!$poMaterialId || !$posIngredientId) throw new Exception('p_po_material_id dan p_pos_ingredient_id wajib diisi');
+    if ($conversionFactor <= 0) throw new Exception('conversion_factor harus lebih dari 0');
+
+    // Ambil nama ingredient
+    $ingStmt = $pdo->prepare("SELECT name FROM ingredients WHERE id=? LIMIT 1");
+    $ingStmt->execute([$posIngredientId]);
+    $ingRow = $ingStmt->fetch();
+    if (!$ingRow) throw new Exception('Ingredient POS tidak ditemukan');
+
+    $createdBy = $authUser['id'] ?? null;
+
+    // Nonaktifkan mapping lama dengan material+branch yang sama (jika ada)
+    $pdo->prepare("
+        UPDATE po_material_pos_mappings SET is_active=0, updated_by=?
+        WHERE po_material_id=? AND pos_branch_id<=>? AND is_active=1
+    ")->execute([$createdBy, $poMaterialId, $posBranchId]);
+
+    $pdo->prepare("
+        INSERT INTO po_material_pos_mappings
+          (po_material_id, po_material_name, pos_ingredient_id, pos_ingredient_name,
+           pos_branch_id, conversion_factor, conversion_note, match_type, is_active, created_by, updated_by)
+        VALUES (?,?,?,?,?,?,?,'manual',1,?,?)
+    ")->execute([
+        $poMaterialId, $poMaterialName, $posIngredientId, $ingRow['name'],
+        $posBranchId, $conversionFactor, $conversionNote ?: null,
+        $createdBy, $createdBy
+    ]);
+
+    // Tandai sync items yang butuh mapping agar bisa di-retry
+    $pdo->prepare("
+        UPDATE po_stock_sync_items SET sync_status='belum_disinkronkan', updated_at=NOW()
+        WHERE po_material_id=? AND sync_status='butuh_mapping_admin'
+          AND (pos_branch_id=? OR ? IS NULL)
+    ")->execute([$poMaterialId, $posBranchId, $posBranchId]);
+
+    return ['success' => true];
+}
+
+// ── Admin: tandai bahan PO sebagai diabaikan dari stok POS ───────────────────
+function rpc_po_sync_save_ignored_material(array $p): mixed {
+    $pdo            = getDB();
+    $poMaterialId   = trim((string)($p['p_po_material_id']   ?? ''));
+    $poMaterialName = trim((string)($p['p_po_material_name'] ?? ''));
+    $posBranchId    = !empty($p['p_pos_branch_id']) ? (int)$p['p_pos_branch_id'] : null;
+    $reason         = trim((string)($p['p_reason']           ?? ''));
+    $isActive       = isset($p['p_is_active']) ? (int)$p['p_is_active'] : 1;
+    $authUser       = $p['_auth_user'] ?? null;
+
+    if (!$poMaterialId) throw new Exception('p_po_material_id wajib diisi');
+    $createdBy = $authUser['id'] ?? null;
+
+    $existing = $pdo->prepare("SELECT id FROM po_ignored_materials WHERE po_material_id=? AND pos_branch_id<=>? LIMIT 1");
+    $existing->execute([$poMaterialId, $posBranchId]);
+    if ($existing->fetch()) {
+        $pdo->prepare("UPDATE po_ignored_materials SET is_active=?, reason=? WHERE po_material_id=? AND pos_branch_id<=>?")
+            ->execute([$isActive, $reason ?: null, $poMaterialId, $posBranchId]);
+    } else {
+        $pdo->prepare("
+            INSERT INTO po_ignored_materials (po_material_id, po_material_name, pos_branch_id, reason, is_active, created_by)
+            VALUES (?,?,?,?,?,?)
+        ")->execute([$poMaterialId, $poMaterialName, $posBranchId, $reason ?: null, $isActive, $createdBy]);
+    }
+
+    // Update sync items yang butuh mapping ke diabaikan
+    if ($isActive) {
+        $pdo->prepare("
+            UPDATE po_stock_sync_items SET sync_status='diabaikan_dari_stok_pos', updated_at=NOW()
+            WHERE po_material_id=? AND sync_status IN ('butuh_mapping_admin','belum_disinkronkan')
+              AND (pos_branch_id=? OR ? IS NULL)
+        ")->execute([$poMaterialId, $posBranchId, $posBranchId]);
+    }
+    return ['success' => true];
+}
+
+// ── Admin: retry sync run yang gagal ─────────────────────────────────────────
+function rpc_po_sync_retry(array $p): mixed {
+    // Ambil sync items yang masih butuh proses untuk PO ini, lalu re-trigger
+    // Pada implementasi ini, admin perlu mengirim ulang data PO dari FE
+    $pdo        = getDB();
+    $poId       = trim((string)($p['p_po_id'] ?? ''));
+    $authUser   = $p['_auth_user'] ?? null;
+    if (!$poId) throw new Exception('p_po_id wajib diisi');
+
+    // Update sync items butuh mapping yang sudah di-mapping jadi belum_disinkronkan
+    $pdo->prepare("
+        UPDATE po_stock_sync_items SET sync_status='belum_disinkronkan', updated_at=NOW()
+        WHERE po_id=? AND sync_status='butuh_mapping_admin'
+    ")->execute([$poId]);
+
+    return ['success' => true, 'message' => 'Item yang sudah di-mapping siap disinkronkan ulang. Jalankan sync dari halaman Purchase Order.'];
+}
+
+// ── Admin: daftar item yang butuh mapping / diabaikan / error ─────────────────
+function rpc_po_sync_get_pending_mappings(array $p): mixed {
+    $pdo    = getDB();
+    $poId   = !empty($p['p_po_id']) ? trim($p['p_po_id']) : null;
+    $status = !empty($p['p_status']) ? trim($p['p_status']) : 'butuh_mapping_admin';
+    $limit  = (int)($p['p_limit'] ?? 50);
+    $offset = (int)($p['p_offset'] ?? 0);
+
+    $where = ['psi.sync_status = ?'];
+    $vals  = [$status];
+    if ($poId) { $where[] = 'psi.po_id = ?'; $vals[] = $poId; }
+
+    $sql = "
+        SELECT psi.*, b.name AS branch_name, i.name AS ingredient_name_pos, i.unit AS ingredient_unit
+        FROM po_stock_sync_items psi
+        LEFT JOIN branches b ON b.id = psi.pos_branch_id
+        LEFT JOIN ingredients i ON i.id = psi.pos_ingredient_id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY psi.updated_at DESC
+        LIMIT ? OFFSET ?
+    ";
+    $vals[] = $limit;
+    $vals[] = $offset;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($vals);
+    return $stmt->fetchAll();
+}
+
+// ── Admin: riwayat sync run ───────────────────────────────────────────────────
+function rpc_po_sync_get_runs(array $p): mixed {
+    $pdo    = getDB();
+    $poId   = !empty($p['p_po_id']) ? trim($p['p_po_id']) : null;
+    $limit  = (int)($p['p_limit'] ?? 20);
+    $offset = (int)($p['p_offset'] ?? 0);
+
+    $where = $poId ? 'WHERE r.po_id = ?' : '';
+    $vals  = $poId ? [$poId] : [];
+    $vals[] = $limit;
+    $vals[] = $offset;
+
+    $stmt = $pdo->prepare("
+        SELECT r.*, u.name AS triggered_by_name
+        FROM po_stock_sync_runs r
+        LEFT JOIN users u ON u.id = r.triggered_by
+        $where
+        ORDER BY r.started_at DESC
+        LIMIT ? OFFSET ?
+    ");
+    $stmt->execute($vals);
+    $runs = $stmt->fetchAll();
+
+    // Tambah item summary per run
+    foreach ($runs as &$run) {
+        $itemStmt = $pdo->prepare("
+            SELECT sync_status, COUNT(*) AS cnt FROM po_stock_sync_items
+            WHERE sync_run_id = ? GROUP BY sync_status
+        ");
+        $itemStmt->execute([$run['id']]);
+        $run['item_summary'] = $itemStmt->fetchAll();
+    }
+    return $runs;
+}
 function rpc_get_staff_cash_ledger(array $p): mixed { return []; }
 function rpc_rbn_require_admin_session(array $p): mixed { return null; }
 function rpc_sync_investor_payment_methods(array $p): mixed { return ['success'=>true]; }
