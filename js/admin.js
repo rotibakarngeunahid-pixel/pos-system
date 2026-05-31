@@ -1125,9 +1125,11 @@ const ADMIN = {
           document.getElementById('product-image-url').value = imageUrl;
         } else {
           showToast('Upload gambar gagal: ' + (upJson.error || 'Unknown error'), 'error');
+          return;
         }
       } catch (upErr) {
         showToast('Upload gambar gagal: ' + upErr.message, 'error');
+        return;
       }
     }
 
@@ -1730,7 +1732,7 @@ const ADMIN = {
     try {
     const { data: t, error: tErr } = await db.from('transactions').select('*, branches(name), users!staff_id(name)').eq('id', id).single();
     if (tErr || !t) { body.innerHTML = `<div class="text-danger p-4">Transaksi tidak ditemukan.</div>`; openModal('modal-trx-detail'); return; }
-    const { data: items } = await db.from('transaction_items').select('*').eq('transaction_id', id);
+    const { data: items } = await db.from('transaction_items').select('*, products(name), product_variants(name)').eq('transaction_id', id);
     const { data: refunds } = await db.from('refund_transactions').select('*').eq('transaction_id', id).order('created_at', { ascending:false });
     body.innerHTML = `
       <div class="grid-2-col-s2 mb-4">
@@ -1753,7 +1755,7 @@ const ADMIN = {
         <thead><tr><th>Produk</th><th>Varian</th><th>Qty</th><th>Harga</th><th>Subtotal</th></tr></thead>
         <tbody>${(items||[]).map(i=>`
           <tr>
-            <td>${escHtml(i.product_name)}</td><td>${escHtml(i.variant_name)}</td>
+            <td>${escHtml(i.product_name || i.products?.name || '(produk dihapus)')}</td><td>${escHtml(i.variant_name || i.product_variants?.name || '')}</td>
             <td>${i.quantity}</td><td>${fRp(i.price)}</td>
             <td class="fw-700">${fRp(i.subtotal)}</td>
           </tr>`).join('')}

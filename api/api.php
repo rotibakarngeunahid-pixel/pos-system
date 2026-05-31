@@ -1163,12 +1163,25 @@ function rpc_process_transaction(array $p): mixed {
             VALUES (?,?,?,?,?,?,?,?)
         ");
         foreach ($cart as $item) {
+            $productName = $item['product_name'];
+            // Fallback: if product_name is missing, look it up from products table
+            if (!$productName && !empty($item['product_id'])) {
+                $r = $pdo->prepare("SELECT name FROM products WHERE id = ? LIMIT 1");
+                $r->execute([$item['product_id']]);
+                $productName = $r->fetchColumn() ?: null;
+            }
+            $variantName = $item['variant_name'];
+            if (!$variantName && !empty($item['variant_id'])) {
+                $r = $pdo->prepare("SELECT name FROM product_variants WHERE id = ? LIMIT 1");
+                $r->execute([$item['variant_id']]);
+                $variantName = $r->fetchColumn() ?: null;
+            }
             $itemStmt->execute([
                 $txId,
                 $item['product_id'],
                 $item['variant_id'],
-                $item['product_name'],
-                $item['variant_name'],
+                $productName,
+                $variantName,
                 $item['quantity'], $item['price'], $item['price'] * $item['quantity']
             ]);
         }

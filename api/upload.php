@@ -127,9 +127,11 @@ if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
 }
 
 // Buat .htaccess agar file gambar bisa diakses publik tapi PHP diblokir.
+// Gunakan <FilesMatch> bukan php_flag karena php_flag tidak didukung PHP-FPM.
 $htaccessPath = $uploadBase . '/.htaccess';
-if (!is_file($htaccessPath)) {
-    file_put_contents($htaccessPath, "Options -Indexes\nphp_flag engine off\n");
+$htaccessContent = "Options -Indexes\n<FilesMatch \"\\.(php[s3-9]?|phtml)$\">\n    deny from all\n</FilesMatch>\n";
+if (!is_file($htaccessPath) || strpos(file_get_contents($htaccessPath), 'php_flag') !== false) {
+    file_put_contents($htaccessPath, $htaccessContent);
 }
 
 // ── Simpan file ───────────────────────────────────────────────────────────────

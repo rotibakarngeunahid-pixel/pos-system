@@ -1275,6 +1275,7 @@ const POS = {
 
     const variant = product?.variants?.find(v => v.id === variantId);
     if (!variant || !product) return;
+    if (!product.productName) { showToast('Produk tidak memiliki nama — perbaiki data produk terlebih dahulu', 'error'); return; }
 
     // Merge if same variant + same toppings already in cart
     const toppingKey = toppings.map(t => t.id).sort().join(',');
