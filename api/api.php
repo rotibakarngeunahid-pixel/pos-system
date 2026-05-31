@@ -2702,6 +2702,49 @@ function rpc_get_ingredient_inventory_logs(array $p): mixed {
     return $stmt->fetchAll();
 }
 
+// ── get_ingredient_avg_usage ──────────────────────────────────────────────────
+function rpc_get_ingredient_avg_usage(array $p): mixed {
+    $pdo      = getDB();
+    $branchId = !empty($p['p_branch_id']) ? (int)$p['p_branch_id'] : null;
+    $dateFrom = $p['p_date_from'] ?? date('Y-m-01');
+    $dateTo   = $p['p_date_to']   ?? date('Y-m-d');
+
+    $qtyCol = dbColumnExists($pdo, 'inventory_logs', 'qty') ? 'qty' : 'quantity';
+
+    $conditions = ["il.type = 'out'", 'il.created_at >= ?', 'il.created_at <= ?'];
+    $params     = [witaDateToUtc($dateFrom), witaDateToUtc($dateTo, true)];
+
+    if ($branchId) {
+        $conditions[] = 'il.branch_id = ?';
+        $params[]     = $branchId;
+    }
+
+    $where = 'WHERE ' . implode(' AND ', $conditions);
+
+    $stmt = $pdo->prepare("
+        SELECT
+          b.name AS branch_name,
+          b.id   AS branch_id,
+          i.name AS ingredient_name,
+          i.unit,
+          COUNT(DISTINCT DATE(CONVERT_TZ(il.created_at, '+00:00', '+08:00'))) AS active_days,
+          COALESCE(SUM(ABS(il.`$qtyCol`)), 0)                                  AS total_used,
+          ROUND(
+            COALESCE(SUM(ABS(il.`$qtyCol`)), 0) /
+            NULLIF(COUNT(DISTINCT DATE(CONVERT_TZ(il.created_at, '+00:00', '+08:00'))), 0),
+            2
+          ) AS avg_per_day
+        FROM inventory_logs il
+        JOIN ingredients i ON i.id = il.ingredient_id
+        JOIN branches b    ON b.id = il.branch_id
+        $where
+        GROUP BY i.id, i.name, i.unit, il.branch_id, b.name, b.id
+        ORDER BY b.name, avg_per_day DESC
+    ");
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
 // ── investor_get_sales_report ─────────────────────────────────────────────────
 function rpc_investor_get_sales_report(array $p): mixed {
     $pdo      = getDB();

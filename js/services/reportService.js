@@ -106,6 +106,15 @@ const reportService = {
     return Object.values(map).sort((a, b) => b.totalUsed - a.totalUsed);
   },
 
+  // ── Ingredient Average Usage ─────────────────────────────────
+  async getIngredientAvgUsage({ branchId, dateFrom, dateTo }) {
+    const params = { p_date_from: dateFrom, p_date_to: dateTo };
+    if (branchId) params.p_branch_id = parseInt(branchId, 10);
+    const { data, error } = await db.rpc('get_ingredient_avg_usage', params);
+    if (error) throw error;
+    return data || [];
+  },
+
   // ── Cashier Session Summary ───────────────────────────────────
   async getSessionReport({ branchId, dateFrom, dateTo }) {
     let q = db.from('cashier_sessions')

@@ -1893,6 +1893,7 @@ const ADMIN = {
     document.getElementById('report-tab-sales').style.display     = tab === 'sales'     ? 'block' : 'none';
     document.getElementById('report-tab-products').style.display  = tab === 'products'  ? 'block' : 'none';
     document.getElementById('report-tab-inv-usage').style.display = tab === 'inv-usage' ? 'block' : 'none';
+    document.getElementById('report-tab-ing-avg').style.display   = tab === 'ing-avg'   ? 'block' : 'none';
     this.runReport(tab);
   },
 
@@ -2047,6 +2048,29 @@ const ADMIN = {
                 <td>${r.totalUsed.toLocaleString('id-ID')} ${escHtml(r.unit)}</td>
               </tr>`).join('')
           : '<tr><td colspan="3" class="empty-td">Tidak ada data pemakaian</td></tr>';
+
+      } else if (tab === 'ing-avg') {
+        const el = document.getElementById('report-ing-avg-body');
+        el.innerHTML = '<tr><td colspan="7" class="empty-td">Memuat...</td></tr>';
+        const data = await reportService.getIngredientAvgUsage({ branchId, dateFrom, dateTo });
+        this._reportData = { tab, data, dateFrom, dateTo };
+        document.getElementById('report-avg-stat-items').textContent = data.length;
+        const top = data[0];
+        document.getElementById('report-avg-stat-top').textContent = top
+          ? `${top.ingredient_name}: ${parseFloat(top.avg_per_day).toLocaleString('id-ID', {minimumFractionDigits:0, maximumFractionDigits:2})} ${top.unit}/hari`
+          : '—';
+        el.innerHTML = data.length
+          ? data.map((r, i) => `
+              <tr>
+                <td>${i+1}</td>
+                <td>${escHtml(r.branch_name)}</td>
+                <td>${escHtml(r.ingredient_name)}</td>
+                <td>${escHtml(r.unit)}</td>
+                <td><strong>${parseFloat(r.avg_per_day).toLocaleString('id-ID', {minimumFractionDigits:0, maximumFractionDigits:2})}</strong></td>
+                <td>${parseFloat(r.total_used).toLocaleString('id-ID', {minimumFractionDigits:0, maximumFractionDigits:2})}</td>
+                <td>${r.active_days} hari</td>
+              </tr>`).join('')
+          : '<tr><td colspan="7" class="empty-td">Tidak ada data pemakaian bahan</td></tr>';
       }
 
       if (exportBtn) exportBtn.disabled = false;
@@ -2105,6 +2129,19 @@ const ADMIN = {
       rows.push(csvRow(['No','Bahan','Total Pemakaian','Satuan']));
       data.forEach((r, i) => rows.push(csvRow([i + 1, r.name, r.totalUsed, r.unit || ''])));
       filename = `laporan-bahan_${dateFrom}_${dateTo}.csv`;
+
+    } else if (tab === 'ing-avg') {
+      rows.push(csvRow(['No','Cabang','Bahan','Satuan','Rata-rata/Hari','Total Periode','Hari Aktif']));
+      data.forEach((r, i) => rows.push(csvRow([
+        i + 1,
+        r.branch_name,
+        r.ingredient_name,
+        r.unit || '',
+        r.avg_per_day,
+        r.total_used,
+        r.active_days,
+      ])));
+      filename = `laporan-rata-bahan_${dateFrom}_${dateTo}.csv`;
     }
 
     const bom  = '﻿'; // UTF-8 BOM agar Excel terbaca dengan benar

@@ -738,6 +738,7 @@
           <div class="inner-tab active" data-admin-action="switch-report-tab" data-tab="sales">Penjualan</div>
           <div class="inner-tab" data-admin-action="switch-report-tab" data-tab="products">Performa Produk</div>
           <div class="inner-tab" data-admin-action="switch-report-tab" data-tab="inv-usage">Pemakaian Bahan</div>
+          <div class="inner-tab" data-admin-action="switch-report-tab" data-tab="ing-avg">Rata-rata Bahan</div>
         </div>
 
         <div id="report-tab-sales">
@@ -775,6 +776,17 @@
           <div class="card"><div class="table-wrap"><table>
             <thead><tr><th>#</th><th>Bahan</th><th>Total Pemakaian</th></tr></thead>
             <tbody id="report-inv-usage-body"><tr><td colspan="3" class="empty-td">Atur filter dan klik Tampilkan</td></tr></tbody>
+          </table></div></div>
+        </div>
+
+        <div id="report-tab-ing-avg" style="display:none">
+          <div class="report-stat-grid">
+            <div class="report-stat"><div class="report-stat-label">Jumlah Bahan Tercatat</div><div class="report-stat-value" id="report-avg-stat-items">—</div></div>
+            <div class="report-stat"><div class="report-stat-label">Bahan Paling Banyak Dipakai</div><div class="report-stat-value" id="report-avg-stat-top">—</div></div>
+          </div>
+          <div class="card"><div class="table-wrap"><table>
+            <thead><tr><th>#</th><th>Cabang</th><th>Bahan</th><th>Satuan</th><th>Rata-rata/Hari</th><th>Total Periode</th><th>Hari Aktif</th></tr></thead>
+            <tbody id="report-ing-avg-body"><tr><td colspan="7" class="empty-td">Atur filter dan klik Tampilkan</td></tr></tbody>
           </table></div></div>
         </div>
       </section>
