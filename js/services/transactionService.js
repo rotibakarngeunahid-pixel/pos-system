@@ -14,8 +14,17 @@ const transactionService = {
     if (!branchId) throw new Error('branchId wajib diisi');
     if (!staffId) throw new Error('staffId wajib diisi');
     if (!paymentMethod) throw new Error('Metode pembayaran wajib diisi');
+
+    const normalizedCart = cart.map(item => ({
+      ...item,
+      product_id:   item.product_id   ?? item.productId   ?? null,
+      variant_id:   item.variant_id   ?? item.variantId   ?? null,
+      product_name: item.product_name ?? item.productName ?? null,
+      variant_name: item.variant_name ?? item.variantName ?? null,
+    }));
+
     const { data, error } = await db.rpc('process_transaction', {
-      p_cart: cart,
+      p_cart: normalizedCart,
       p_branch_id: branchId,
       p_staff_id: staffId,
       p_session_id: sessionId || null,

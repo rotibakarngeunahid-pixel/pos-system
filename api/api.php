@@ -1009,6 +1009,32 @@ function rpc_rbn_validate_session(array $p): mixed {
 }
 
 // ── process_transaction ───────────────────────────────────────────────────────
+function transactionItemSignatureList(array $items): array {
+    $out = [];
+    foreach ($items as $item) {
+        $out[] = implode('|', [
+            (string)($item['product_id'] ?? ''),
+            (string)($item['variant_id'] ?? ''),
+            trim((string)($item['product_name'] ?? '')),
+            trim((string)($item['variant_name'] ?? '')),
+            number_format((float)($item['quantity'] ?? 0), 4, '.', ''),
+            number_format((float)($item['price'] ?? 0), 4, '.', ''),
+        ]);
+    }
+    sort($out, SORT_STRING);
+    return $out;
+}
+
+function transactionCartMatches(PDO $pdo, int $transactionId, array $cart): bool {
+    $stmt = $pdo->prepare("
+        SELECT product_id, variant_id, product_name, variant_name, quantity, price
+        FROM transaction_items
+        WHERE transaction_id = ?
+    ");
+    $stmt->execute([$transactionId]);
+    return transactionItemSignatureList($stmt->fetchAll()) === transactionItemSignatureList($cart);
+}
+
 function rpc_process_transaction(array $p): mixed {
     $pdo = getDB();
     $pdo->beginTransaction();
@@ -1016,7 +1042,7 @@ function rpc_process_transaction(array $p): mixed {
         $cart          = $p['p_cart']           ?? [];
         $branchId      = (int)($p['p_branch_id']     ?? 0);
         $staffId       = (int)($p['p_staff_id']      ?? 0);
-        $sessionId     = $p['p_session_id']     ? (int)$p['p_session_id'] : null;
+        $sessionId     = !empty($p['p_session_id']) ? (int)$p['p_session_id'] : null;
         $paymentMethod = $p['p_payment_method'] ?? 'cash';
         $paymentAmount = (float)($p['p_payment_amount']  ?? 0);
         $discountAmount= (float)($p['p_discount_amount'] ?? 0);
@@ -1025,8 +1051,11 @@ function rpc_process_transaction(array $p): mixed {
         $notes         = $p['p_notes']          ?? null;
         $clientTxId    = $p['p_client_tx_id']   ?? null;
 
-        if (!$cart || !$branchId || !$staffId || !$paymentMethod)
+        if (!is_array($cart) || !$cart || !$branchId || !$staffId || !$paymentMethod)
             throw new Exception('Parameter transaksi tidak lengkap');
+        if ($discountAmount < 0 || $taxAmount < 0 || $feeAmount < 0 || $paymentAmount < 0) {
+            throw new Exception('Nominal transaksi tidak boleh negatif');
+        }
 
         // Wajib ada sesi kas yang masih aktif untuk staff + outlet yang sama.
         if (!$sessionId) {
@@ -1048,40 +1077,68 @@ function rpc_process_transaction(array $p): mixed {
 
         // Idempotency check
         if ($clientTxId) {
-            $chk = $pdo->prepare("SELECT id,subtotal,total,change_amount,discount_amount,tax_amount FROM transactions WHERE client_tx_id = ? LIMIT 1");
+            $chk = $pdo->prepare("SELECT id,subtotal,total,payment_amount,change_amount,discount_amount,tax_amount,fee_amount,status,client_tx_id FROM transactions WHERE client_tx_id = ? LIMIT 1");
             $chk->execute([$clientTxId]);
             $existing = $chk->fetch();
             if ($existing) { $pdo->rollBack(); return $existing; }
         }
 
-        // Calculate totals
+        // Calculate totals and normalize cart keys from both frontend styles.
         $subtotal = 0;
+        $normalizedCart = [];
         foreach ($cart as $item) {
-            $subtotal += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
+            if (!is_array($item)) throw new Exception('Item transaksi tidak valid');
+            $qty   = (int)($item['quantity'] ?? 1);
+            $price = (float)($item['price'] ?? 0);
+            if ($qty <= 0) throw new Exception('Qty item transaksi harus lebih dari 0');
+            if ($price < 0) throw new Exception('Harga item transaksi tidak boleh negatif');
+
+            $row = [
+                'product_id'   => $item['product_id']   ?? $item['productId']   ?? null,
+                'variant_id'   => $item['variant_id']   ?? $item['variantId']   ?? null,
+                'product_name' => $item['product_name'] ?? $item['productName'] ?? null,
+                'variant_name' => $item['variant_name'] ?? $item['variantName'] ?? null,
+                'quantity'     => $qty,
+                'price'        => $price,
+            ];
+            $normalizedCart[] = $row;
+            $subtotal += $price * $qty;
         }
+        $cart = $normalizedCart;
+        if ($discountAmount > $subtotal) throw new Exception('Diskon tidak boleh melebihi subtotal');
         $total        = $subtotal - $discountAmount + $taxAmount + $feeAmount;
+        if ($total < 0) throw new Exception('Total transaksi tidak boleh negatif');
+        if ($paymentAmount < $total) throw new Exception('Pembayaran kurang dari total transaksi');
         $changeAmount = $paymentAmount - $total;
 
-        // Content-based duplicate detection: jika dalam 30 detik terakhir ada transaksi
-        // dengan branch/staff/session/total yang sama → kembalikan transaksi yang sudah ada.
-        // Ini melindungi dari kasus di mana dua klik menghasilkan clientTxId berbeda
-        // tetapi konten transaksinya identik.
-        $dupChk = $pdo->prepare("
-            SELECT id, subtotal, total, change_amount, discount_amount, tax_amount
-            FROM transactions
-            WHERE branch_id  = ?
-              AND staff_id   = ?
-              AND session_id = ?
-              AND total      = ?
-              AND status     = 'completed'
-              AND created_at >= NOW() - INTERVAL 30 SECOND
-            LIMIT 1
-        ");
-        $dupChk->execute([$branchId, $staffId, $sessionId, $total]);
-        $dupTx = $dupChk->fetch();
-        if ($dupTx) {
-            $pdo->rollBack();
-            return $dupTx;
+        // Fallback duplicate detection only for clients without clientTxId.
+        // Different clientTxId means different transaction; broad same-total
+        // matching can swallow legitimate back-to-back sales.
+        if (!$clientTxId) {
+            $dupChk = $pdo->prepare("
+                SELECT id, subtotal, total, payment_amount, change_amount, discount_amount, tax_amount, fee_amount, status
+                FROM transactions
+                WHERE branch_id  = ?
+                  AND staff_id   = ?
+                  AND session_id = ?
+                  AND payment_method = ?
+                  AND total = ?
+                  AND payment_amount = ?
+                  AND discount_amount = ?
+                  AND tax_amount = ?
+                  AND fee_amount = ?
+                  AND status = 'completed'
+                  AND created_at >= NOW() - INTERVAL 5 SECOND
+                ORDER BY created_at DESC
+                LIMIT 5
+            ");
+            $dupChk->execute([$branchId, $staffId, $sessionId, $paymentMethod, $total, $paymentAmount, $discountAmount, $taxAmount, $feeAmount]);
+            foreach ($dupChk->fetchAll() as $dupTx) {
+                if (transactionCartMatches($pdo, (int)$dupTx['id'], $cart)) {
+                    $pdo->rollBack();
+                    return $dupTx;
+                }
+            }
         }
 
         // Insert transaction
@@ -1106,15 +1163,13 @@ function rpc_process_transaction(array $p): mixed {
             VALUES (?,?,?,?,?,?,?,?)
         ");
         foreach ($cart as $item) {
-            $qty      = (int)($item['quantity'] ?? 1);
-            $price    = (float)($item['price'] ?? 0);
             $itemStmt->execute([
                 $txId,
-                $item['product_id']  ?? null,
-                $item['variant_id']  ?? null,
-                $item['product_name'] ?? null,
-                $item['variant_name'] ?? null,
-                $qty, $price, $price * $qty
+                $item['product_id'],
+                $item['variant_id'],
+                $item['product_name'],
+                $item['variant_name'],
+                $item['quantity'], $item['price'], $item['price'] * $item['quantity']
             ]);
         }
 
@@ -1344,6 +1399,9 @@ function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
     $closingCash= (float)($p['p_closing_cash'] ?? 0);
     $staffId    = (int)($p['p_staff_id']    ?? 0);
     $closingNote= trim($p['p_closing_note'] ?? '');
+    if (!$sessionId) throw new Exception('session_id wajib diisi');
+    if (!$staffId) throw new Exception('staff_id wajib diisi');
+    if ($closingCash < 0) throw new Exception('Kas akhir tidak boleh negatif');
 
     $pdo->beginTransaction();
     try {
@@ -1415,6 +1473,7 @@ function rpc_admin_force_close_branch_cash_session(array $p): mixed {
     $closingCash = (float)($p['p_closing_cash'] ?? 0);
     $reason    = trim($p['p_reason'] ?? '');
     if (!$reason) throw new Exception('Alasan force close wajib diisi');
+    if ($closingCash < 0) throw new Exception('Kas akhir tidak boleh negatif');
 
     $admin = $pdo->prepare("SELECT role FROM users WHERE id=? LIMIT 1");
     $admin->execute([$adminId]);
@@ -1450,6 +1509,7 @@ function rpc_admin_set_branch_cash_balance(array $p): mixed {
     $branchId   = (int)($p['p_branch_id']   ?? 0);
     $newBalance = (float)($p['p_new_balance'] ?? 0);
     $reason     = trim($p['p_reason'] ?? '');
+    if (!$branchId) throw new Exception('branch_id wajib diisi');
     if (!$reason) throw new Exception('Alasan koreksi saldo wajib diisi');
     if ($newBalance < 0) throw new Exception('Saldo tidak boleh negatif');
 

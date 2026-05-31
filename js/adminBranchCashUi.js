@@ -230,11 +230,15 @@ const adminBranchCashUi = {
         ? `<span class="badge ${Number(r.last_variance_amount) >= 0 ? 'badge-success' : 'badge-danger'}">${Number(r.last_variance_amount) >= 0 ? '+' : ''}${formatRupiah(r.last_variance_amount)}</span>`
         : '<span class="text-muted">—</span>';
 
-      const closeShiftBtn = '';
+      const closeShiftBtn = r.shift_status === 'open'
+        ? `<button class="btn btn-primary btn-xs" data-bc-action="close-shift" data-branch-id="${r.branch_id}" title="Tutup Shift">
+             <i data-lucide="check-circle" style="width:12px;height:12px"></i> Tutup Shift
+           </button>`
+        : '';
 
       const forceCloseBtn = r.shift_status === 'open'
-        ? `<button class="btn btn-danger btn-xs" data-bc-action="force-close" data-branch-id="${r.branch_id}" title="Tutup Shift (Admin)">
-             <i data-lucide="lock" style="width:12px;height:12px"></i> Tutup Shift
+        ? `<button class="btn btn-danger btn-xs" data-bc-action="force-close" data-branch-id="${r.branch_id}" title="Paksa Tutup Shift">
+             <i data-lucide="lock" style="width:12px;height:12px"></i> Paksa Tutup
            </button>`
         : '';
 

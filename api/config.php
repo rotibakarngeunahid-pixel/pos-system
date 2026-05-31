@@ -51,6 +51,14 @@ define('ALLOWED_ORIGIN_PATTERNS', [
 
 function isOriginAllowed(string $origin): bool {
     if (in_array($origin, ALLOWED_ORIGINS, true)) return true;
+    $parts = parse_url($origin);
+    if ($parts) {
+        $scheme = $parts['scheme'] ?? '';
+        $host   = trim($parts['host'] ?? '', '[]');
+        if (in_array($scheme, ['http', 'https'], true) && in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
+            return true;
+        }
+    }
     foreach (ALLOWED_ORIGIN_PATTERNS as $pattern) {
         if (preg_match($pattern, $origin)) return true;
     }

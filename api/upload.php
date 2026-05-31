@@ -91,14 +91,22 @@ $ext = $extMap[$mimeType] ?? 'jpg';
 $uploadBase = dirname(__DIR__) . '/uploads';
 $uploadDir  = $uploadBase . '/' . $folder;
 
-if (!is_dir($uploadDir)) {
-    if (!mkdir($uploadDir, 0755, true)) {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'error' => 'Gagal membuat direktori upload']);
-        exit;
-    }
-    // Buat .htaccess agar file gambar bisa diakses publik tapi PHP diblokir
-    file_put_contents($uploadBase . '/.htaccess', "Options -Indexes\nphp_flag engine off\n");
+if (!is_dir($uploadBase) && !mkdir($uploadBase, 0755, true)) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => 'Gagal membuat direktori upload']);
+    exit;
+}
+
+if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => 'Gagal membuat direktori upload']);
+    exit;
+}
+
+// Buat .htaccess agar file gambar bisa diakses publik tapi PHP diblokir.
+$htaccessPath = $uploadBase . '/.htaccess';
+if (!is_file($htaccessPath)) {
+    file_put_contents($htaccessPath, "Options -Indexes\nphp_flag engine off\n");
 }
 
 // ── Simpan file ───────────────────────────────────────────────────────────────
