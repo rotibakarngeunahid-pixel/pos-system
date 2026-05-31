@@ -633,6 +633,14 @@
           </div>
         </div>
 
+        <!-- Warning bila server PO tidak bisa diakses -->
+        <div id="po-sync-server-warning" style="display:none;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--r-sm);font-size:13px;color:#92400e;margin-bottom:16px;">
+          ⚠️ <span></span>
+          &nbsp;—&nbsp; Pastikan URL server PO benar di
+          <button onclick="const u=prompt('URL Server Purchase Order:',localStorage.getItem('rbn_po_server_url')||'https://purchase-order-system.vercel.app');if(u){localStorage.setItem('rbn_po_server_url',u);location.reload();}"
+            style="background:none;border:none;cursor:pointer;color:#92400e;font-weight:700;text-decoration:underline;">Klik untuk ubah URL</button>
+        </div>
+
         <!-- ── Tab nav ── -->
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:24px;border-bottom:2px solid var(--border,#e5e7eb);padding-bottom:0;">
           <button data-po-sync-tab="outlet-mapping"
@@ -660,36 +668,9 @@
         <!-- ── Tab: Mapping Outlet ── -->
         <div id="po-sync-tab-outlet-mapping" class="po-sync-tab">
 
-          <!-- Form tambah -->
-          <div class="card" style="margin-bottom:20px;">
-            <div style="padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;gap:8px;">
-              <i data-lucide="plus-circle" class="icon-sm" style="color:var(--primary);"></i>
-              <strong style="font-size:14px;">Tambah Mapping Outlet Baru</strong>
-            </div>
-            <div style="padding:16px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
-              <div class="form-group" style="margin:0;flex:1;min-width:180px;">
-                <label class="form-label">ID Outlet PO <span style="color:var(--danger)">*</span></label>
-                <input type="text" class="form-control" id="po-outlet-id-input" placeholder="UUID dari Supabase PO" />
-              </div>
-              <div class="form-group" style="margin:0;flex:1;min-width:140px;">
-                <label class="form-label">Nama Outlet PO <span style="color:var(--danger)">*</span></label>
-                <input type="text" class="form-control" id="po-outlet-name-input" placeholder="Contoh: Outlet Pusat" />
-              </div>
-              <div class="form-group" style="margin:0;flex:1;min-width:160px;">
-                <label class="form-label">Cabang POS <span style="color:var(--danger)">*</span></label>
-                <select class="form-control" id="po-outlet-branch-select">
-                  <option value="">— Pilih Cabang —</option>
-                </select>
-              </div>
-              <button class="btn btn-primary" data-admin-action="po-sync-save-outlet-mapping" style="white-space:nowrap;">
-                <i data-lucide="save" class="icon-sm"></i> Simpan
-              </button>
-            </div>
-          </div>
-
-          <!-- Daftar mapping -->
-          <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
-            Mapping yang sudah dibuat
+          <!-- Daftar mapping — auto-load dari server PO + MySQL -->
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+            Outlet dari sistem Purchase Order ditampilkan otomatis. Pilih cabang POS untuk setiap outlet lalu klik <strong>Petakan</strong>.
           </div>
           <div id="po-sync-outlet-mapping-list">
             <div class="empty-state"><div class="empty-title">Memuat...</div></div>

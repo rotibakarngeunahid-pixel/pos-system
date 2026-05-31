@@ -124,6 +124,7 @@ const ADMIN = {
         case 'po-sync-deactivate-material-mapping': this.poSyncDeactivateMaterialMapping(btn.dataset.id); break;
         case 'po-sync-deactivate-ignored': this.poSyncDeactivateIgnored(btn.dataset.id); break;
         case 'po-sync-load-suggestions': this.poSyncLoadSuggestions(); break;
+        case 'po-sync-approve-outlet': this.poSyncApproveOutlet(btn.dataset.outletId, btn.dataset.outletName, btn.dataset.rowIndex); break;
         case 'po-sync-approve-suggestion': this.poSyncApproveSuggestion(btn.dataset.matId, btn.dataset.matName); break;
         case 'po-sync-ignore-suggestion': this.poSyncIgnoreSuggestion(btn.dataset.matId, btn.dataset.matName); break;
       }
@@ -4401,6 +4402,19 @@ const ADMIN = {
   // PO SYNC MANAGEMENT
   // ══════════════════════════════════════════════════════════════════════════
 
+  // Ambil URL server PO dari localStorage (bisa diset user)
+  poServerUrl() {
+    return (localStorage.getItem('rbn_po_server_url') || 'https://purchase-order-system.vercel.app').replace(/\/$/, '');
+  },
+
+  // Fetch outlet + material dari purchase_order server
+  async poSyncFetchSetupData() {
+    const url = this.poServerUrl();
+    const res = await fetch(`${url}/api/public/pos-setup-data`);
+    if (!res.ok) throw new Error(`Server PO tidak bisa diakses (${res.status}). Cek URL di pengaturan.`);
+    return res.json();
+  },
+
   async loadPoSyncSection() {
     // Isi dropdown cabang di semua form
     const { data: branches } = await db.from('branches').select('id, name').order('name');
@@ -4435,7 +4449,19 @@ const ADMIN = {
     }
     if (firstPanel) firstPanel.style.display = '';
 
-    // Auto-load semua mapping sekaligus supaya langsung bisa diverifikasi
+    // Fetch data dari server PO sekaligus (outlet + material)
+    this._poSetupData = null;
+    try {
+      this._poSetupData = await this.poSyncFetchSetupData();
+    } catch(e) {
+      const warn = document.getElementById('po-sync-server-warning');
+      if (warn) {
+        warn.style.display = '';
+        warn.textContent = `Tidak bisa terhubung ke server PO: ${e.message}`;
+      }
+    }
+
+    // Load semua tab
     this.poSyncLoadOutletMappings();
     this.poSyncLoadMaterialMappings();
     this.poSyncLoadIgnoredMaterials();
@@ -4476,52 +4502,98 @@ const ADMIN = {
     if (!container) return;
     container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
     try {
-      const { data, error } = await db.from('po_outlet_branch_mappings').select('*').order('is_active', { ascending: false });
+      // Ambil mapping yang sudah ada di MySQL
+      const { data: mapped, error } = await db.from('po_outlet_branch_mappings').select('*').order('is_active', { ascending: false });
       if (error) throw error;
-      if (!data?.length) {
+
+      // Ambil daftar outlet dari server PO (jika tersedia)
+      const poOutlets = this._poSetupData?.outlets || [];
+      const mappedIds = new Set((mapped || []).map(r => r.po_outlet_id));
+
+      // Outlet dari PO yang belum dipetakan
+      const unmapped = poOutlets.filter(o => !mappedIds.has(o.id));
+
+      // Ambil nama branch untuk dropdown
+      const { data: branches } = await db.from('branches').select('id, name').order('name');
+      const branchOpts = (branches || []).map(b =>
+        `<option value="${b.id}">${escHtml(b.name)}</option>`
+      ).join('');
+
+      let html = '';
+
+      // ── Outlet yang belum dipetakan ──────────────────────────────────────
+      if (unmapped.length) {
+        html += `<div style="margin-bottom:16px;">
+          <div style="font-size:12px;font-weight:700;color:var(--warning,#d97706);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
+            ${unmapped.length} outlet belum dipetakan
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="border-bottom:2px solid var(--border,#e5e7eb);">
+              <th style="padding:8px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Outlet di Sistem PO</th>
+              <th style="padding:8px 4px;text-align:center;">→</th>
+              <th style="padding:8px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Pilih Cabang POS</th>
+              <th style="padding:8px 12px;"></th>
+            </tr></thead>
+            <tbody>
+              ${unmapped.map((o, i) => `<tr style="border-bottom:1px solid var(--border,#e5e7eb);" id="outlet-row-${i}">
+                <td style="padding:10px 12px;">
+                  <div style="font-weight:600;">${escHtml(o.name)}</div>
+                  <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(o.id)}</div>
+                </td>
+                <td style="padding:10px 4px;text-align:center;color:var(--text-muted);">→</td>
+                <td style="padding:10px 12px;min-width:180px;">
+                  <select class="form-control" id="outlet-branch-${i}" style="font-size:13px;">
+                    <option value="">— Pilih Cabang —</option>
+                    ${branchOpts}
+                  </select>
+                </td>
+                <td style="padding:10px 12px;">
+                  <button class="btn btn-sm" style="background:#16a34a;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+                    data-admin-action="po-sync-approve-outlet"
+                    data-outlet-id="${escHtml(o.id)}"
+                    data-outlet-name="${escHtml(o.name)}"
+                    data-row-index="${i}">
+                    Petakan
+                  </button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      }
+
+      const data = mapped;
+      if (!data?.length && !unmapped.length) {
         container.innerHTML = `<div class="empty-state">
-          <div class="empty-title">Belum ada mapping outlet</div>
-          <div class="empty-desc">Isi form di atas untuk memetakan outlet PO ke cabang POS</div>
+          <div class="empty-title">Belum ada outlet terdeteksi</div>
+          <div class="empty-desc">Tidak ada data dari sistem PO. Pastikan URL server PO sudah benar.</div>
         </div>`;
         return;
       }
-      const aktif    = data.filter(r => r.is_active);
-      const nonaktif = data.filter(r => !r.is_active);
-      container.innerHTML = `
-        <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-alt);border-radius:var(--r-sm);font-size:13px;">
-          <strong>${aktif.length}</strong> mapping aktif &nbsp;·&nbsp;
-          <span class="text-muted">${nonaktif.length} nonaktif</span>
+      // Tabel mapping yang sudah ada
+      if (data?.length) {
+        const aktif    = data.filter(r => r.is_active);
+        const nonaktif = data.filter(r => !r.is_active);
+        html += `<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:${unmapped.length ? '20px' : '0'};">
+          ${aktif.length} sudah dipetakan
         </div>
         <table class="data-table">
           <thead><tr>
-            <th>Outlet di Sistem PO</th>
-            <th style="text-align:center;">→</th>
-            <th>Cabang di POS</th>
-            <th>Status</th>
-            <th>Aksi</th>
+            <th>Outlet PO</th><th style="text-align:center;">→</th><th>Cabang POS</th><th>Status</th><th>Aksi</th>
           </tr></thead>
           <tbody>
             ${data.map(r => `<tr style="${!r.is_active ? 'opacity:0.5;' : ''}">
-              <td>
-                <div style="font-weight:600;">${escHtml(r.po_outlet_name)}</div>
-                <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(r.po_outlet_id)}</div>
-              </td>
-              <td style="text-align:center;font-size:18px;color:${r.is_active ? 'var(--success,#16a34a)' : 'var(--text-muted)'};">
-                ${r.is_active ? '✅' : '⛔'}
-              </td>
-              <td>
-                <div style="font-weight:600;">${escHtml(r.pos_branch_name)}</div>
-                <div style="font-size:11px;color:var(--text-muted);">Cabang POS</div>
-              </td>
-              <td>${r.is_active
-                ? '<span class="badge badge-success">Aktif</span>'
-                : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
-              <td>${r.is_active
-                ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-outlet-mapping" data-id="${r.id}">Nonaktifkan</button>`
-                : ''}</td>
+              <td><div style="font-weight:600;">${escHtml(r.po_outlet_name)}</div>
+                <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(r.po_outlet_id)}</div></td>
+              <td style="text-align:center;font-size:16px;">${r.is_active ? '✅' : '⛔'}</td>
+              <td><div style="font-weight:600;">${escHtml(r.pos_branch_name)}</div></td>
+              <td>${r.is_active ? '<span class="badge badge-success">Aktif</span>' : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
+              <td>${r.is_active ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-outlet-mapping" data-id="${r.id}">Nonaktifkan</button>` : ''}</td>
             </tr>`).join('')}
           </tbody>
         </table>`;
+      }
+      container.innerHTML = html || '<div class="empty-state"><div class="empty-title">Semua outlet sudah dipetakan</div></div>';
     } catch(e) {
       container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
     }
@@ -4542,6 +4614,19 @@ const ADMIN = {
       document.getElementById('po-outlet-name-input').value = '';
       this.poSyncLoadOutletMappings();
     } catch(e) { showToast('Gagal simpan: ' + e.message, 'error'); }
+  },
+
+  async poSyncApproveOutlet(outletId, outletName, rowIndex) {
+    const branchId = parseInt(document.getElementById(`outlet-branch-${rowIndex}`)?.value || '0');
+    if (!branchId) { showToast('Pilih cabang POS terlebih dahulu', 'error'); return; }
+    try {
+      const { error } = await db.rpc('po_sync_save_outlet_mapping', {
+        p_po_outlet_id: outletId, p_po_outlet_name: outletName, p_pos_branch_id: branchId
+      });
+      if (error) throw error;
+      showToast(`Outlet "${outletName}" berhasil dipetakan`, 'success');
+      this.poSyncLoadOutletMappings();
+    } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
   },
 
   async poSyncDeactivateOutletMapping(id) {
@@ -4727,7 +4812,13 @@ const ADMIN = {
     if (!area) return;
     area.innerHTML = '<div class="text-muted text-sm">Memuat saran...</div>';
     try {
-      const { data, error } = await db.rpc('po_sync_get_suggestions', {});
+      // Kirim daftar material dari server PO ke RPC sebagai extra context
+      const poMaterials = (this._poSetupData?.materials || []).map(m => ({
+        po_material_id: m.id, po_material_name: m.name
+      }));
+      const { data, error } = await db.rpc('po_sync_get_suggestions', {
+        ...(poMaterials.length ? { p_extra_materials: JSON.stringify(poMaterials) } : {})
+      });
       if (error) throw error;
 
       const suggestions = data?.suggestions || [];
