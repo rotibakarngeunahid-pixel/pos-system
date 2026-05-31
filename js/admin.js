@@ -4410,11 +4410,10 @@ const ADMIN = {
     const ingEl = document.getElementById('po-material-ingredient-select');
     if (ingEl) ingEl.innerHTML = ingOpts;
 
-    // Load data tab yang aktif
-    const activeTab = document.querySelector('[data-po-sync-tab].active')?.dataset?.poSyncTab || 'pending-mappings';
-    if (activeTab === 'outlet-mapping') this.poSyncLoadOutletMappings();
-    else if (activeTab === 'material-mapping') this.poSyncLoadMaterialMappings();
-    else if (activeTab === 'ignored-materials') this.poSyncLoadIgnoredMaterials();
+    // Auto-load semua mapping sekaligus supaya langsung bisa diverifikasi
+    this.poSyncLoadOutletMappings();
+    this.poSyncLoadMaterialMappings();
+    this.poSyncLoadIgnoredMaterials();
   },
 
   async poSyncLoadPendingMappings() {
@@ -4452,23 +4451,52 @@ const ADMIN = {
     if (!container) return;
     container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
     try {
-      const { data, error } = await db.from('po_outlet_branch_mappings').select('*').order('created_at', { ascending: false });
+      const { data, error } = await db.from('po_outlet_branch_mappings').select('*').order('is_active', { ascending: false });
       if (error) throw error;
       if (!data?.length) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada mapping outlet</div></div>';
+        container.innerHTML = `<div class="empty-state">
+          <div class="empty-title">Belum ada mapping outlet</div>
+          <div class="empty-desc">Isi form di atas untuk memetakan outlet PO ke cabang POS</div>
+        </div>`;
         return;
       }
-      container.innerHTML = `<table class="data-table"><thead><tr>
-        <th>Outlet PO</th><th>ID Outlet PO</th><th>Cabang POS</th><th>Status</th><th>Aksi</th>
-      </tr></thead><tbody>
-        ${data.map(r => `<tr>
-          <td>${escHtml(r.po_outlet_name)}</td>
-          <td><small class="text-muted">${escHtml(r.po_outlet_id)}</small></td>
-          <td>${escHtml(r.pos_branch_name)}</td>
-          <td>${r.is_active ? '<span class="badge badge-success">Aktif</span>' : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
-          <td>${r.is_active ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-outlet-mapping" data-id="${r.id}">Nonaktifkan</button>` : ''}</td>
-        </tr>`).join('')}
-      </tbody></table>`;
+      const aktif    = data.filter(r => r.is_active);
+      const nonaktif = data.filter(r => !r.is_active);
+      container.innerHTML = `
+        <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-alt);border-radius:var(--r-sm);font-size:13px;">
+          <strong>${aktif.length}</strong> mapping aktif &nbsp;·&nbsp;
+          <span class="text-muted">${nonaktif.length} nonaktif</span>
+        </div>
+        <table class="data-table">
+          <thead><tr>
+            <th>Outlet di Sistem PO</th>
+            <th style="text-align:center;">→</th>
+            <th>Cabang di POS</th>
+            <th>Status</th>
+            <th>Aksi</th>
+          </tr></thead>
+          <tbody>
+            ${data.map(r => `<tr style="${!r.is_active ? 'opacity:0.5;' : ''}">
+              <td>
+                <div style="font-weight:600;">${escHtml(r.po_outlet_name)}</div>
+                <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(r.po_outlet_id)}</div>
+              </td>
+              <td style="text-align:center;font-size:18px;color:${r.is_active ? 'var(--success,#16a34a)' : 'var(--text-muted)'};">
+                ${r.is_active ? '✅' : '⛔'}
+              </td>
+              <td>
+                <div style="font-weight:600;">${escHtml(r.pos_branch_name)}</div>
+                <div style="font-size:11px;color:var(--text-muted);">Cabang POS</div>
+              </td>
+              <td>${r.is_active
+                ? '<span class="badge badge-success">Aktif</span>'
+                : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
+              <td>${r.is_active
+                ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-outlet-mapping" data-id="${r.id}">Nonaktifkan</button>`
+                : ''}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
     } catch(e) {
       container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
     }
@@ -4506,25 +4534,65 @@ const ADMIN = {
     if (!container) return;
     container.innerHTML = '<div class="text-muted text-sm">Memuat...</div>';
     try {
-      const { data, error } = await db.from('po_material_pos_mappings').select('*, branches(name), ingredients(name, unit)').order('created_at', { ascending: false });
+      const { data, error } = await db.from('po_material_pos_mappings')
+        .select('*, branches(name), ingredients(name, unit)')
+        .order('is_active', { ascending: false });
       if (error) throw error;
       if (!data?.length) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada mapping bahan</div></div>';
+        container.innerHTML = `<div class="empty-state">
+          <div class="empty-title">Belum ada mapping bahan</div>
+          <div class="empty-desc">Isi form di atas untuk memetakan bahan PO ke bahan POS</div>
+        </div>`;
         return;
       }
-      container.innerHTML = `<table class="data-table"><thead><tr>
-        <th>Nama Bahan PO</th><th>Bahan POS</th><th>Faktor Konversi</th><th>Cabang</th><th>Tipe</th><th>Status</th><th>Aksi</th>
-      </tr></thead><tbody>
-        ${data.map(r => `<tr>
-          <td>${escHtml(r.po_material_name)}<br><small class="text-muted">${escHtml(r.po_material_id)}</small></td>
-          <td>${escHtml(r.pos_ingredient_name)}</td>
-          <td>${r.conversion_factor}${r.conversion_note ? `<br><small class="text-muted">${escHtml(r.conversion_note)}</small>` : ''}</td>
-          <td>${r.branches?.name || '<em>Global</em>'}</td>
-          <td>${escHtml(r.match_type)}</td>
-          <td>${r.is_active ? '<span class="badge badge-success">Aktif</span>' : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
-          <td>${r.is_active ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-material-mapping" data-id="${r.id}">Nonaktifkan</button>` : ''}</td>
-        </tr>`).join('')}
-      </tbody></table>`;
+      const aktif    = data.filter(r => r.is_active);
+      const nonaktif = data.filter(r => !r.is_active);
+      container.innerHTML = `
+        <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-alt);border-radius:var(--r-sm);font-size:13px;">
+          <strong>${aktif.length}</strong> mapping aktif &nbsp;·&nbsp;
+          <span class="text-muted">${nonaktif.length} nonaktif</span>
+          &nbsp;·&nbsp; <span class="text-muted" style="font-size:12px;">Faktor konversi: qty stok POS = qty PO × faktor</span>
+        </div>
+        <table class="data-table">
+          <thead><tr>
+            <th>Bahan di Sistem PO</th>
+            <th style="text-align:center;">→</th>
+            <th>Bahan di POS</th>
+            <th>Faktor Konversi</th>
+            <th>Berlaku Untuk</th>
+            <th>Status</th>
+            <th>Aksi</th>
+          </tr></thead>
+          <tbody>
+            ${data.map(r => {
+              const isOk = r.is_active && r.conversion_factor > 0 && r.pos_ingredient_name;
+              return `<tr style="${!r.is_active ? 'opacity:0.5;' : ''}">
+                <td>
+                  <div style="font-weight:600;">${escHtml(r.po_material_name)}</div>
+                  <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(r.po_material_id)}</div>
+                </td>
+                <td style="text-align:center;font-size:18px;">${isOk ? '✅' : r.is_active ? '⚠️' : '⛔'}</td>
+                <td>
+                  <div style="font-weight:600;">${escHtml(r.pos_ingredient_name || '—')}</div>
+                  ${r.ingredients?.unit ? `<div style="font-size:11px;color:var(--text-muted);">Satuan: ${escHtml(r.ingredients.unit)}</div>` : ''}
+                </td>
+                <td>
+                  <div style="font-weight:600;font-size:15px;">× ${r.conversion_factor}</div>
+                  ${r.conversion_note ? `<div style="font-size:11px;color:var(--text-muted);">${escHtml(r.conversion_note)}</div>` : ''}
+                </td>
+                <td>${r.branches?.name
+                  ? `<span class="badge badge-info">${escHtml(r.branches.name)}</span>`
+                  : '<span class="badge badge-secondary">Semua Cabang</span>'}</td>
+                <td>${r.is_active
+                  ? '<span class="badge badge-success">Aktif</span>'
+                  : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
+                <td>${r.is_active
+                  ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-material-mapping" data-id="${r.id}">Nonaktifkan</button>`
+                  : ''}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
     } catch(e) {
       container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
     }
