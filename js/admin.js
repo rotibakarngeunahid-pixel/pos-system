@@ -2057,7 +2057,7 @@ const ADMIN = {
         document.getElementById('report-avg-stat-items').textContent = data.length;
         const top = data[0];
         document.getElementById('report-avg-stat-top').textContent = top
-          ? `${top.ingredient_name}: ${parseFloat(top.avg_per_day).toLocaleString('id-ID', {minimumFractionDigits:0, maximumFractionDigits:2})} ${top.unit}/hari`
+          ? `${top.ingredient_name}: ${Math.round(parseFloat(top.avg_per_day)).toLocaleString('id-ID')} ${top.unit}/hari`
           : '—';
         el.innerHTML = data.length
           ? data.map((r, i) => `
@@ -2066,7 +2066,7 @@ const ADMIN = {
                 <td>${escHtml(r.branch_name)}</td>
                 <td>${escHtml(r.ingredient_name)}</td>
                 <td>${escHtml(r.unit)}</td>
-                <td><strong>${parseFloat(r.avg_per_day).toLocaleString('id-ID', {minimumFractionDigits:0, maximumFractionDigits:2})}</strong></td>
+                <td><strong>${Math.round(parseFloat(r.avg_per_day)).toLocaleString('id-ID')}</strong></td>
                 <td>${parseFloat(r.total_used).toLocaleString('id-ID', {minimumFractionDigits:0, maximumFractionDigits:2})}</td>
                 <td>${r.active_days} hari</td>
               </tr>`).join('')

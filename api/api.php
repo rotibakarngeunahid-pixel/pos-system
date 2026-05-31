@@ -2732,7 +2732,7 @@ function rpc_get_ingredient_avg_usage(array $p): mixed {
           ROUND(
             COALESCE(SUM(ABS(il.`$qtyCol`)), 0) /
             NULLIF(COUNT(DISTINCT DATE(CONVERT_TZ(il.created_at, '+00:00', '+08:00'))), 0),
-            2
+            0
           ) AS avg_per_day
         FROM inventory_logs il
         JOIN ingredients i ON i.id = il.ingredient_id
