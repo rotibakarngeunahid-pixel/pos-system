@@ -131,14 +131,20 @@ const ADMIN = {
       const tabBtn = e.target.closest('[data-po-sync-tab]');
       if (!tabBtn) return;
       const tabName = tabBtn.dataset.poSyncTab;
-      document.querySelectorAll('[data-po-sync-tab]').forEach(b => b.classList.remove('active'));
-      tabBtn.classList.add('active');
+      // Reset semua tab buttons
+      document.querySelectorAll('[data-po-sync-tab]').forEach(b => {
+        b.style.color = 'var(--text-muted)';
+        b.style.borderBottomColor = 'transparent';
+        b.style.background = 'none';
+      });
+      // Aktifkan tab yang dipilih
+      tabBtn.style.color = 'var(--primary,#2563eb)';
+      tabBtn.style.borderBottomColor = 'var(--primary,#2563eb)';
+      tabBtn.style.background = 'var(--primary-soft,rgba(37,99,235,.07))';
+      // Tampilkan panel yang sesuai
       document.querySelectorAll('.po-sync-tab').forEach(t => t.style.display = 'none');
       const panel = document.getElementById(`po-sync-tab-${tabName}`);
       if (panel) panel.style.display = '';
-      if (tabName === 'outlet-mapping') this.poSyncLoadOutletMappings();
-      if (tabName === 'material-mapping') this.poSyncLoadMaterialMappings();
-      if (tabName === 'ignored-materials') this.poSyncLoadIgnoredMaterials();
     });
     document.addEventListener('change', (e) => {
       const node = e.target.closest('[data-admin-change]');
@@ -4409,6 +4415,22 @@ const ADMIN = {
     const ingOpts = `<option value="">— Pilih Bahan —</option>` + (ings || []).map(i => `<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`).join('');
     const ingEl = document.getElementById('po-material-ingredient-select');
     if (ingEl) ingEl.innerHTML = ingOpts;
+
+    // Aktifkan tab pertama (Mapping Outlet) secara visual
+    document.querySelectorAll('[data-po-sync-tab]').forEach(b => {
+      b.style.color = 'var(--text-muted)';
+      b.style.borderBottomColor = 'transparent';
+      b.style.background = 'none';
+    });
+    document.querySelectorAll('.po-sync-tab').forEach(t => t.style.display = 'none');
+    const firstTab = document.querySelector('[data-po-sync-tab="outlet-mapping"]');
+    const firstPanel = document.getElementById('po-sync-tab-outlet-mapping');
+    if (firstTab) {
+      firstTab.style.color = 'var(--primary,#2563eb)';
+      firstTab.style.borderBottomColor = 'var(--primary,#2563eb)';
+      firstTab.style.background = 'var(--primary-soft,rgba(37,99,235,.07))';
+    }
+    if (firstPanel) firstPanel.style.display = '';
 
     // Auto-load semua mapping sekaligus supaya langsung bisa diverifikasi
     this.poSyncLoadOutletMappings();

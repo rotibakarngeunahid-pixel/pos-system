@@ -627,32 +627,181 @@
         <div class="section-header">
           <h2 class="section-title"><i data-lucide="link" class="icon-sm"></i> Sinkronisasi PO → Stok POS</h2>
           <div class="section-actions">
-            <button class="btn btn-outline btn-sm" id="po-sync-refresh-btn" data-admin-action="po-sync-refresh">
-              <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
+            <button class="btn btn-outline btn-sm" data-admin-action="po-sync-refresh">
+              <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh Semua
             </button>
           </div>
         </div>
 
-        <!-- Sub-tabs -->
-        <div class="tabs" style="margin-bottom:20px;">
-          <button class="tab-btn active" data-po-sync-tab="pending-mappings">Butuh Mapping</button>
-          <button class="tab-btn" data-po-sync-tab="outlet-mapping">Mapping Outlet</button>
-          <button class="tab-btn" data-po-sync-tab="material-mapping">Mapping Bahan</button>
-          <button class="tab-btn" data-po-sync-tab="ignored-materials">Bahan Diabaikan</button>
-          <button class="tab-btn" data-po-sync-tab="sync-runs">Riwayat Sync</button>
+        <!-- ── Tab nav ── -->
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:24px;border-bottom:2px solid var(--border,#e5e7eb);padding-bottom:0;">
+          <button data-po-sync-tab="outlet-mapping"
+            style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:6px;transition:all .15s;">
+            <i data-lucide="git-merge" style="width:14px;height:14px;"></i> Mapping Outlet
+          </button>
+          <button data-po-sync-tab="material-mapping"
+            style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:6px;transition:all .15s;">
+            <i data-lucide="shuffle" style="width:14px;height:14px;"></i> Mapping Bahan
+          </button>
+          <button data-po-sync-tab="ignored-materials"
+            style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:6px;transition:all .15s;">
+            <i data-lucide="eye-off" style="width:14px;height:14px;"></i> Bahan Diabaikan
+          </button>
+          <button data-po-sync-tab="pending-mappings"
+            style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:6px;transition:all .15s;">
+            <i data-lucide="alert-circle" style="width:14px;height:14px;"></i> Butuh Tindakan
+          </button>
+          <button data-po-sync-tab="sync-runs"
+            style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:6px;transition:all .15s;">
+            <i data-lucide="history" style="width:14px;height:14px;"></i> Riwayat Sync
+          </button>
         </div>
 
-        <!-- ── Tab: Butuh Mapping ── -->
-        <div id="po-sync-tab-pending-mappings" class="po-sync-tab">
-          <p class="text-muted text-sm" style="margin-bottom:12px;">
-            Item PO yang belum bisa disinkronkan karena bahan atau outlet belum dipetakan.
-          </p>
-          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-            <select class="form-control w-auto" id="po-sync-pending-status-filter">
+        <!-- ── Tab: Mapping Outlet ── -->
+        <div id="po-sync-tab-outlet-mapping" class="po-sync-tab">
+
+          <!-- Form tambah -->
+          <div class="card" style="margin-bottom:20px;">
+            <div style="padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;gap:8px;">
+              <i data-lucide="plus-circle" class="icon-sm" style="color:var(--primary);"></i>
+              <strong style="font-size:14px;">Tambah Mapping Outlet Baru</strong>
+            </div>
+            <div style="padding:16px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+              <div class="form-group" style="margin:0;flex:1;min-width:180px;">
+                <label class="form-label">ID Outlet PO <span style="color:var(--danger)">*</span></label>
+                <input type="text" class="form-control" id="po-outlet-id-input" placeholder="UUID dari Supabase PO" />
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:140px;">
+                <label class="form-label">Nama Outlet PO <span style="color:var(--danger)">*</span></label>
+                <input type="text" class="form-control" id="po-outlet-name-input" placeholder="Contoh: Outlet Pusat" />
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:160px;">
+                <label class="form-label">Cabang POS <span style="color:var(--danger)">*</span></label>
+                <select class="form-control" id="po-outlet-branch-select">
+                  <option value="">— Pilih Cabang —</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" data-admin-action="po-sync-save-outlet-mapping" style="white-space:nowrap;">
+                <i data-lucide="save" class="icon-sm"></i> Simpan
+              </button>
+            </div>
+          </div>
+
+          <!-- Daftar mapping -->
+          <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
+            Mapping yang sudah dibuat
+          </div>
+          <div id="po-sync-outlet-mapping-list">
+            <div class="empty-state"><div class="empty-title">Memuat...</div></div>
+          </div>
+        </div>
+
+        <!-- ── Tab: Mapping Bahan ── -->
+        <div id="po-sync-tab-material-mapping" class="po-sync-tab" style="display:none;">
+
+          <!-- Form tambah -->
+          <div class="card" style="margin-bottom:20px;">
+            <div style="padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;gap:8px;">
+              <i data-lucide="plus-circle" class="icon-sm" style="color:var(--primary);"></i>
+              <strong style="font-size:14px;">Tambah Mapping Bahan Baru</strong>
+              <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">Sistem tidak menebak sendiri — semua mapping harus dibuat manual</span>
+            </div>
+            <div style="padding:16px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+              <div class="form-group" style="margin:0;flex:2;min-width:180px;">
+                <label class="form-label">ID Material PO <span style="color:var(--danger)">*</span></label>
+                <input type="text" class="form-control" id="po-material-id-input" placeholder="UUID dari Supabase PO" />
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:130px;">
+                <label class="form-label">Nama di PO <span style="color:var(--danger)">*</span></label>
+                <input type="text" class="form-control" id="po-material-name-input" placeholder="Contoh: box" />
+              </div>
+              <div class="form-group" style="margin:0;flex:2;min-width:160px;">
+                <label class="form-label">Bahan POS <span style="color:var(--danger)">*</span></label>
+                <select class="form-control" id="po-material-ingredient-select">
+                  <option value="">— Pilih Bahan —</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;width:110px;">
+                <label class="form-label">Faktor ×</label>
+                <input type="number" class="form-control" id="po-material-conversion" value="1" min="0.0001" step="0.001" />
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:140px;">
+                <label class="form-label">Catatan Konversi</label>
+                <input type="text" class="form-control" id="po-material-conversion-note" placeholder="Mis: 1 karton = 24 pcs" />
+              </div>
+              <div class="form-group" style="margin:0;min-width:130px;">
+                <label class="form-label">Cabang</label>
+                <select class="form-control" id="po-material-branch-select">
+                  <option value="">— Semua Cabang —</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" data-admin-action="po-sync-save-material-mapping" style="white-space:nowrap;">
+                <i data-lucide="save" class="icon-sm"></i> Simpan
+              </button>
+            </div>
+          </div>
+
+          <!-- Daftar mapping -->
+          <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
+            Mapping yang sudah dibuat
+          </div>
+          <div id="po-sync-material-mapping-list">
+            <div class="empty-state"><div class="empty-title">Memuat...</div></div>
+          </div>
+        </div>
+
+        <!-- ── Tab: Bahan Diabaikan ── -->
+        <div id="po-sync-tab-ignored-materials" class="po-sync-tab" style="display:none;">
+
+          <!-- Form tambah -->
+          <div class="card" style="margin-bottom:20px;">
+            <div style="padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;gap:8px;">
+              <i data-lucide="eye-off" class="icon-sm" style="color:var(--warning,#d97706);"></i>
+              <strong style="font-size:14px;">Tandai Bahan yang Diabaikan dari Stok POS</strong>
+              <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">Contoh: plastik kresek, tisu, sabun</span>
+            </div>
+            <div style="padding:16px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+              <div class="form-group" style="margin:0;flex:2;min-width:180px;">
+                <label class="form-label">ID Material PO <span style="color:var(--danger)">*</span></label>
+                <input type="text" class="form-control" id="po-ignored-material-id" placeholder="UUID dari Supabase PO" />
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:130px;">
+                <label class="form-label">Nama Bahan</label>
+                <input type="text" class="form-control" id="po-ignored-material-name" placeholder="Contoh: plastik kresek" />
+              </div>
+              <div class="form-group" style="margin:0;flex:2;min-width:160px;">
+                <label class="form-label">Alasan</label>
+                <input type="text" class="form-control" id="po-ignored-material-reason" placeholder="Tidak dihitung di POS" />
+              </div>
+              <div class="form-group" style="margin:0;min-width:130px;">
+                <label class="form-label">Cabang</label>
+                <select class="form-control" id="po-ignored-branch-select">
+                  <option value="">— Semua Cabang —</option>
+                </select>
+              </div>
+              <button class="btn btn-warning" data-admin-action="po-sync-save-ignored-material" style="white-space:nowrap;">
+                <i data-lucide="eye-off" class="icon-sm"></i> Tandai Diabaikan
+              </button>
+            </div>
+          </div>
+
+          <!-- Daftar -->
+          <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
+            Bahan yang diabaikan
+          </div>
+          <div id="po-sync-ignored-list">
+            <div class="empty-state"><div class="empty-title">Memuat...</div></div>
+          </div>
+        </div>
+
+        <!-- ── Tab: Butuh Tindakan ── -->
+        <div id="po-sync-tab-pending-mappings" class="po-sync-tab" style="display:none;">
+          <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+            <select class="form-control" style="max-width:240px;" id="po-sync-pending-status-filter">
               <option value="butuh_mapping_admin">Butuh Mapping Bahan</option>
               <option value="butuh_alokasi_cabang">Butuh Mapping Outlet</option>
               <option value="gagal_sinkron">Gagal Sinkron</option>
-              <option value="rollback_butuh_review_admin">Rollback Butuh Review</option>
+              <option value="rollback_butuh_review_admin">Rollback Butuh Review Admin</option>
             </select>
             <button class="btn btn-outline btn-sm" data-admin-action="po-sync-load-pending">
               <i data-lucide="search" class="icon-sm"></i> Tampilkan
@@ -663,115 +812,9 @@
           </div>
         </div>
 
-        <!-- ── Tab: Mapping Outlet ── -->
-        <div id="po-sync-tab-outlet-mapping" class="po-sync-tab" style="display:none;">
-          <p class="text-muted text-sm" style="margin-bottom:12px;">
-            Petakan outlet dari sistem Purchase Order ke cabang POS.
-          </p>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:16px;background:var(--bg-alt);border-radius:var(--r);">
-            <div class="form-group" style="margin:0;min-width:200px;">
-              <label class="form-label">ID Outlet PO (UUID)</label>
-              <input type="text" class="form-control" id="po-outlet-id-input" placeholder="UUID outlet dari Supabase" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:150px;">
-              <label class="form-label">Nama Outlet PO</label>
-              <input type="text" class="form-control" id="po-outlet-name-input" placeholder="Nama outlet" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:160px;">
-              <label class="form-label">Cabang POS</label>
-              <select class="form-control" id="po-outlet-branch-select">
-                <option value="">— Pilih Cabang —</option>
-              </select>
-            </div>
-            <button class="btn btn-primary btn-sm" data-admin-action="po-sync-save-outlet-mapping">
-              <i data-lucide="save" class="icon-sm"></i> Simpan Mapping
-            </button>
-          </div>
-          <div id="po-sync-outlet-mapping-list">
-            <div class="empty-state"><div class="empty-title">Memuat data mapping outlet...</div></div>
-          </div>
-        </div>
-
-        <!-- ── Tab: Mapping Bahan ── -->
-        <div id="po-sync-tab-material-mapping" class="po-sync-tab" style="display:none;">
-          <p class="text-muted text-sm" style="margin-bottom:12px;">
-            Petakan bahan dari sistem PO ke bahan POS. Sistem tidak akan menebak sendiri.
-          </p>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:16px;background:var(--bg-alt);border-radius:var(--r);">
-            <div class="form-group" style="margin:0;min-width:200px;">
-              <label class="form-label">ID Material PO (UUID)</label>
-              <input type="text" class="form-control" id="po-material-id-input" placeholder="UUID material dari Supabase" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:160px;">
-              <label class="form-label">Nama Material PO</label>
-              <input type="text" class="form-control" id="po-material-name-input" placeholder="Nama di PO" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:180px;">
-              <label class="form-label">Bahan POS</label>
-              <select class="form-control" id="po-material-ingredient-select">
-                <option value="">— Pilih Bahan —</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0;width:100px;">
-              <label class="form-label">Faktor Konversi</label>
-              <input type="number" class="form-control" id="po-material-conversion" value="1" min="0.0001" step="0.001" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:160px;">
-              <label class="form-label">Catatan Konversi</label>
-              <input type="text" class="form-control" id="po-material-conversion-note" placeholder="Mis: 1 karton = 24 pcs" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:140px;">
-              <label class="form-label">Cabang (kosong=global)</label>
-              <select class="form-control" id="po-material-branch-select">
-                <option value="">— Global —</option>
-              </select>
-            </div>
-            <button class="btn btn-primary btn-sm" data-admin-action="po-sync-save-material-mapping">
-              <i data-lucide="save" class="icon-sm"></i> Simpan Mapping
-            </button>
-          </div>
-          <div id="po-sync-material-mapping-list">
-            <div class="empty-state"><div class="empty-title">Memuat data mapping bahan...</div></div>
-          </div>
-        </div>
-
-        <!-- ── Tab: Bahan Diabaikan ── -->
-        <div id="po-sync-tab-ignored-materials" class="po-sync-tab" style="display:none;">
-          <p class="text-muted text-sm" style="margin-bottom:12px;">
-            Bahan PO yang tidak perlu masuk stok POS (plastik kresek, tisu, dll).
-          </p>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:16px;background:var(--bg-alt);border-radius:var(--r);">
-            <div class="form-group" style="margin:0;min-width:200px;">
-              <label class="form-label">ID Material PO (UUID)</label>
-              <input type="text" class="form-control" id="po-ignored-material-id" placeholder="UUID dari Supabase" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:160px;">
-              <label class="form-label">Nama Material PO</label>
-              <input type="text" class="form-control" id="po-ignored-material-name" placeholder="Nama bahan" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:200px;">
-              <label class="form-label">Alasan</label>
-              <input type="text" class="form-control" id="po-ignored-material-reason" placeholder="Mis: Tidak dihitung di POS" />
-            </div>
-            <div class="form-group" style="margin:0;min-width:140px;">
-              <label class="form-label">Cabang (kosong=global)</label>
-              <select class="form-control" id="po-ignored-branch-select">
-                <option value="">— Global —</option>
-              </select>
-            </div>
-            <button class="btn btn-warning btn-sm" data-admin-action="po-sync-save-ignored-material">
-              <i data-lucide="eye-off" class="icon-sm"></i> Tandai Diabaikan
-            </button>
-          </div>
-          <div id="po-sync-ignored-list">
-            <div class="empty-state"><div class="empty-title">Memuat daftar bahan diabaikan...</div></div>
-          </div>
-        </div>
-
         <!-- ── Tab: Riwayat Sync ── -->
         <div id="po-sync-tab-sync-runs" class="po-sync-tab" style="display:none;">
-          <p class="text-muted text-sm" style="margin-bottom:12px;">Riwayat proses sinkronisasi PO ke stok POS.</p>
-          <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
             <input type="text" class="form-control" style="max-width:320px;" id="po-sync-runs-po-id" placeholder="Filter ID PO (UUID, opsional)" />
             <button class="btn btn-outline btn-sm" data-admin-action="po-sync-load-runs">
               <i data-lucide="search" class="icon-sm"></i> Tampilkan
