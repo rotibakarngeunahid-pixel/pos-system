@@ -222,21 +222,21 @@ const adminDepositUi = {
           : fRp(r.cash_balance_at_deposit);
 
         return `<tr class="deposit-admin-row ${r.status}">
-          <td class="deposit-admin-id" title="${escHtml(depositId)}">${shortId}</td>
-          <td class="deposit-admin-date">${date}</td>
-          <td>${staff}</td>
-          <td>${br}</td>
-          <td class="deposit-admin-amount">${fRp(r.amount)}</td>
-          <td class="deposit-admin-kas text-muted">${cashBalance}</td>
-          <td>
+          <td class="deposit-admin-id" title="${escHtml(depositId)}" data-label="#">${shortId}</td>
+          <td class="deposit-admin-date" data-label="Waktu">${date}</td>
+          <td data-label="Staff">${staff}</td>
+          <td data-label="Cabang">${br}</td>
+          <td class="deposit-admin-amount" data-label="Jumlah">${fRp(r.amount)}</td>
+          <td class="deposit-admin-kas text-muted" data-label="Saldo Kas">${cashBalance}</td>
+          <td data-label="Metode">
             <span class="deposit-admin-method">
               <i data-lucide="${typeIcon}" style="width:12px;height:12px;flex-shrink:0"></i>
               ${method}
             </span>
           </td>
-          <td>${notes}</td>
-          <td>${proof}</td>
-          <td>${statusCell}${actionBtns}</td>
+          <td data-label="Catatan">${notes}</td>
+          <td data-label="Bukti">${proof}</td>
+          <td data-label="Status">${statusCell}${actionBtns}</td>
         </tr>`;
       }).join('');
 
@@ -246,11 +246,11 @@ const adminDepositUi = {
         const row    = rows[rowIdx];
         const depositId = row.id;
 
-        wrap.querySelector('.dep-confirm-btn')?.addEventListener('click', () => {
-          this.doConfirm(depositId);
+        wrap.querySelector('.dep-confirm-btn')?.addEventListener('click', (e) => {
+          this.doConfirm(depositId, e.currentTarget);
         });
-        wrap.querySelector('.dep-reject-btn')?.addEventListener('click', () => {
-          this.doReject(depositId);
+        wrap.querySelector('.dep-reject-btn')?.addEventListener('click', (e) => {
+          this.doReject(depositId, e.currentTarget);
         });
       });
 
@@ -856,13 +856,17 @@ const adminDepositUi = {
     }
   },
 
-  async doConfirm(depositId) {
+  async doConfirm(depositId, btn = null) {
     const ok = await showConfirm({
       title: 'Konfirmasi Setoran',
       message: 'Konfirmasi setoran ini? Setelah dikonfirmasi, kas akan berkurang.',
       confirmText: 'Ya, Konfirmasi'
     });
     if (!ok) return;
+
+    const origHTML = btn?.innerHTML;
+    if (btn) { btn.disabled = true; btn.classList.add('is-loading'); btn.innerHTML = '<span class="btn-spinner"></span>'; }
+
     try {
       const adminId = auth.getSession()?.id || null;
       await depositService.confirmDeposit({ depositId, adminId, action: 'confirmed' });
@@ -873,6 +877,7 @@ const adminDepositUi = {
       if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
     } catch (err) {
       console.error('doConfirm', err);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); if (origHTML) btn.innerHTML = origHTML; }
       this.showDepositActionError(err, {
         action: 'mengkonfirmasi setoran',
         fallback: 'Gagal konfirmasi'
@@ -880,13 +885,17 @@ const adminDepositUi = {
     }
   },
 
-  async doReject(depositId) {
+  async doReject(depositId, btn = null) {
     const reason = await showPrompt({ title: 'Tolak Setoran', placeholder: 'Alasan penolakan (wajib, min. 3 karakter)' });
     if (reason === null) return;
     if (!reason.trim() || reason.trim().length < 3) {
       showToast('Alasan penolakan wajib diisi minimal 3 karakter', 'error');
       return;
     }
+
+    const origHTML = btn?.innerHTML;
+    if (btn) { btn.disabled = true; btn.classList.add('is-loading'); btn.innerHTML = '<span class="btn-spinner"></span>'; }
+
     try {
       const adminId = auth.getSession()?.id || null;
       await depositService.confirmDeposit({ depositId, adminId, action: 'rejected', rejectReason: reason.trim() });
@@ -897,6 +906,7 @@ const adminDepositUi = {
       if (window.adminBranchCashUi) adminBranchCashUi.markDirty();
     } catch (err) {
       console.error('doReject', err);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); if (origHTML) btn.innerHTML = origHTML; }
       this.showDepositActionError(err, {
         action: 'menolak setoran',
         fallback: 'Gagal menolak'

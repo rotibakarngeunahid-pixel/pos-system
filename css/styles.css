@@ -5408,3 +5408,322 @@ tbody tr:hover td { background: var(--surface-2); }
     transition: none !important;
   }
 }
+
+/* ============================================================
+   UI/UX IMPROVEMENTS v4 — Responsive Tables, Loading States,
+   Filter Bar, Form Validation
+   ============================================================ */
+
+/* ── Responsive Card Table (mobile) ────────────────────────── */
+/* Add class="table-responsive" to any <table> wrapper or <table> itself
+   to automatically switch to card layout below 700px. */
+@media (max-width: 700px) {
+  .table-responsive thead { display: none; }
+  .table-responsive tbody tr {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    margin-bottom: 10px;
+    padding: 2px 0;
+    box-shadow: var(--sh-xs);
+    overflow: hidden;
+  }
+  .table-responsive tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .table-responsive tbody td:last-child { border-bottom: none; }
+  .table-responsive tbody td::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    min-width: 90px;
+    padding-top: 2px;
+  }
+}
+
+/* ── Column Visibility Helpers ──────────────────────────────── */
+@media (max-width: 1300px) { .hide-1300 { display: none !important; } }
+@media (max-width: 1100px) { .hide-1100 { display: none !important; } }
+@media (max-width: 900px)  { .hide-900  { display: none !important; } }
+@media (max-width: 700px)  { .hide-700  { display: none !important; } }
+
+/* ── Section Header Responsive ──────────────────────────────── */
+@media (max-width: 580px) {
+  .section-title { font-size: 18px !important; }
+  .section-header { gap: 10px; }
+  .section-actions { flex-wrap: wrap; width: 100%; }
+  .section-actions .btn { flex: 1; min-width: 100px; justify-content: center; }
+}
+
+/* ── Filters Bar Responsive ──────────────────────────────────── */
+@media (max-width: 680px) {
+  .filters-bar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .filters-bar .form-group { margin: 0; }
+  .filters-bar input.form-control,
+  .filters-bar select.form-control { width: 100% !important; }
+  .filters-bar .quick-filters { flex-wrap: wrap; }
+  .filters-bar .quick-filter-btn { flex: 1 1 auto; text-align: center; }
+  .filters-bar .pb-1 { display: flex; }
+  .filters-bar .pb-1 .btn { flex: 1; justify-content: center; }
+}
+
+/* ── Section Toolbar Responsive ──────────────────────────────── */
+@media (max-width: 680px) {
+  .section-toolbar { flex-direction: column; align-items: stretch; }
+  .section-toolbar > * { width: 100% !important; max-width: 100% !important; }
+  .section-toolbar .btn { justify-content: center; }
+}
+
+/* ── Deposit Table: Column Optimization ──────────────────────── */
+#deposits-admin-table { min-width: 900px; }
+
+/* Hide "Saldo Kas" column on ≤1200px */
+@media (max-width: 1200px) {
+  #section-cash-deposits .table-wrap thead th:nth-child(6),
+  #section-cash-deposits .table-wrap tbody td:nth-child(6),
+  #section-cash-deposits .table-wrap tfoot td:nth-child(6) { display: none !important; }
+}
+/* Hide "Catatan" column on ≤1050px */
+@media (max-width: 1050px) {
+  #section-cash-deposits .table-wrap thead th:nth-child(8),
+  #section-cash-deposits .table-wrap tbody td:nth-child(8),
+  #section-cash-deposits .table-wrap tfoot td:nth-child(8) { display: none !important; }
+}
+/* Compact action buttons on ≤1350px */
+@media (max-width: 1350px) {
+  .deposit-admin-actions .dep-confirm-btn,
+  .deposit-admin-actions .dep-reject-btn {
+    font-size: 11px !important;
+    padding: 3px 8px !important;
+    height: 26px !important;
+  }
+}
+
+/* ── Transaction Table: min-width ─────────────────────────── */
+#section-transactions .table-wrap table { min-width: 700px; }
+
+/* ── Reports Sales Table ──────────────────────────────────── */
+#section-reports .table-wrap table { min-width: 680px; }
+
+/* ── Inventory Logs Table ─────────────────────────────────── */
+#section-inv-logs .table-wrap table { min-width: 760px; }
+@media (max-width: 1100px) {
+  #section-inv-logs .table-wrap thead th:nth-child(7),
+  #section-inv-logs .table-wrap tbody td:nth-child(7) { display: none !important; }
+}
+
+/* ── Transfer Monitoring Table ────────────────────────────── */
+#section-transfer-monitoring .table-wrap table { min-width: 760px; }
+
+/* ── Cash Branch Transfers Table ──────────────────────────── */
+#section-cash-branch-transfers .table-wrap table { min-width: 800px; }
+
+/* ── Cash Report Tables ───────────────────────────────────── */
+#section-cash-report .table-wrap table { min-width: 560px; }
+
+/* ── PO Sync Tabs: horizontal scroll on narrow screens ─────── */
+#section-po-sync > div[style*="flex"][style*="gap"] {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#section-po-sync > div[style*="flex"][style*="gap"]::-webkit-scrollbar { display: none; }
+
+/* ── Admin Main: padding above bottom nav ─────────────────── */
+@media (max-width: 900px) {
+  .admin-main {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* ── Loading State: Button with Spinner ─────────────────────── */
+.btn.is-loading {
+  pointer-events: none !important;
+  opacity: 0.75;
+}
+.btn.is-loading .btn-text { display: none; }
+.btn.is-loading::after {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+}
+.btn-secondary.is-loading::after,
+.btn-outline.is-loading::after,
+.btn-ghost.is-loading::after {
+  border-color: rgba(0,0,0,0.2);
+  border-top-color: var(--text-sub);
+}
+.btn-success.is-loading::after { border-top-color: white; border-color: rgba(255,255,255,0.3); }
+.btn-danger.is-loading::after  { border-top-color: white; border-color: rgba(255,255,255,0.3); }
+.btn-warning.is-loading::after { border-top-color: white; border-color: rgba(255,255,255,0.3); }
+
+/* ── Loading State: Table Row Action Buttons ─────────────────── */
+.dep-confirm-btn.is-loading,
+.dep-reject-btn.is-loading {
+  opacity: 0.65;
+  pointer-events: none;
+  cursor: wait !important;
+  position: relative;
+}
+.dep-confirm-btn.is-loading i,
+.dep-reject-btn.is-loading i { display: none; }
+.dep-confirm-btn.is-loading::before,
+.dep-reject-btn.is-loading::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* ── Form Validation Improvements ───────────────────────────── */
+.form-group.has-error .form-control {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.12) !important;
+}
+.form-group.has-success .form-control {
+  border-color: var(--success) !important;
+  box-shadow: 0 0 0 3px rgba(22,163,74,0.10) !important;
+}
+.form-field-error {
+  font-size: 11px;
+  color: var(--danger);
+  font-weight: 600;
+  margin-top: 3px;
+  display: none;
+  animation: fadeIn 0.15s ease;
+}
+.form-field-error.show { display: flex; align-items: center; gap: 4px; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Required field indicator */
+.form-label .required-star { color: var(--danger); margin-left: 2px; }
+
+/* ── Inline Spinner Helper ───────────────────────────────────── */
+.spinner-sm {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0,0,0,0.15);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.spinner-sm.white {
+  border-color: rgba(255,255,255,0.3);
+  border-top-color: white;
+}
+
+/* ── Stats Grid: 1 column on very small screens ──────────── */
+@media (max-width: 420px) {
+  .stats-grid { grid-template-columns: 1fr !important; }
+  .report-stat-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ── Inventory grid: compact on tablet ─────────────────────── */
+@media (max-width: 900px) {
+  .inv-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+}
+@media (max-width: 580px) {
+  .inv-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+}
+
+/* ── Dashboard grid: single column on tablet ────────────────── */
+@media (max-width: 1000px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Empty state: responsive ─────────────────────────────────── */
+@media (max-width: 580px) {
+  .empty-state { padding: 32px 20px; }
+  .empty-title { font-size: 14px; }
+}
+
+/* ── Toast: full width on mobile ────────────────────────────── */
+@media (max-width: 480px) {
+  #toast-container { left: 12px; right: 12px; top: 8px; }
+  .toast { max-width: none; width: 100%; font-size: 12px; padding: 10px 14px; }
+}
+
+/* ── Modal: better padding on very small screens ─────────────── */
+@media (max-width: 420px) {
+  .modal-body { padding: 16px !important; }
+  .modal-header { padding: 14px 16px !important; }
+  .modal-footer { padding: 12px 16px !important; }
+}
+
+/* ── Table row actions: wrap on mobile ──────────────────────── */
+@media (max-width: 700px) {
+  .list-card-actions { flex-wrap: wrap; }
+  .list-card-actions .btn { flex: 1; min-width: 80px; justify-content: center; }
+}
+
+/* ── Bc-cards filter row: wrap properly ──────────────────────── */
+.filter-row { flex-wrap: wrap; gap: 8px; }
+@media (max-width: 580px) {
+  .filter-row { flex-direction: column; align-items: stretch; }
+  .filter-row .form-control { width: 100% !important; }
+  .filter-row label { width: 100%; }
+}
+
+/* ── dep-filter improvements on smaller screens ─────────────── */
+@media (max-width: 760px) {
+  .dep-filter-row { gap: 8px; }
+  .dep-filter-group { min-width: calc(50% - 4px); flex: 0 0 calc(50% - 4px); }
+  .dep-filter-action { flex: 1 1 100%; min-width: 100%; }
+  .dep-filter-btn { width: 100%; justify-content: center; }
+}
+@media (max-width: 460px) {
+  .dep-filter-group { min-width: 100%; flex: 1 1 100%; }
+}
+
+/* ── Admin list card: wrap actions on narrow ─────────────────── */
+@media (max-width: 600px) {
+  .admin-list-card { flex-wrap: wrap; gap: 10px; padding: 12px 14px; }
+  .admin-list-card .list-card-meta { width: 100%; margin-top: -4px; }
+  .admin-list-card .list-card-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* ── Topbar: compact on mobile ──────────────────────────────── */
+@media (max-width: 580px) {
+  .topbar-date { display: none; }
+  .admin-topbar-right .btn span { display: none; }
+  .admin-topbar-right .btn { min-width: 36px; min-height: 36px; padding: 0; justify-content: center; }
+}
+
+/* ── Cash deposits: Accounts table ──────────────────────────── */
+#deposit-accounts-list .table-wrap table { min-width: 600px; }
+
+/* ── Highlight row on action ─────────────────────────────────── */
+@keyframes rowHighlight {
+  0%   { background-color: rgba(251,140,0,0.12); }
+  100% { background-color: transparent; }
+}
+.row-flash { animation: rowHighlight 1s ease forwards; }

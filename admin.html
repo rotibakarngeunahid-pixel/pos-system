@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#f97316" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="RBN Admin" />
-  <link rel="stylesheet" href="css/styles.css?v=20260518-admin-cash-ui-2" />
+  <link rel="stylesheet" href="css/styles.css?v=20260602-ux-responsive-v4" />
   <style>
     /* Page-specific overrides */
     .bg-alt { background: var(--bg-alt); }
@@ -1294,8 +1294,21 @@
 
         <div class="card" style="margin-top:12px">
           <div class="table-wrap">
-            <table>
-              <thead><tr><th>#</th><th>Waktu</th><th>Staff/Admin</th><th>Cabang</th><th>Jumlah</th><th>Saldo Kas</th><th>Metode</th><th>Catatan</th><th>Bukti</th><th>Status / Aksi</th></tr></thead>
+            <table id="deposits-admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Waktu</th>
+                  <th>Staff/Admin</th>
+                  <th>Cabang</th>
+                  <th>Jumlah</th>
+                  <th>Saldo Kas</th>
+                  <th>Metode</th>
+                  <th>Catatan</th>
+                  <th>Bukti</th>
+                  <th>Status / Aksi</th>
+                </tr>
+              </thead>
               <tbody id="deposits-table-body"><tr><td colspan="10" class="empty-td">Memuat...</td></tr></tbody>
               <tfoot id="deposits-table-foot"></tfoot>
             </table>

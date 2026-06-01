@@ -21,6 +21,21 @@ const ADMIN = {
   _copyMenuSubmitting: false,
   _reportData:         null,
 
+  // ── Button Loading Helper ─────────────────────────────────────
+  _btnLoad(selector, loadingText = 'Menyimpan...') {
+    const btn = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    if (!btn) return () => {};
+    const origHTML = btn.innerHTML;
+    const origDisabled = btn.disabled;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="btn-spinner"></span><span>${loadingText}</span>`;
+    return () => {
+      btn.disabled = origDisabled;
+      btn.innerHTML = origHTML;
+      if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+    };
+  },
+
   // ── Init ─────────────────────────────────────────────────────
   async init() {
     this.user = auth.requireAnyRole(['admin', 'owner']);
@@ -584,21 +599,26 @@ const ADMIN = {
     const address = document.getElementById('branch-address').value.trim();
     if (!name) { showToast('Nama cabang wajib diisi', 'error'); return; }
 
+    const resetBtn = this._btnLoad('[data-admin-action="save-branch"]');
     let newBranchId = null;
-    if (id) {
-      const { error } = await db.from('branches').update({ name, address }).eq('id', id);
-      if (error) { showDbError(error, { action: 'menyimpan cabang', entity: 'Cabang' }); return; }
-    } else {
-      const { data, error } = await db.from('branches').insert({ name, address }).select('id').single();
-      if (error) { showDbError(error, { action: 'menyimpan cabang', entity: 'Cabang' }); return; }
-      newBranchId = data?.id || null;
-    }
+    try {
+      if (id) {
+        const { error } = await db.from('branches').update({ name, address }).eq('id', id);
+        if (error) { showDbError(error, { action: 'menyimpan cabang', entity: 'Cabang' }); return; }
+      } else {
+        const { data, error } = await db.from('branches').insert({ name, address }).select('id').single();
+        if (error) { showDbError(error, { action: 'menyimpan cabang', entity: 'Cabang' }); return; }
+        newBranchId = data?.id || null;
+      }
 
-    this.closeModal('modal-branch');
-    await this._refreshBranchesCache();
-    await this.loadBranches();
-    showToast('Cabang berhasil disimpan', 'success');
-    window.RBNDataEvents?.publish('settings:changed', { source: 'admin' });
+      this.closeModal('modal-branch');
+      await this._refreshBranchesCache();
+      await this.loadBranches();
+      showToast('Cabang berhasil disimpan', 'success');
+      window.RBNDataEvents?.publish('settings:changed', { source: 'admin' });
+    } finally {
+      resetBtn();
+    }
 
     // Offer copy menu for newly created branch
     if (newBranchId && this.branches.some(b => b.id !== newBranchId)) {
@@ -1154,6 +1174,8 @@ const ADMIN = {
       if (!valid.length) { showToast('Tambahkan minimal 1 varian dengan nama dan harga', 'error'); return; }
     }
 
+    const resetBtn = this._btnLoad('[data-admin-action="save-product"]', 'Menyimpan...');
+
     if (fileInput.files?.[0]) {
       const file = fileInput.files[0];
       try {
@@ -1176,66 +1198,70 @@ const ADMIN = {
           document.getElementById('product-image-url').value = imageUrl;
         } else {
           showToast('Upload gambar gagal: ' + (upJson.error || 'Unknown error'), 'error');
-          return;
+          resetBtn(); return;
         }
       } catch (upErr) {
         showToast('Upload gambar gagal: ' + upErr.message, 'error');
-        return;
+        resetBtn(); return;
       }
     }
 
     const payload = { name, category, image_url: imageUrl || null, has_variants: !isSimple, default_price: isSimple ? defaultPrice : null };
     let savedId = parseInt(id) || null;
 
-    if (id) {
-      const { error } = await db.from('products').update(payload).eq('id', id);
-      if (error) { showDbError(error, { action: 'menyimpan produk', entity: 'Produk' }); return; }
-    } else {
-      // Insert product
-      const { data: inserted, error } = await db.from('products').insert(payload).select().single();
-      if (error) { showDbError(error, { action: 'menyimpan produk', entity: 'Produk' }); return; }
-      savedId = inserted.id;
-      document.getElementById('product-id').value = savedId;
-      document.getElementById('product-modal-title').textContent = 'Edit Produk';
-
-      if (isSimple) {
-        // Insert single hidden variant so RPC process_transaction stays compatible
-        const { error: vErr } = await db.from('product_variants').insert({
-          product_id: savedId, name, price: defaultPrice, is_default: true
-        });
-        if (vErr) showToast('Produk tersimpan, tetapi varian belum tersimpan. Periksa varian produk lalu simpan ulang.', 'warning');
+    try {
+      if (id) {
+        const { error } = await db.from('products').update(payload).eq('id', id);
+        if (error) { showDbError(error, { action: 'menyimpan produk', entity: 'Produk' }); return; }
       } else {
-        // Bulk insert pending variants
-        const variantRows = this._pendingVariants
-          .filter(v => v.name?.trim() && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0)
-          .map(v => ({ product_id: savedId, name: v.name.trim(), price: parseFloat(v.price) }));
-        if (variantRows.length) {
-          const { error: vErr } = await db.from('product_variants').insert(variantRows);
-          if (vErr) { showToast('Produk tersimpan, tetapi sebagian varian belum tersimpan. Periksa varian produk lalu simpan ulang.', 'warning'); }
+        // Insert product
+        const { data: inserted, error } = await db.from('products').insert(payload).select().single();
+        if (error) { showDbError(error, { action: 'menyimpan produk', entity: 'Produk' }); return; }
+        savedId = inserted.id;
+        document.getElementById('product-id').value = savedId;
+        document.getElementById('product-modal-title').textContent = 'Edit Produk';
+
+        if (isSimple) {
+          // Insert single hidden variant so RPC process_transaction stays compatible
+          const { error: vErr } = await db.from('product_variants').insert({
+            product_id: savedId, name, price: defaultPrice, is_default: true
+          });
+          if (vErr) showToast('Produk tersimpan, tetapi varian belum tersimpan. Periksa varian produk lalu simpan ulang.', 'warning');
+        } else {
+          // Bulk insert pending variants
+          const variantRows = this._pendingVariants
+            .filter(v => v.name?.trim() && !isNaN(parseFloat(v.price)) && parseFloat(v.price) >= 0)
+            .map(v => ({ product_id: savedId, name: v.name.trim(), price: parseFloat(v.price) }));
+          if (variantRows.length) {
+            const { error: vErr } = await db.from('product_variants').insert(variantRows);
+            if (vErr) { showToast('Produk tersimpan, tetapi sebagian varian belum tersimpan. Periksa varian produk lalu simpan ulang.', 'warning'); }
+          }
+          this._pendingVariants = [];
         }
-        this._pendingVariants = [];
       }
-    }
 
-    // Sync branch_products
-    const checkedBranches = Array.from(document.querySelectorAll('.product-branch-cb:checked')).map(cb => parseInt(cb.value));
-    await db.from('branch_products').update({ is_active: false }).eq('product_id', savedId);
-    
-    for (const bId of checkedBranches) {
-      const { data: existing } = await db.from('branch_products').select('id').eq('branch_id', bId).eq('product_id', savedId).maybeSingle();
-      if (existing) {
-        await db.from('branch_products').update({ is_active: true }).eq('id', existing.id);
-      } else {
-        await db.from('branch_products').insert({ branch_id: bId, product_id: savedId, is_active: true });
+      // Sync branch_products
+      const checkedBranches = Array.from(document.querySelectorAll('.product-branch-cb:checked')).map(cb => parseInt(cb.value));
+      await db.from('branch_products').update({ is_active: false }).eq('product_id', savedId);
+
+      for (const bId of checkedBranches) {
+        const { data: existing } = await db.from('branch_products').select('id').eq('branch_id', bId).eq('product_id', savedId).maybeSingle();
+        if (existing) {
+          await db.from('branch_products').update({ is_active: true }).eq('id', existing.id);
+        } else {
+          await db.from('branch_products').insert({ branch_id: bId, product_id: savedId, is_active: true });
+        }
       }
-    }
 
-    this.closeModal('modal-product');
-    await this._refreshProductsCache();
-    await this.loadProducts();
-    showToast('Produk berhasil disimpan', 'success');
-    window.RBNDataEvents?.publish('products:changed', { source: 'admin' });
-    if (savedId) await this.loadProductModalVariants(savedId);
+      this.closeModal('modal-product');
+      await this._refreshProductsCache();
+      await this.loadProducts();
+      showToast('Produk berhasil disimpan', 'success');
+      window.RBNDataEvents?.publish('products:changed', { source: 'admin' });
+      if (savedId) await this.loadProductModalVariants(savedId);
+    } finally {
+      resetBtn();
+    }
   },
 
   async deleteProduct(id, name) {
@@ -1287,6 +1313,7 @@ const ADMIN = {
     const name = document.getElementById('product-category-name').value.trim();
     if (!name) { showToast('Nama kategori wajib diisi', 'error'); return; }
 
+    const resetBtn = this._btnLoad('[data-admin-action="save-product-category"]');
     const payload = { name };
     try {
       const { error } = id
@@ -1302,14 +1329,15 @@ const ADMIN = {
         }
         return;
       }
+      closeModal('modal-product-category');
+      await this._refreshCategoriesCache();
+      await this.loadProductCategories();
+      showToast('Kategori produk disimpan', 'success');
     } catch (e) {
       showDbError(e, { action: 'menyimpan kategori produk', entity: 'Kategori produk' });
-      return;
+    } finally {
+      resetBtn();
     }
-    closeModal('modal-product-category');
-    await this._refreshCategoriesCache();
-    await this.loadProductCategories();
-    showToast('Kategori produk disimpan', 'success');
   },
 
   async deleteProductCategory(id, name) {
@@ -1478,22 +1506,27 @@ const ADMIN = {
     const qty          = parseFloat(document.getElementById('recipe-item-qty').value);
     if (!ingredientId || isNaN(qty) || qty <= 0) { showToast('Lengkapi semua field', 'error'); return; }
 
-    if (id) {
-      const { error } = await db.from('recipe_items').update({ ingredient_id: ingredientId, quantity: qty }).eq('id', id);
-      if (error) { showDbError(error, { action: 'menyimpan bahan resep', entity: 'Bahan resep' }); return; }
-    } else {
-      let { data: recipe } = await db.from('recipes').select('id').eq('variant_id', variantId).maybeSingle();
-      if (!recipe) {
-        const { data: nr } = await db.from('recipes').insert({ variant_id: variantId }).select().single();
-        recipe = nr;
+    const resetBtn = this._btnLoad('[data-admin-action="save-recipe-item"]');
+    try {
+      if (id) {
+        const { error } = await db.from('recipe_items').update({ ingredient_id: ingredientId, quantity: qty }).eq('id', id);
+        if (error) { showDbError(error, { action: 'menyimpan bahan resep', entity: 'Bahan resep' }); return; }
+      } else {
+        let { data: recipe } = await db.from('recipes').select('id').eq('variant_id', variantId).maybeSingle();
+        if (!recipe) {
+          const { data: nr } = await db.from('recipes').insert({ variant_id: variantId }).select().single();
+          recipe = nr;
+        }
+        const { error } = await db.from('recipe_items').insert({ recipe_id: recipe.id, ingredient_id: ingredientId, quantity: qty });
+        if (error) { showDbError(error, { action: 'menyimpan bahan resep', entity: 'Bahan resep' }); return; }
       }
-      const { error } = await db.from('recipe_items').insert({ recipe_id: recipe.id, ingredient_id: ingredientId, quantity: qty });
-      if (error) { showDbError(error, { action: 'menyimpan bahan resep', entity: 'Bahan resep' }); return; }
+      this.closeModal('modal-recipe-item');
+      await this.loadRecipeItems();
+      showToast('Bahan resep disimpan', 'success');
+      window.RBNDataEvents?.publish('recipes:changed', { source: 'admin' });
+    } finally {
+      resetBtn();
     }
-    this.closeModal('modal-recipe-item');
-    await this.loadRecipeItems();
-    showToast('Bahan resep disimpan', 'success');
-    window.RBNDataEvents?.publish('recipes:changed', { source: 'admin' });
   },
 
   async deleteRecipeItem(id) {
@@ -1598,34 +1631,39 @@ const ADMIN = {
     const costPrice = parseFloat(document.getElementById('ing-cost-price').value) || 0;
     if (!name || !unit) { showToast('Nama dan satuan wajib diisi', 'error'); return; }
 
+    const resetBtn = this._btnLoad('[data-admin-action="save-ingredient"]');
     const payload = { name, unit, cost_price: costPrice };
     let savedId = id ? parseInt(id) : null;
 
-    if (id) {
-      const { error } = await db.from('ingredients').update(payload).eq('id', id);
-      if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
-    } else {
-      const { data, error } = await db.from('ingredients').insert(payload).select('id').single();
-      if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
-      savedId = data.id;
-    }
-
-    // Simpan mapping cabang (non-fatal jika tabel belum ada)
     try {
-      const checkedIds = [...document.querySelectorAll('.ing-branch-cb:checked')].map(cb => parseInt(cb.value));
-      await db.from('branch_ingredient_assignments').delete().eq('ingredient_id', savedId);
-      if (checkedIds.length > 0) {
-        await db.from('branch_ingredient_assignments').insert(
-          checkedIds.map(bid => ({ branch_id: bid, ingredient_id: savedId }))
-        );
+      if (id) {
+        const { error } = await db.from('ingredients').update(payload).eq('id', id);
+        if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
+      } else {
+        const { data, error } = await db.from('ingredients').insert(payload).select('id').single();
+        if (error) { showDbError(error, { action: 'menyimpan bahan', entity: 'Bahan baku' }); return; }
+        savedId = data.id;
       }
-    } catch { /* tabel belum ada, mapping dilewati */ }
 
-    this.closeModal('modal-ingredient');
-    await this._refreshIngredientsCache();
-    if (this.currentSection === 'ingredients') await this.loadIngredients();
-    else await this.loadInventory();
-    showToast('Bahan berhasil disimpan', 'success');
+      // Simpan mapping cabang (non-fatal jika tabel belum ada)
+      try {
+        const checkedIds = [...document.querySelectorAll('.ing-branch-cb:checked')].map(cb => parseInt(cb.value));
+        await db.from('branch_ingredient_assignments').delete().eq('ingredient_id', savedId);
+        if (checkedIds.length > 0) {
+          await db.from('branch_ingredient_assignments').insert(
+            checkedIds.map(bid => ({ branch_id: bid, ingredient_id: savedId }))
+          );
+        }
+      } catch { /* tabel belum ada, mapping dilewati */ }
+
+      this.closeModal('modal-ingredient');
+      await this._refreshIngredientsCache();
+      if (this.currentSection === 'ingredients') await this.loadIngredients();
+      else await this.loadInventory();
+      showToast('Bahan berhasil disimpan', 'success');
+    } finally {
+      resetBtn();
+    }
   },
 
   // ── Inventory ─────────────────────────────────────────────────
@@ -1715,6 +1753,7 @@ const ADMIN = {
       return;
     }
 
+    const resetBtn = this._btnLoad('[data-admin-action="save-inventory-adjust"]', 'Menyimpan...');
     try {
       const invType = { stock_in:'in', stock_out:'out', opname:'opname' }[type] || 'in';
       await inventoryService.adjustStock({
@@ -1727,6 +1766,8 @@ const ADMIN = {
       window.RBNDataEvents?.publish('inventory:changed', { source: 'admin' });
     } catch (e) {
       showDbError(e, { action: 'memperbarui stok', entity: 'Stok' });
+    } finally {
+      resetBtn();
     }
   },
 
@@ -2404,12 +2445,13 @@ const ADMIN = {
     const branchId = role !== 'investor' ? (document.getElementById('staff-branch-id').value || null) : null;
 
     if (!name) { showToast('Username wajib diisi', 'error'); return; }
+    if (!id && !password.trim()) { showToast('Password wajib diisi', 'error'); return; }
 
+    const resetBtn = this._btnLoad('[data-admin-action="save-staff"]');
     let savedUserId = id ? Number(id) : null;
     const payload = { name, role, branch_id: branchId };
     try {
       if (!id) {
-        if (!password.trim()) { showToast('Password wajib diisi', 'error'); return; }
         payload.password = password.trim();
         const { data: inserted, error } = await db.from('users').insert(payload).select('id').single();
         if (error) throw error;
@@ -2419,28 +2461,29 @@ const ADMIN = {
         const { error } = await db.from('users').update(payload).eq('id', id);
         if (error) throw error;
       }
+
+      if (role === 'investor' && savedUserId) {
+        const selectedBranches = this._getCheckedBranchIds('investor-branch-checkboxes');
+        await db.from('investor_branch_access').delete().eq('user_id', savedUserId);
+        if (selectedBranches.length) {
+          const rows = selectedBranches.map(bid => ({ user_id: savedUserId, branch_id: bid, created_by: this.user.id }));
+          const { error: iaErr } = await db.from('investor_branch_access').insert(rows);
+          if (iaErr) { showToast('User disimpan tapi akses cabang gagal: ' + iaErr.message, 'warn'); }
+        }
+      }
+
+      this.closeModal('modal-staff');
+      await this.loadStaff();
+      showToast('User berhasil disimpan', 'success');
     } catch (e) {
       if (e && e.code === '23505') {
         showToast('Username sudah digunakan, pilih username lain', 'error');
       } else {
         showDbError(e, { action: 'menyimpan user', entity: 'User' });
       }
-      return;
+    } finally {
+      resetBtn();
     }
-
-    if (role === 'investor' && savedUserId) {
-      const selectedBranches = this._getCheckedBranchIds('investor-branch-checkboxes');
-      await db.from('investor_branch_access').delete().eq('user_id', savedUserId);
-      if (selectedBranches.length) {
-        const rows = selectedBranches.map(bid => ({ user_id: savedUserId, branch_id: bid, created_by: this.user.id }));
-        const { error: iaErr } = await db.from('investor_branch_access').insert(rows);
-        if (iaErr) { showToast('User disimpan tapi akses cabang gagal: ' + iaErr.message, 'warn'); }
-      }
-    }
-
-    this.closeModal('modal-staff');
-    await this.loadStaff();
-    showToast('User berhasil disimpan', 'success');
   },
 
   async deleteStaff(id, name) {
@@ -3361,12 +3404,17 @@ const ADMIN = {
     const name = document.getElementById('cash-cat-name').value.trim();
     const type = document.getElementById('cash-cat-type').value;
     if (!name) { showToast('Nama kategori wajib diisi', 'error'); return; }
+    const resetBtn = this._btnLoad('[data-admin-action="save-cash-category"]');
     try {
       await cashService.saveCategory({ id: id || null, name, type });
       this.closeModal('modal-cash-category');
       await this.loadCashCategories();
       showToast('Kategori disimpan', 'success');
-    } catch (e) { showDbError(e, { action: 'menyimpan kategori kas', entity: 'Kategori kas' }); }
+    } catch (e) {
+      showDbError(e, { action: 'menyimpan kategori kas', entity: 'Kategori kas' });
+    } finally {
+      resetBtn();
+    }
   },
 
   async deleteCashCategory(id, name) {
