@@ -4444,36 +4444,43 @@ function poFindMaterialMapping(PDO $pdo, string $materialId, int $branchId): ?ar
 }
 
 // ── Helper: cek apakah bahan PO di-ignore global ─────────────────────────────
-function poIsMaterialGloballyIgnored(PDO $pdo, string $materialId): bool {
+function poIsMaterialGloballyIgnored(PDO $pdo, string $materialId, string $materialName = ''): bool {
     $stmt = $pdo->prepare("
         SELECT 1 FROM po_ignored_materials
-        WHERE po_material_id = ? AND pos_branch_id IS NULL AND is_active = 1
+        WHERE pos_branch_id IS NULL AND is_active = 1
+          AND (po_material_id = ?
+               OR (? != '' AND LOWER(TRIM(po_material_name)) = LOWER(TRIM(?))))
         LIMIT 1
     ");
-    $stmt->execute([$materialId]);
+    $stmt->execute([$materialId, $materialName, $materialName]);
     return (bool)$stmt->fetch();
 }
 
 // ── Helper: cek apakah bahan PO di-ignore untuk cabang ini ───────────────────
-function poIsMaterialIgnored(PDO $pdo, string $materialId, int $branchId): bool {
+function poIsMaterialIgnored(PDO $pdo, string $materialId, int $branchId, string $materialName = ''): bool {
     // Cek global dulu
-    if (poIsMaterialGloballyIgnored($pdo, $materialId)) return true;
+    if (poIsMaterialGloballyIgnored($pdo, $materialId, $materialName)) return true;
 
     // Cek khusus cabang
     $stmt = $pdo->prepare("
         SELECT 1 FROM po_ignored_materials
-        WHERE po_material_id = ? AND pos_branch_id = ? AND is_active = 1
+        WHERE (po_material_id = ?
+               OR (? != '' AND LOWER(TRIM(po_material_name)) = LOWER(TRIM(?))))
+          AND pos_branch_id = ? AND is_active = 1
         LIMIT 1
     ");
-    $stmt->execute([$materialId, $branchId]);
+    $stmt->execute([$materialId, $materialName, $materialName, $branchId]);
     return (bool)$stmt->fetch();
 }
 
 function poApplyIgnoredMaterialStatuses(PDO $pdo): void {
+    // Cocokkan via UUID (primary) ATAU via nama bahan (fallback untuk kasus mismatch UUID)
     $pdo->exec("
         UPDATE po_stock_sync_items psi
         JOIN po_ignored_materials pim
-          ON pim.po_material_id = psi.po_material_id
+          ON (pim.po_material_id = psi.po_material_id
+              OR (TRIM(pim.po_material_name) != ''
+                  AND LOWER(TRIM(pim.po_material_name)) = LOWER(TRIM(psi.po_material_name))))
          AND pim.is_active = 1
          AND (pim.pos_branch_id IS NULL OR pim.pos_branch_id = psi.pos_branch_id)
         SET psi.sync_status = 'diabaikan_dari_stok_pos',
@@ -4629,7 +4636,7 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
         }
 
         // Bahan yang di-ignore global tidak perlu mapping bahan maupun alokasi cabang.
-        if (poIsMaterialGloballyIgnored($pdo, $materialId)) {
+        if (poIsMaterialGloballyIgnored($pdo, $materialId, $materialName)) {
             $results[] = ['po_item_id' => $poItemId, 'status' => 'diabaikan_dari_stok_pos'];
             $skippedCount++;
             poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived, null, null, null, 0, 0, null, 'diabaikan_dari_stok_pos', null);
@@ -4707,7 +4714,7 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
             $branchQty  = (float)$tb['qty'];
 
             // Cek ignored
-            if (poIsMaterialIgnored($pdo, $materialId, $branchId)) {
+            if (poIsMaterialIgnored($pdo, $materialId, $branchId, $materialName)) {
                 $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'diabaikan_dari_stok_pos'];
                 $skippedCount++;
                 poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, null, null, 0, 0, null, 'diabaikan_dari_stok_pos', null);

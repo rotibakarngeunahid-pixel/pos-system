@@ -5142,14 +5142,19 @@ const ADMIN = {
         const err  = sum.errors   ?? 0;
         const poIdShort = (r.po_id || '').slice(0, 8) + (r.po_id?.length > 8 ? '…' : '');
 
-        const itemRows = items.map(item => {
+        const showIgnored = document.getElementById('po-sync-runs-show-ignored')?.checked ?? false;
+        const visibleItems = showIgnored ? items : items.filter(it => it.sync_status !== 'diabaikan_dari_stok_pos');
+        const hiddenIgnoredCount = items.length - visibleItems.length;
+
+        const itemRows = visibleItems.map(item => {
           const delta = Number(item.delta_qty || 0);
           const deltaCls = delta < 0 ? 'po-run-delta-neg' : delta > 0 ? 'po-run-delta-pos' : 'po-run-delta-zero';
           const errMsg = item.error_message ? `<div style="color:#dc2626;font-size:10.5px;margin-top:2px;">${escHtml(item.error_message)}</div>` : '';
+          const matUuid = item.po_material_id || item.po_item_id || '';
           return `<tr>
             <td>
               <div class="po-run-mat-name">${escHtml(item.po_material_name || '-')}</div>
-              <div class="po-run-mat-uuid" title="${escHtml(item.po_item_id || '')}">${escHtml(item.po_item_id || '')}</div>
+              <div class="po-run-mat-uuid" title="Material ID: ${escHtml(matUuid)}">${escHtml(matUuid)}</div>
             </td>
             <td>${escHtml(item.pos_ingredient_name || '-')}</td>
             <td>${escHtml(item.branch_name || item.pos_branch_id || '-')}</td>
@@ -5161,15 +5166,19 @@ const ADMIN = {
           </tr>`;
         }).join('');
 
+        const ignoredNote = hiddenIgnoredCount > 0
+          ? `<div style="padding:8px 12px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border,#e5e7eb);background:var(--bg-alt);">${hiddenIgnoredCount} bahan diabaikan disembunyikan — centang "Tampilkan bahan diabaikan" untuk melihat</div>`
+          : '';
+
         const bodyContent = items.length
           ? `<table class="po-run-items-table">
               <thead><tr>
-                <th>Bahan PO</th><th>Bahan POS</th><th>Cabang</th>
+                <th>Bahan PO (Material ID)</th><th>Bahan POS</th><th>Cabang</th>
                 <th style="text-align:right;">Qty PO</th><th style="text-align:right;">Target POS</th>
                 <th style="text-align:right;">Delta</th><th>Status</th><th>Error</th>
               </tr></thead>
-              <tbody>${itemRows}</tbody>
-             </table>`
+              <tbody>${itemRows || `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:16px;">Semua item diabaikan</td></tr>`}</tbody>
+             </table>${ignoredNote}`
           : `<div class="po-run-empty">Tidak ada detail item</div>`;
 
         return `<div class="po-run-card">
@@ -5207,6 +5216,12 @@ const ADMIN = {
           if (chev) chev.classList.toggle('is-open', !isOpen);
         });
       });
+
+      const ignoredChk = document.getElementById('po-sync-runs-show-ignored');
+      if (ignoredChk && !ignoredChk._listenerAttached) {
+        ignoredChk._listenerAttached = true;
+        ignoredChk.addEventListener('change', () => ADMIN.poSyncLoadRuns());
+      }
     } catch(e) {
       container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
     }
