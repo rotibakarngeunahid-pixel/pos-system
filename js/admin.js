@@ -5070,17 +5070,64 @@ const ADMIN = {
         container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada riwayat sync</div></div>';
         return;
       }
+      const fmtQty = (value) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '0';
+        return n.toLocaleString('id-ID', { maximumFractionDigits: 4 });
+      };
+      const itemStatusBadge = (status) => {
+        const cls = {
+          sudah_disinkronkan: 'success',
+          butuh_mapping_admin: 'warning',
+          butuh_alokasi_cabang: 'warning',
+          diabaikan_dari_stok_pos: 'secondary',
+          gagal_sinkron: 'danger',
+          rollback_butuh_review_admin: 'danger',
+        }[status] || 'secondary';
+        return `<span class="badge badge-${cls}">${escHtml(status || '-')}</span>`;
+      };
       container.innerHTML = `<table class="data-table"><thead><tr>
-        <th>ID PO</th><th>Trigger</th><th>Status</th><th>Ringkasan</th><th>Waktu</th>
+        <th>ID PO</th><th>Trigger</th><th>Status</th><th>Ringkasan</th><th>Detail Item</th><th>Waktu</th>
       </tr></thead><tbody>
         ${data.map(r => {
           const sum = typeof r.summary === 'string' ? JSON.parse(r.summary || '{}') : (r.summary || {});
           const statusClass = { success: 'success', partial_success: 'warning', failed: 'danger', pending: 'secondary' }[r.status] || 'secondary';
+          const items = r.items || [];
+          const details = items.length ? `<details>
+            <summary style="cursor:pointer;font-weight:700;color:var(--primary);font-size:12px;">${items.length} baris sync</summary>
+            <div style="overflow-x:auto;margin-top:8px;">
+              <table class="data-table" style="font-size:12px;margin:0;">
+                <thead><tr>
+                  <th>Bahan PO</th><th>Bahan POS</th><th>Cabang</th><th>Qty PO</th><th>Target POS</th><th>Delta</th><th>Status</th><th>Error</th>
+                </tr></thead>
+                <tbody>
+                  ${items.map(item => {
+                    const delta = Number(item.delta_qty || 0);
+                    const deltaColor = delta < 0 ? 'var(--danger)' : delta > 0 ? 'var(--success)' : 'var(--text-muted)';
+                    return `<tr>
+                      <td>
+                        <div style="font-weight:600;">${escHtml(item.po_material_name || '-')}</div>
+                        <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(item.po_item_id || '')}</div>
+                      </td>
+                      <td>${escHtml(item.pos_ingredient_name || '-')}</td>
+                      <td>${escHtml(item.branch_name || item.pos_branch_id || '-')}</td>
+                      <td style="text-align:right;">${fmtQty(item.po_qty_received)}</td>
+                      <td style="text-align:right;">${fmtQty(item.target_sync_qty)}</td>
+                      <td style="text-align:right;font-weight:700;color:${deltaColor};">${delta > 0 ? '+' : ''}${fmtQty(delta)}</td>
+                      <td>${itemStatusBadge(item.sync_status)}</td>
+                      <td style="max-width:220px;color:var(--danger);">${escHtml(item.error_message || '')}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </details>` : '<span class="text-muted">Tidak ada detail</span>';
           return `<tr>
             <td style="font-size:12px;">${escHtml(r.po_id)}</td>
             <td>${escHtml(r.trigger_type)}</td>
             <td><span class="badge badge-${statusClass}">${escHtml(r.status)}</span></td>
-            <td>✅${sum.success ?? 0} ⏭${sum.skipped ?? 0} ❌${sum.errors ?? 0}</td>
+            <td>OK ${sum.success ?? 0} / Skip ${sum.skipped ?? 0} / Error ${sum.errors ?? 0}</td>
+            <td>${details}</td>
             <td style="font-size:12px;">${r.started_at ? r.started_at.slice(0,16) : ''}</td>
           </tr>`;
         }).join('')}

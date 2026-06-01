@@ -4475,6 +4475,20 @@ function poResolveBranch(PDO $pdo, string $outletId): ?array {
     return $stmt->fetch() ?: null;
 }
 
+function poGetPreviouslySyncedBranches(PDO $pdo, string $poId, string $poItemId): array {
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT psi.pos_branch_id AS branch_id, b.name AS branch_name
+        FROM po_stock_sync_items psi
+        LEFT JOIN branches b ON b.id = psi.pos_branch_id
+        WHERE psi.po_id = ?
+          AND psi.po_item_id = ?
+          AND psi.pos_branch_id IS NOT NULL
+          AND COALESCE(psi.target_sync_qty, 0) <> 0
+    ");
+    $stmt->execute([$poId, $poItemId]);
+    return $stmt->fetchAll();
+}
+
 // ── Helper: tulis log inventory + update stok dalam satu transaksi ────────────
 function poApplyStockDelta(
     PDO $pdo,
@@ -4600,6 +4614,8 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
 
         // Tentukan target distribusi per cabang
         $targetBranches = [];
+        $previousBranches = poGetPreviouslySyncedBranches($pdo, $poId, $poItemId);
+        $isRevisionLike = in_array($triggerType, ['po_revised', 'po_cancelled', 'manual_retry'], true);
         if (!empty($distributions)) {
             foreach ($distributions as $dist) {
                 $distOutletId = (string)($dist['outlet_id'] ?? '');
@@ -4626,10 +4642,36 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
             }
             $targetBranches[] = ['branch_id' => (int)$branchRow['pos_branch_id'], 'branch_name' => $branchRow['pos_branch_name'], 'outlet_id' => $outletId, 'qty' => $qtyReceived];
         } else {
-            $results[] = ['po_item_id' => $poItemId, 'status' => 'butuh_alokasi_cabang', 'error' => 'Tidak ada informasi outlet/cabang untuk item ini'];
-            $skippedCount++;
-            poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived, null, null, null, 0, 0, null, 'butuh_alokasi_cabang', 'Tidak ada outlet');
-            continue;
+            if ($isRevisionLike && !empty($previousBranches)) {
+                foreach ($previousBranches as $prevBranch) {
+                    $targetBranches[] = [
+                        'branch_id' => (int)$prevBranch['branch_id'],
+                        'branch_name' => $prevBranch['branch_name'] ?? '',
+                        'outlet_id' => '',
+                        'qty' => 0.0,
+                    ];
+                }
+            } else {
+                $results[] = ['po_item_id' => $poItemId, 'status' => 'butuh_alokasi_cabang', 'error' => 'Tidak ada informasi outlet/cabang untuk item ini'];
+                $skippedCount++;
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived, null, null, null, 0, 0, null, 'butuh_alokasi_cabang', 'Tidak ada outlet');
+                continue;
+            }
+        }
+
+        if ($isRevisionLike && !empty($previousBranches)) {
+            $currentBranchIds = [];
+            foreach ($targetBranches as $tb) $currentBranchIds[(int)$tb['branch_id']] = true;
+            foreach ($previousBranches as $prevBranch) {
+                $prevBranchId = (int)$prevBranch['branch_id'];
+                if (!$prevBranchId || isset($currentBranchIds[$prevBranchId])) continue;
+                $targetBranches[] = [
+                    'branch_id' => $prevBranchId,
+                    'branch_name' => $prevBranch['branch_name'] ?? '',
+                    'outlet_id' => '',
+                    'qty' => 0.0,
+                ];
+            }
         }
 
         // Proses setiap target cabang
@@ -5007,6 +5049,23 @@ function rpc_po_sync_get_runs(array $p): mixed {
         ");
         $itemStmt->execute([$run['id']]);
         $run['item_summary'] = $itemStmt->fetchAll();
+
+        $detailStmt = $pdo->prepare("
+            SELECT
+              psi.id, psi.po_item_id, psi.po_material_id, psi.po_material_name,
+              psi.po_item_source, psi.po_qty_received,
+              psi.pos_branch_id, b.name AS branch_name,
+              psi.pos_ingredient_id, psi.pos_ingredient_name, i.unit AS ingredient_unit,
+              psi.target_sync_qty, psi.previous_synced_qty, psi.delta_qty,
+              psi.sync_status, psi.error_message, psi.inventory_log_id, psi.updated_at
+            FROM po_stock_sync_items psi
+            LEFT JOIN branches b ON b.id = psi.pos_branch_id
+            LEFT JOIN ingredients i ON i.id = psi.pos_ingredient_id
+            WHERE psi.sync_run_id = ?
+            ORDER BY b.name, psi.po_material_name
+        ");
+        $detailStmt->execute([$run['id']]);
+        $run['items'] = $detailStmt->fetchAll();
     }
     return $runs;
 }
