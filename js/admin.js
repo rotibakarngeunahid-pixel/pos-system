@@ -4415,7 +4415,7 @@ const ADMIN = {
 
   // Ambil URL server PO dari localStorage (bisa diset user)
   poServerUrl() {
-    return (localStorage.getItem('rbn_po_server_url') || 'https://purchaseorder-zeta.vercel.app').replace(/\/$/, '');
+    return (localStorage.getItem('rbn_po_server_url') || 'https://purchase-order-system-iota.vercel.app').replace(/\/$/, '');
   },
 
   // Fetch outlet + material dari purchase_order server
