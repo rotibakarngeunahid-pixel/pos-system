@@ -627,6 +627,9 @@
         <div class="section-header">
           <h2 class="section-title"><i data-lucide="link" class="icon-sm"></i> Sinkronisasi PO → Stok POS</h2>
           <div class="section-actions">
+            <button class="btn btn-outline btn-sm" data-admin-action="po-sync-configure-server">
+              <i data-lucide="settings" class="icon-sm"></i> URL Server PO
+            </button>
             <button class="btn btn-outline btn-sm" data-admin-action="po-sync-refresh">
               <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh Semua
             </button>
@@ -634,12 +637,7 @@
         </div>
 
         <!-- Warning bila server PO tidak bisa diakses -->
-        <div id="po-sync-server-warning" style="display:none;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--r-sm);font-size:13px;color:#92400e;margin-bottom:16px;">
-          ⚠️ <span></span>
-          &nbsp;—&nbsp; Pastikan URL server PO benar di
-          <button onclick="const u=prompt('URL Server Purchase Order:',localStorage.getItem('rbn_po_server_url')||'https://purchaseorder-zeta.vercel.app');if(u){localStorage.setItem('rbn_po_server_url',u);location.reload();}"
-            style="background:none;border:none;cursor:pointer;color:#92400e;font-weight:700;text-decoration:underline;">Klik untuk ubah URL</button>
-        </div>
+        <div id="po-sync-server-warning" style="display:none;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--r-sm);font-size:13px;color:#92400e;margin-bottom:16px;"></div>
 
         <!-- ── Tab nav ── -->
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:24px;border-bottom:2px solid var(--border,#e5e7eb);padding-bottom:0;">

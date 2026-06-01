@@ -1,5 +1,10 @@
 'use strict';
 
+const PO_SYNC_DEFAULT_SERVER_URL = 'https://purchase-order-system-iota.vercel.app';
+const PO_SYNC_LEGACY_SERVER_URLS = new Set([
+  'https://purchaseorder-zeta.vercel.app',
+]);
+
 const ADMIN = {
   user:        null,
   branches:    [],
@@ -115,6 +120,7 @@ const ADMIN = {
         case 'admin-reject-transfer': this.adminRejectTransfer(Number(btn.dataset.id)); break;
         // PO sync actions
         case 'po-sync-refresh': this.loadPoSyncSection(); break;
+        case 'po-sync-configure-server': this.poSyncConfigureServer(); break;
         case 'po-sync-load-pending': this.poSyncLoadPendingMappings(); break;
         case 'po-sync-load-runs': this.poSyncLoadRuns(); break;
         case 'po-sync-save-outlet-mapping': this.poSyncSaveOutletMapping(); break;
@@ -4414,13 +4420,52 @@ const ADMIN = {
   // ══════════════════════════════════════════════════════════════════════════
 
   // Ambil URL server PO dari localStorage (bisa diset user)
+  poNormalizeServerUrl(url) {
+    return String(url || '').trim().replace(/\/+$/, '');
+  },
+
   poServerUrl() {
-    return (localStorage.getItem('rbn_po_server_url') || 'https://purchase-order-system-iota.vercel.app').replace(/\/$/, '');
+    return this.poNormalizeServerUrl(localStorage.getItem('rbn_po_server_url') || PO_SYNC_DEFAULT_SERVER_URL);
+  },
+
+  poSyncConfigureServer() {
+    const current = this.poServerUrl();
+    const value = prompt('URL Server Purchase Order:', current || PO_SYNC_DEFAULT_SERVER_URL);
+    if (value === null) return;
+
+    const next = this.poNormalizeServerUrl(value);
+    if (next) {
+      localStorage.setItem('rbn_po_server_url', next);
+    } else {
+      localStorage.removeItem('rbn_po_server_url');
+    }
+    this.loadPoSyncSection();
+  },
+
+  poSyncFormatFetchError(error, url) {
+    if (String(error?.message || '').toLowerCase() === 'failed to fetch') {
+      return `Tidak bisa menghubungi ${url}. Cek URL server PO atau akses CORS.`;
+    }
+    return error?.message || 'Server PO tidak bisa diakses.';
   },
 
   // Fetch outlet + material dari purchase_order server
   async poSyncFetchSetupData() {
     const url = this.poServerUrl();
+    try {
+      return await this.poSyncFetchSetupDataFromUrl(url);
+    } catch (error) {
+      if (PO_SYNC_LEGACY_SERVER_URLS.has(url)) {
+        localStorage.setItem('rbn_po_server_url', PO_SYNC_DEFAULT_SERVER_URL);
+        const payload = await this.poSyncFetchSetupDataFromUrl(PO_SYNC_DEFAULT_SERVER_URL);
+        payload._warning = `URL server PO lama (${url}) sudah tidak aktif. Sistem memakai ${PO_SYNC_DEFAULT_SERVER_URL}.`;
+        return payload;
+      }
+      throw new Error(this.poSyncFormatFetchError(error, url));
+    }
+  },
+
+  async poSyncFetchSetupDataFromUrl(url) {
     const endpoint = `${url}/api/public/pos-setup-data`;
     const res = await fetch(endpoint, { headers: { Accept: 'application/json' } });
     const contentType = res.headers.get('content-type') || '';
@@ -4481,6 +4526,11 @@ const ADMIN = {
     this._poSetupData = null;
     try {
       this._poSetupData = await this.poSyncFetchSetupData();
+      const warn = document.getElementById('po-sync-server-warning');
+      if (warn) {
+        warn.style.display = this._poSetupData?._warning ? '' : 'none';
+        warn.textContent = this._poSetupData?._warning || '';
+      }
     } catch(e) {
       const warn = document.getElementById('po-sync-server-warning');
       if (warn) {
