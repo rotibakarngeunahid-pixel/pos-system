@@ -5104,63 +5104,109 @@ const ADMIN = {
         if (!Number.isFinite(n)) return '0';
         return n.toLocaleString('id-ID', { maximumFractionDigits: 4 });
       };
-      const itemStatusBadge = (status) => {
-        const cls = {
-          sudah_disinkronkan: 'success',
-          butuh_mapping_admin: 'warning',
-          butuh_alokasi_cabang: 'warning',
-          diabaikan_dari_stok_pos: 'secondary',
-          gagal_sinkron: 'danger',
-          rollback_butuh_review_admin: 'danger',
-        }[status] || 'secondary';
-        return `<span class="badge badge-${cls}">${escHtml(status || '-')}</span>`;
+      const fmtTime = (ts) => {
+        if (!ts) return '';
+        try {
+          return new Date(ts).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        } catch { return ts.slice(0,16); }
       };
-      container.innerHTML = `<table class="data-table"><thead><tr>
-        <th>ID PO</th><th>Trigger</th><th>Status</th><th>Ringkasan</th><th>Detail Item</th><th>Waktu</th>
-      </tr></thead><tbody>
-        ${runs.map(r => {
-          const sum = typeof r.summary === 'string' ? JSON.parse(r.summary || '{}') : (r.summary || {});
-          const statusClass = { success: 'success', partial_success: 'warning', failed: 'danger', pending: 'secondary' }[r.status] || 'secondary';
-          const items = r.items || [];
-          const details = items.length ? `<details>
-            <summary style="cursor:pointer;font-weight:700;color:var(--primary);font-size:12px;">${items.length} baris sync</summary>
-            <div style="overflow-x:auto;margin-top:8px;">
-              <table class="data-table" style="font-size:12px;margin:0;">
-                <thead><tr>
-                  <th>Bahan PO</th><th>Bahan POS</th><th>Cabang</th><th>Qty PO</th><th>Target POS</th><th>Delta</th><th>Status</th><th>Error</th>
-                </tr></thead>
-                <tbody>
-                  ${items.map(item => {
-                    const delta = Number(item.delta_qty || 0);
-                    const deltaColor = delta < 0 ? 'var(--danger)' : delta > 0 ? 'var(--success)' : 'var(--text-muted)';
-                    return `<tr>
-                      <td>
-                        <div style="font-weight:600;">${escHtml(item.po_material_name || '-')}</div>
-                        <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escHtml(item.po_item_id || '')}</div>
-                      </td>
-                      <td>${escHtml(item.pos_ingredient_name || '-')}</td>
-                      <td>${escHtml(item.branch_name || item.pos_branch_id || '-')}</td>
-                      <td style="text-align:right;">${fmtQty(item.po_qty_received)}</td>
-                      <td style="text-align:right;">${fmtQty(item.target_sync_qty)}</td>
-                      <td style="text-align:right;font-weight:700;color:${deltaColor};">${delta > 0 ? '+' : ''}${fmtQty(delta)}</td>
-                      <td>${itemStatusBadge(item.sync_status)}</td>
-                      <td style="max-width:220px;color:var(--danger);">${escHtml(item.error_message || '')}</td>
-                    </tr>`;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
-          </details>` : '<span class="text-muted">Tidak ada detail</span>';
+      const itemStatusBadge = (status) => {
+        const map = {
+          sudah_disinkronkan:           { cls:'success',   label:'Disinkronkan' },
+          butuh_mapping_admin:          { cls:'warning',   label:'Butuh Mapping' },
+          butuh_alokasi_cabang:         { cls:'warning',   label:'Butuh Outlet' },
+          diabaikan_dari_stok_pos:      { cls:'secondary', label:'Diabaikan' },
+          gagal_sinkron:                { cls:'danger',    label:'Gagal' },
+          rollback_butuh_review_admin:  { cls:'danger',    label:'Rollback' },
+        };
+        const m = map[status] || { cls:'secondary', label: status || '-' };
+        return `<span class="badge badge-${m.cls}">${escHtml(m.label)}</span>`;
+      };
+      const triggerLabel = (t) => ({
+        po_received: 'PO Diterima',
+        manual:      'Manual',
+        retry:       'Retry',
+      }[t] || escHtml(t || '-'));
+      const statusRunBadge = (s) => {
+        const map = { success:'success', partial_success:'warning', failed:'danger', pending:'secondary' };
+        const labels = { success:'Sukses', partial_success:'Sebagian', failed:'Gagal', pending:'Pending' };
+        const cls = map[s] || 'secondary';
+        return `<span class="badge badge-${cls}">${labels[s] || escHtml(s || '-')}</span>`;
+      };
+
+      const cards = runs.map((r, idx) => {
+        const sum = typeof r.summary === 'string' ? JSON.parse(r.summary || '{}') : (r.summary || {});
+        const items = r.items || [];
+        const ok   = sum.success  ?? 0;
+        const skip = sum.skipped  ?? 0;
+        const err  = sum.errors   ?? 0;
+        const poIdShort = (r.po_id || '').slice(0, 8) + (r.po_id?.length > 8 ? '…' : '');
+
+        const itemRows = items.map(item => {
+          const delta = Number(item.delta_qty || 0);
+          const deltaCls = delta < 0 ? 'po-run-delta-neg' : delta > 0 ? 'po-run-delta-pos' : 'po-run-delta-zero';
+          const errMsg = item.error_message ? `<div style="color:#dc2626;font-size:10.5px;margin-top:2px;">${escHtml(item.error_message)}</div>` : '';
           return `<tr>
-            <td style="font-size:12px;">${escHtml(r.po_id)}</td>
-            <td>${escHtml(r.trigger_type)}</td>
-            <td><span class="badge badge-${statusClass}">${escHtml(r.status)}</span></td>
-            <td>OK ${sum.success ?? 0} / Skip ${sum.skipped ?? 0} / Error ${sum.errors ?? 0}</td>
-            <td>${details}</td>
-            <td style="font-size:12px;">${r.started_at ? r.started_at.slice(0,16) : ''}</td>
+            <td>
+              <div class="po-run-mat-name">${escHtml(item.po_material_name || '-')}</div>
+              <div class="po-run-mat-uuid" title="${escHtml(item.po_item_id || '')}">${escHtml(item.po_item_id || '')}</div>
+            </td>
+            <td>${escHtml(item.pos_ingredient_name || '-')}</td>
+            <td>${escHtml(item.branch_name || item.pos_branch_id || '-')}</td>
+            <td class="po-run-qty">${fmtQty(item.po_qty_received)}</td>
+            <td class="po-run-qty">${fmtQty(item.target_sync_qty)}</td>
+            <td class="po-run-qty"><span class="${deltaCls}" style="font-weight:700;">${delta > 0 ? '+' : ''}${fmtQty(delta)}</span></td>
+            <td>${itemStatusBadge(item.sync_status)}</td>
+            <td>${errMsg}</td>
           </tr>`;
-        }).join('')}
-      </tbody></table>`;
+        }).join('');
+
+        const bodyContent = items.length
+          ? `<table class="po-run-items-table">
+              <thead><tr>
+                <th>Bahan PO</th><th>Bahan POS</th><th>Cabang</th>
+                <th style="text-align:right;">Qty PO</th><th style="text-align:right;">Target POS</th>
+                <th style="text-align:right;">Delta</th><th>Status</th><th>Error</th>
+              </tr></thead>
+              <tbody>${itemRows}</tbody>
+             </table>`
+          : `<div class="po-run-empty">Tidak ada detail item</div>`;
+
+        return `<div class="po-run-card">
+          <div class="po-run-card-header" data-po-run-idx="${idx}">
+            <div class="po-run-id" title="${escHtml(r.po_id || '')}">${poIdShort || '-'}</div>
+            <div class="po-run-meta">
+              ${statusRunBadge(r.status)}
+              <span style="font-size:12px;color:var(--text-muted);">${triggerLabel(r.trigger_type)}</span>
+              <div class="po-run-summary-stats">
+                <span class="po-run-stat ok"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${ok} OK</span>
+                ${skip > 0 ? `<span class="po-run-stat skip">${skip} Skip</span>` : ''}
+                ${err  > 0 ? `<span class="po-run-stat err"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> ${err} Error</span>` : ''}
+              </div>
+            </div>
+            <div class="po-run-time">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              ${fmtTime(r.started_at)}
+            </div>
+            <svg class="po-run-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="po-run-body" id="po-run-body-${idx}">${bodyContent}</div>
+        </div>`;
+      }).join('');
+
+      container.innerHTML = cards;
+
+      container.querySelectorAll('.po-run-card-header').forEach(header => {
+        header.addEventListener('click', () => {
+          const idx  = header.dataset.poRunIdx;
+          const body = document.getElementById(`po-run-body-${idx}`);
+          const chev = header.querySelector('.po-run-chevron');
+          const isOpen = body.classList.contains('is-open');
+          body.classList.toggle('is-open', !isOpen);
+          header.classList.toggle('is-open', !isOpen);
+          if (chev) chev.classList.toggle('is-open', !isOpen);
+        });
+      });
     } catch(e) {
       container.innerHTML = `<div class="text-danger">Gagal memuat: ${escHtml(e.message)}</div>`;
     }
