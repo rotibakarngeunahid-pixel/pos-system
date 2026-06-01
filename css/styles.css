@@ -5490,30 +5490,67 @@ tbody tr:hover td { background: var(--surface-2); }
   .section-toolbar .btn { justify-content: center; }
 }
 
-/* ── Deposit Table: Column Optimization ──────────────────────── */
-#deposits-admin-table { min-width: 900px; }
+/* ── Deposit Table: Fit-to-Screen Layout ────────────────────── */
+/*
+  Goal: table fits without horizontal scroll on a 1200-1440px laptop.
+  Strategy:
+  - Sembunyikan "Saldo Kas" (kolom 6) — info sekunder, bisa dilihat di detail
+  - Sembunyikan "#" (kolom 1) — UUID bisa di-hover dari WAKTU
+  - Tombol aksi stack vertikal agar kolom STATUS lebih sempit
+  - table-layout:fixed + overflow:hidden pada sel teks panjang
+*/
 
-/* Hide "Saldo Kas" column on ≤1200px */
-@media (max-width: 1200px) {
-  #section-cash-deposits .table-wrap thead th:nth-child(6),
-  #section-cash-deposits .table-wrap tbody td:nth-child(6),
-  #section-cash-deposits .table-wrap tfoot td:nth-child(6) { display: none !important; }
+/* Sembunyikan Saldo Kas di semua layar (info sekunder) */
+#section-cash-deposits .table-wrap thead th:nth-child(6),
+#section-cash-deposits .table-wrap tbody td:nth-child(6),
+#section-cash-deposits .table-wrap tfoot td:nth-child(6) { display: none !important; }
+
+/* Sembunyikan kolom # di ≤1400px */
+@media (max-width: 1400px) {
+  #section-cash-deposits .table-wrap thead th:nth-child(1),
+  #section-cash-deposits .table-wrap tbody td:nth-child(1),
+  #section-cash-deposits .table-wrap tfoot td:nth-child(1) { display: none !important; }
 }
-/* Hide "Catatan" column on ≤1050px */
-@media (max-width: 1050px) {
+
+/* Sembunyikan Catatan di ≤1200px */
+@media (max-width: 1200px) {
   #section-cash-deposits .table-wrap thead th:nth-child(8),
   #section-cash-deposits .table-wrap tbody td:nth-child(8),
   #section-cash-deposits .table-wrap tfoot td:nth-child(8) { display: none !important; }
 }
-/* Compact action buttons on ≤1350px */
-@media (max-width: 1350px) {
-  .deposit-admin-actions .dep-confirm-btn,
-  .deposit-admin-actions .dep-reject-btn {
-    font-size: 11px !important;
-    padding: 3px 8px !important;
-    height: 26px !important;
-  }
+
+/* Tombol aksi: stack vertikal agar kolom STATUS tidak melebar */
+.deposit-admin-actions {
+  flex-direction: column !important;
+  gap: 3px !important;
+  align-items: flex-start;
 }
+.deposit-admin-actions .dep-confirm-btn,
+.deposit-admin-actions .dep-reject-btn {
+  font-size: 11px !important;
+  padding: 3px 10px !important;
+  height: 24px !important;
+  width: 100%;
+  justify-content: center;
+}
+
+/* Truncate teks panjang di kolom CABANG dan METODE */
+#section-cash-deposits .table-wrap td:nth-child(4),
+#section-cash-deposits .table-wrap td:nth-child(7) {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#section-cash-deposits .table-wrap td:nth-child(3) {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hapus min-width agar table bisa shrink */
+#deposits-admin-table { min-width: unset; }
 
 /* ── Transaction Table: min-width ─────────────────────────── */
 #section-transactions .table-wrap table { min-width: 700px; }
