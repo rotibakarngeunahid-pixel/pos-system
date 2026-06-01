@@ -5070,6 +5070,35 @@ const ADMIN = {
         container.innerHTML = '<div class="empty-state"><div class="empty-title">Belum ada riwayat sync</div></div>';
         return;
       }
+      const runIdsNeedingDetails = data
+        .filter(r => r.id && (!Array.isArray(r.items) || !r.items.length))
+        .map(r => r.id);
+      const fallbackItemsByRun = {};
+      if (runIdsNeedingDetails.length) {
+        const { data: fallbackItems, error: fallbackErr } = await db
+          .from('po_stock_sync_items')
+          .select('*, branches(name), ingredients(name, unit)')
+          .in('sync_run_id', runIdsNeedingDetails)
+          .order('po_material_name');
+        if (fallbackErr) {
+          console.warn('Gagal memuat detail item sync PO:', fallbackErr);
+        } else {
+          (fallbackItems || []).forEach(item => {
+            const runId = item.sync_run_id;
+            if (!fallbackItemsByRun[runId]) fallbackItemsByRun[runId] = [];
+            fallbackItemsByRun[runId].push({
+              ...item,
+              branch_name: item.branch_name || item.branches?.name || null,
+              pos_ingredient_name: item.pos_ingredient_name || item.ingredients?.name || null,
+              ingredient_unit: item.ingredient_unit || item.ingredients?.unit || null,
+            });
+          });
+        }
+      }
+      const runs = data.map(r => ({
+        ...r,
+        items: Array.isArray(r.items) && r.items.length ? r.items : (fallbackItemsByRun[r.id] || []),
+      }));
       const fmtQty = (value) => {
         const n = Number(value);
         if (!Number.isFinite(n)) return '0';
@@ -5089,7 +5118,7 @@ const ADMIN = {
       container.innerHTML = `<table class="data-table"><thead><tr>
         <th>ID PO</th><th>Trigger</th><th>Status</th><th>Ringkasan</th><th>Detail Item</th><th>Waktu</th>
       </tr></thead><tbody>
-        ${data.map(r => {
+        ${runs.map(r => {
           const sum = typeof r.summary === 'string' ? JSON.parse(r.summary || '{}') : (r.summary || {});
           const statusClass = { success: 'success', partial_success: 'warning', failed: 'danger', pending: 'secondary' }[r.status] || 'secondary';
           const items = r.items || [];
