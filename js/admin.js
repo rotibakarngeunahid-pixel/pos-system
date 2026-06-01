@@ -1684,10 +1684,16 @@ const ADMIN = {
   },
 
   toggleInventoryModalType() {
-    const type    = document.getElementById('inv-adj-type').value;
-    const labels  = { stock_in:'Jumlah Masuk', stock_out:'Jumlah Keluar', opname:'Stok Aktual (Fisik)' };
-    const qtyLabel = document.getElementById('inv-adj-qty-label');
-    if (qtyLabel) qtyLabel.textContent = labels[type] || 'Jumlah';
+    const type     = document.getElementById('inv-adj-type').value;
+    const qtyLabels   = { stock_in:'Jumlah Masuk', stock_out:'Jumlah Keluar', opname:'Stok Aktual (Fisik)' };
+    const notesLabels = { stock_in:'Catatan *', stock_out:'Catatan', opname:'Catatan / Keterangan Opname *' };
+    const notesPH     = { stock_in:'Wajib diisi — contoh: Pembelian dari supplier', stock_out:'Alasan keluar stok (opsional)', opname:'Wajib diisi — contoh: Hasil hitung fisik tgl ...' };
+    const qtyLabel   = document.getElementById('inv-adj-qty-label');
+    const notesLabel = document.getElementById('inv-adj-notes-label');
+    const notesInput = document.getElementById('inv-adj-notes');
+    if (qtyLabel)   qtyLabel.textContent   = qtyLabels[type]  || 'Jumlah';
+    if (notesLabel) notesLabel.textContent = notesLabels[type] || 'Catatan';
+    if (notesInput) notesInput.placeholder = notesPH[type]     || '';
   },
 
   async saveInventoryAdjust() {
@@ -1697,6 +1703,11 @@ const ADMIN = {
     const qty          = parseFloat(document.getElementById('inv-adj-qty').value);
     const notes        = document.getElementById('inv-adj-notes').value.trim();
     if (!branchId || !ingredientId || isNaN(qty) || qty < 0) { showToast('Lengkapi semua field', 'error'); return; }
+    if ((type === 'opname' || type === 'stock_in') && !notes) {
+      showToast(type === 'opname' ? 'Catatan wajib diisi untuk stok opname' : 'Catatan wajib diisi untuk stok masuk manual', 'error');
+      document.getElementById('inv-adj-notes')?.focus();
+      return;
+    }
 
     try {
       const invType = { stock_in:'in', stock_out:'out', opname:'opname' }[type] || 'in';
@@ -4410,9 +4421,26 @@ const ADMIN = {
   // Fetch outlet + material dari purchase_order server
   async poSyncFetchSetupData() {
     const url = this.poServerUrl();
-    const res = await fetch(`${url}/api/public/pos-setup-data`);
-    if (!res.ok) throw new Error(`Server PO tidak bisa diakses (${res.status}). Cek URL di pengaturan.`);
-    return res.json();
+    const endpoint = `${url}/api/public/pos-setup-data`;
+    const res = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+    const contentType = res.headers.get('content-type') || '';
+    const text = await res.text();
+
+    let payload = null;
+    if (text && contentType.includes('application/json')) {
+      try { payload = JSON.parse(text); } catch (_) { payload = null; }
+    }
+
+    if (!res.ok) {
+      const detail = payload?.error?.message || payload?.error || text?.trim();
+      throw new Error(detail || `Server PO tidak bisa diakses (${res.status}). Cek URL di pengaturan.`);
+    }
+
+    if (!contentType.includes('application/json')) {
+      throw new Error('URL server PO tidak valid: endpoint setup mengembalikan HTML, bukan JSON.');
+    }
+
+    return payload || JSON.parse(text);
   },
 
   async loadPoSyncSection() {

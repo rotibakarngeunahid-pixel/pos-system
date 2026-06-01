@@ -637,7 +637,7 @@
         <div id="po-sync-server-warning" style="display:none;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--r-sm);font-size:13px;color:#92400e;margin-bottom:16px;">
           ⚠️ <span></span>
           &nbsp;—&nbsp; Pastikan URL server PO benar di
-          <button onclick="const u=prompt('URL Server Purchase Order:',localStorage.getItem('rbn_po_server_url')||'https://purchase-order-system.vercel.app');if(u){localStorage.setItem('rbn_po_server_url',u);location.reload();}"
+          <button onclick="const u=prompt('URL Server Purchase Order:',localStorage.getItem('rbn_po_server_url')||'https://purchaseorder-zeta.vercel.app');if(u){localStorage.setItem('rbn_po_server_url',u);location.reload();}"
             style="background:none;border:none;cursor:pointer;color:#92400e;font-weight:700;text-decoration:underline;">Klik untuk ubah URL</button>
         </div>
 
@@ -2611,7 +2611,7 @@ atau tidak aktif."
           <input type="number" class="form-control" id="inv-adj-qty" min="0" step="0.001" placeholder="0" />
         </div>
         <div class="form-group">
-          <label class="form-label">Catatan</label>
+          <label class="form-label" id="inv-adj-notes-label">Catatan</label>
           <input type="text" class="form-control" id="inv-adj-notes" placeholder="Opsional" />
         </div>
       </div>
