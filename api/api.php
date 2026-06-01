@@ -4443,16 +4443,21 @@ function poFindMaterialMapping(PDO $pdo, string $materialId, int $branchId): ?ar
     return $stmt->fetch() ?: null;
 }
 
-// ── Helper: cek apakah bahan PO di-ignore untuk cabang ini ───────────────────
-function poIsMaterialIgnored(PDO $pdo, string $materialId, int $branchId): bool {
-    // Cek global dulu
+// ── Helper: cek apakah bahan PO di-ignore global ─────────────────────────────
+function poIsMaterialGloballyIgnored(PDO $pdo, string $materialId): bool {
     $stmt = $pdo->prepare("
         SELECT 1 FROM po_ignored_materials
         WHERE po_material_id = ? AND pos_branch_id IS NULL AND is_active = 1
         LIMIT 1
     ");
     $stmt->execute([$materialId]);
-    if ($stmt->fetch()) return true;
+    return (bool)$stmt->fetch();
+}
+
+// ── Helper: cek apakah bahan PO di-ignore untuk cabang ini ───────────────────
+function poIsMaterialIgnored(PDO $pdo, string $materialId, int $branchId): bool {
+    // Cek global dulu
+    if (poIsMaterialGloballyIgnored($pdo, $materialId)) return true;
 
     // Cek khusus cabang
     $stmt = $pdo->prepare("
@@ -4462,6 +4467,20 @@ function poIsMaterialIgnored(PDO $pdo, string $materialId, int $branchId): bool 
     ");
     $stmt->execute([$materialId, $branchId]);
     return (bool)$stmt->fetch();
+}
+
+function poApplyIgnoredMaterialStatuses(PDO $pdo): void {
+    $pdo->exec("
+        UPDATE po_stock_sync_items psi
+        JOIN po_ignored_materials pim
+          ON pim.po_material_id = psi.po_material_id
+         AND pim.is_active = 1
+         AND (pim.pos_branch_id IS NULL OR pim.pos_branch_id = psi.pos_branch_id)
+        SET psi.sync_status = 'diabaikan_dari_stok_pos',
+            psi.error_message = NULL,
+            psi.updated_at = NOW()
+        WHERE psi.sync_status IN ('butuh_mapping_admin','butuh_alokasi_cabang','belum_disinkronkan')
+    ");
 }
 
 // ── Helper: resolve outlet_id → branch POS id ────────────────────────────────
@@ -4606,6 +4625,14 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
         if (!$poItemId || !$materialId) {
             $results[] = ['po_item_id' => $poItemId, 'status' => 'gagal_sinkron', 'error' => 'po_item_id dan po_material_id wajib diisi'];
             $errorCount++;
+            continue;
+        }
+
+        // Bahan yang di-ignore global tidak perlu mapping bahan maupun alokasi cabang.
+        if (poIsMaterialGloballyIgnored($pdo, $materialId)) {
+            $results[] = ['po_item_id' => $poItemId, 'status' => 'diabaikan_dari_stok_pos'];
+            $skippedCount++;
+            poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $qtyReceived, null, null, null, 0, 0, null, 'diabaikan_dari_stok_pos', null);
             continue;
         }
 
@@ -4965,7 +4992,7 @@ function rpc_po_sync_save_ignored_material(array $p): mixed {
     if ($isActive) {
         $pdo->prepare("
             UPDATE po_stock_sync_items SET sync_status='diabaikan_dari_stok_pos', updated_at=NOW()
-            WHERE po_material_id=? AND sync_status IN ('butuh_mapping_admin','belum_disinkronkan')
+            WHERE po_material_id=? AND sync_status IN ('butuh_mapping_admin','butuh_alokasi_cabang','belum_disinkronkan')
               AND (pos_branch_id=? OR ? IS NULL)
         ")->execute([$poMaterialId, $posBranchId, $posBranchId]);
     }
@@ -4993,6 +5020,8 @@ function rpc_po_sync_retry(array $p): mixed {
 // ── Admin: daftar item yang butuh mapping / diabaikan / error ─────────────────
 function rpc_po_sync_get_pending_mappings(array $p): mixed {
     $pdo    = getDB();
+    poApplyIgnoredMaterialStatuses($pdo);
+
     $poId   = !empty($p['p_po_id']) ? trim($p['p_po_id']) : null;
     $status = !empty($p['p_status']) ? trim($p['p_status']) : 'butuh_mapping_admin';
     $limit  = (int)($p['p_limit'] ?? 50);
@@ -5021,6 +5050,8 @@ function rpc_po_sync_get_pending_mappings(array $p): mixed {
 // ── Admin: riwayat sync run ───────────────────────────────────────────────────
 function rpc_po_sync_get_runs(array $p): mixed {
     $pdo    = getDB();
+    poApplyIgnoredMaterialStatuses($pdo);
+
     $poId   = !empty($p['p_po_id']) ? trim($p['p_po_id']) : null;
     $limit  = (int)($p['p_limit'] ?? 20);
     $offset = (int)($p['p_offset'] ?? 0);
@@ -5104,6 +5135,8 @@ function rpcInsertBranchCashLedger(
 // + bahan dari manual input (p_extra_materials JSON opsional).
 function rpc_po_sync_get_suggestions(array $p): mixed {
     $pdo           = getDB();
+    poApplyIgnoredMaterialStatuses($pdo);
+
     $extraRaw      = $p['p_extra_materials'] ?? null;
     $extraMaterials = [];
     if ($extraRaw) {
