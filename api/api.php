@@ -2552,6 +2552,26 @@ function rpc_create_deposit(array $p): mixed {
             throw new Exception('Masih ada setoran yang belum dikonfirmasi admin. Tunggu konfirmasi terlebih dahulu.');
         }
 
+        // Validasi nominal tidak boleh melebihi saldo kas aktual cabang (termasuk transfer masuk).
+        // Cek server-side ini memastikan integritas data meskipun frontend mengirim nilai yang stale.
+        $branchBalChk = $pdo->prepare("SELECT current_balance FROM branch_cash_balances WHERE branch_id=? LIMIT 1");
+        $branchBalChk->execute([$branchId]);
+        $branchBalRow = $branchBalChk->fetchColumn();
+        if ($branchBalRow !== false) {
+            $branchBalance = (float)$branchBalRow;
+            $pendingChk = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM cash_deposits WHERE branch_id=? AND status='pending'");
+            $pendingChk->execute([$branchId]);
+            $pendingTotal = (float)$pendingChk->fetchColumn();
+            $availableBalance = max(0.0, $branchBalance - $pendingTotal);
+            if ($amount > $availableBalance) {
+                throw new Exception(
+                    'Nominal setoran (Rp ' . number_format($amount, 0, ',', '.') . ') melebihi saldo kas outlet yang tersedia ' .
+                    '(Rp ' . number_format($availableBalance, 0, ',', '.') . '). ' .
+                    'Saldo kas sudah mencakup transfer tunai masuk dari cabang lain.'
+                );
+            }
+        }
+
         $id = uuid4();
         $row = [
             'id'         => $id,
@@ -2861,12 +2881,26 @@ function rpc_get_deposit_eligible_sessions(array $p): mixed {
         if ($d['status'] === 'pending') { $hasAnyPending = true; break; }
     }
 
-    return array_map(function($row) use ($depsBySession, $hasAnyPending) {
+    // Saldo kas aktual cabang dari branch_cash_balances (sudah termasuk transfer masuk/keluar yang dikonfirmasi).
+    // Ini adalah nilai yang BENAR untuk menghitung depositable_cash karena mencerminkan
+    // semua komponen: kas tutup shift, transfer tunai masuk, transfer tunai keluar, deposit yang sudah dikonfirmasi.
+    $branchBalStmt = $pdo->prepare("SELECT COALESCE(current_balance, 0) FROM branch_cash_balances WHERE branch_id=? LIMIT 1");
+    $branchBalStmt->execute([$branchId]);
+    $branchCurrentBalance = (float)($branchBalStmt->fetchColumn() ?? 0.0);
+
+    // Kurangi dengan total pending deposit di level cabang (semua sesi, bukan hanya sesi ini)
+    // agar tidak terjadi over-deposit ketika ada deposit yang belum dikonfirmasi admin.
+    $pendingBranchStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM cash_deposits WHERE branch_id=? AND status='pending'");
+    $pendingBranchStmt->execute([$branchId]);
+    $totalPendingBranch = (float)($pendingBranchStmt->fetchColumn() ?? 0.0);
+
+    // Kas bersih yang bisa disetor = saldo aktual cabang - deposit pending yang belum dikonfirmasi
+    $netDepositable = max(0.0, $branchCurrentBalance - $totalPendingBranch);
+
+    return array_map(function($row) use ($depsBySession, $hasAnyPending, $netDepositable, $branchCurrentBalance) {
         $sid = $row['id'];
         $dep = $depsBySession[$sid] ?? ['pending' => 0.0, 'confirmed' => 0.0, 'lastStatus' => null];
         $totalDep  = $dep['pending'] + $dep['confirmed'];
-        $baseCash  = (float)$row['base_cash'];
-        $depositable = max(0.0, $baseCash - $totalDep);
 
         $blockReason = null;
         if ($totalDep > 0 && $dep['lastStatus'] === 'pending') {
@@ -2877,10 +2911,15 @@ function rpc_get_deposit_eligible_sessions(array $p): mixed {
             $blockReason = 'Masih ada setoran dari shift lain yang menunggu konfirmasi';
         }
 
-        $row['depositable_cash']    = $depositable;
-        $row['has_active_deposit']  = $totalDep > 0;
-        $row['last_deposit_status'] = $dep['lastStatus'];
-        $row['block_reason']        = $blockReason;
+        // Gunakan saldo aktual cabang sebagai depositable (bukan hanya closing_cash sesi),
+        // sehingga transfer tunai masuk dari cabang lain ikut terhitung.
+        $depositable = $netDepositable;
+
+        $row['depositable_cash']      = $depositable;
+        $row['branch_current_balance'] = $branchCurrentBalance;
+        $row['has_active_deposit']    = $totalDep > 0;
+        $row['last_deposit_status']   = $dep['lastStatus'];
+        $row['block_reason']          = $blockReason;
         return $row;
     }, $sessions);
 }
