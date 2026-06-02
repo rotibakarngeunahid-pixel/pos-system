@@ -143,6 +143,7 @@ const ADMIN = {
         case 'po-sync-save-ignored-material': this.poSyncSaveIgnoredMaterial(); break;
         case 'po-sync-deactivate-outlet-mapping': this.poSyncDeactivateOutletMapping(btn.dataset.id); break;
         case 'po-sync-deactivate-material-mapping': this.poSyncDeactivateMaterialMapping(btn.dataset.id); break;
+        case 'po-sync-edit-material-mapping': this.poSyncEditMaterialMapping(btn.dataset.id); break;
         case 'po-sync-deactivate-ignored': this.poSyncDeactivateIgnored(btn.dataset.id); break;
         case 'po-sync-load-suggestions': this.poSyncLoadSuggestions(); break;
         case 'po-sync-approve-outlet': this.poSyncApproveOutlet(btn.dataset.outletId, btn.dataset.outletName, btn.dataset.rowIndex); break;
@@ -4813,7 +4814,7 @@ const ADMIN = {
                   ${r.ingredients?.unit ? `<div style="font-size:11px;color:var(--text-muted);">Satuan: ${escHtml(r.ingredients.unit)}</div>` : ''}
                 </td>
                 <td>
-                  <div style="font-weight:600;font-size:15px;">× ${r.conversion_factor}</div>
+                  <div style="font-weight:600;font-size:15px;">× ${parseFloat(r.conversion_factor)}</div>
                   ${r.conversion_note ? `<div style="font-size:11px;color:var(--text-muted);">${escHtml(r.conversion_note)}</div>` : ''}
                 </td>
                 <td>${r.branches?.name
@@ -4822,8 +4823,9 @@ const ADMIN = {
                 <td>${r.is_active
                   ? '<span class="badge badge-success">Aktif</span>'
                   : '<span class="badge badge-secondary">Nonaktif</span>'}</td>
-                <td>${r.is_active
-                  ? `<button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-material-mapping" data-id="${r.id}">Nonaktifkan</button>`
+                <td style="display:flex;gap:6px;flex-wrap:wrap;">${r.is_active
+                  ? `<button class="btn btn-secondary btn-sm" data-admin-action="po-sync-edit-material-mapping" data-id="${r.id}">Edit</button>
+                     <button class="btn btn-danger-soft btn-sm" data-admin-action="po-sync-deactivate-material-mapping" data-id="${r.id}">Nonaktifkan</button>`
                   : ''}</td>
               </tr>`;
             }).join('')}
@@ -4869,6 +4871,24 @@ const ADMIN = {
       if (error) throw error;
       showToast('Mapping bahan dinonaktifkan', 'success');
       this.poSyncLoadMaterialMappings();
+    } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
+  },
+
+  async poSyncEditMaterialMapping(id) {
+    if (!id) return;
+    try {
+      const { data, error } = await db.from('po_material_pos_mappings').select('*').eq('id', parseInt(id)).single();
+      if (error || !data) { showToast('Gagal memuat data mapping', 'error'); return; }
+      const set = (elId, val) => { const el = document.getElementById(elId); if (el) el.value = val ?? ''; };
+      set('po-material-id-input', data.po_material_id);
+      set('po-material-name-input', data.po_material_name);
+      set('po-material-conversion', parseFloat(data.conversion_factor));
+      set('po-material-conversion-note', data.conversion_note);
+      set('po-material-ingredient-select', data.pos_ingredient_id);
+      set('po-material-branch-select', data.pos_branch_id || '');
+      const tab = document.getElementById('po-sync-tab-material-mapping');
+      const details = tab?.querySelector('details');
+      if (details) { details.open = true; details.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
     } catch(e) { showToast('Gagal: ' + e.message, 'error'); }
   },
 

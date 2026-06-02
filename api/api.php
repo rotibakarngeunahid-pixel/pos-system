@@ -1305,9 +1305,14 @@ function adminRpcNames(): array {
     ];
 }
 
-// RPC khusus sistem PO yang boleh dipanggil via API key (tanpa session user)
+// RPC khusus integrasi sistem internal yang boleh dipanggil via API key
+// tanpa session user POS. API key sudah divalidasi di bagian atas api.php.
 function systemRpcNames(): array {
     return [
+        'check_shift_status',
+        'inventory_list_branches',
+        'inventory_list_ingredients',
+        'inventory_get_branch_stock',
         'sync_purchase_order_to_inventory',
     ];
 }
@@ -1321,9 +1326,10 @@ function authorizeRpcRequest(string $name, array $params): array {
         return [$params, null];
     }
 
-    // System RPC: dipanggil oleh server purchase_order menggunakan API key saja (tanpa session user).
+    // System RPC: dipanggil oleh integrasi internal menggunakan API key saja (tanpa session user).
     // API key sudah divalidasi di bagian atas api.php.
     if (in_array($name, systemRpcNames(), true)) {
+        rateLimitAction('rpc_system_' . $name, 120, 60, 'ip:' . requestIp());
         $params['_auth_user'] = ['role' => 'system', 'id' => 0, 'branch_id' => null];
         return [$params, null];
     }
@@ -1968,7 +1974,73 @@ function rpc_check_shift_status(array $p): mixed {
     ];
 }
 
-// ── open_cash_session_from_branch_balance ─────────────────────────────────────
+// Inventory integration RPCs used by the Google Apps Script inventory portal.
+function rpc_inventory_list_branches(array $p): mixed {
+    $pdo = getDB();
+    $stmt = $pdo->query("
+        SELECT id, name
+        FROM branches
+        ORDER BY name
+        LIMIT 500
+    ");
+    return $stmt->fetchAll();
+}
+
+function rpc_inventory_list_ingredients(array $p): mixed {
+    $pdo = getDB();
+    $stmt = $pdo->query("
+        SELECT id, name, unit
+        FROM ingredients
+        ORDER BY name
+        LIMIT 1000
+    ");
+    return $stmt->fetchAll();
+}
+
+function parsePositiveIntListParam(mixed $value, int $maxItems = 500): array {
+    if (is_string($value)) {
+        $raw = trim($value);
+        if ($raw === '') return [];
+        if (str_starts_with($raw, '[')) {
+            $decoded = json_decode($raw, true);
+            $value = is_array($decoded) ? $decoded : explode(',', $raw);
+        } else {
+            $value = explode(',', $raw);
+        }
+    } elseif (!is_array($value)) {
+        $value = [$value];
+    }
+
+    $ids = [];
+    foreach ($value as $item) {
+        $id = (int)$item;
+        if ($id > 0) $ids[$id] = $id;
+        if (count($ids) >= $maxItems) break;
+    }
+    return array_values($ids);
+}
+
+function rpc_inventory_get_branch_stock(array $p): mixed {
+    $pdo = getDB();
+    $branchId = (int)($p['p_branch_id'] ?? 0);
+    if (!$branchId) throw new Exception('p_branch_id wajib diisi');
+
+    $ingredientIds = parsePositiveIntListParam($p['p_ingredient_ids'] ?? []);
+    if (!$ingredientIds) return [];
+
+    $placeholders = implode(',', array_fill(0, count($ingredientIds), '?'));
+    $stmt = $pdo->prepare("
+        SELECT ingredient_id, stock, updated_at
+        FROM branch_inventory
+        WHERE branch_id = ?
+          AND ingredient_id IN ($placeholders)
+        LIMIT 500
+    ");
+    $stmt->execute(array_merge([$branchId], $ingredientIds));
+    return $stmt->fetchAll();
+}
+
+// open_cash_session_from_branch_balance
 function rpc_open_cash_session_from_branch_balance(array $p): mixed {
     $pdo       = getDB();
     $branchId  = (int)($p['p_branch_id']     ?? 0);
@@ -3173,6 +3245,35 @@ function rpc_void_transaction(array $p): mixed {
 
         $pdo->prepare("UPDATE cash_logs SET is_void=1,void_reason=?,void_by=?,void_at=NOW() WHERE reference_type='sale' AND reference_id=?")
             ->execute([$reason,$by,$txId]);
+
+        // Kembalikan stok bahan baku berdasarkan BOM (recipe)
+        $branchId = (int)$t['branch_id'];
+        $itemsStmt = $pdo->prepare("SELECT variant_id, quantity FROM transaction_items WHERE transaction_id=?");
+        $itemsStmt->execute([$txId]);
+        foreach ($itemsStmt->fetchAll() as $item) {
+            if (!$item['variant_id']) continue;
+            $recipeStmt = $pdo->prepare("SELECT id FROM recipes WHERE variant_id=? LIMIT 1");
+            $recipeStmt->execute([$item['variant_id']]);
+            $recipe = $recipeStmt->fetch();
+            if (!$recipe) continue;
+            $riStmt = $pdo->prepare("SELECT ingredient_id, quantity FROM recipe_items WHERE recipe_id=?");
+            $riStmt->execute([$recipe['id']]);
+            foreach ($riStmt->fetchAll() as $ri) {
+                $ingId     = (int)$ri['ingredient_id'];
+                $returnQty = (float)$ri['quantity'] * (float)$item['quantity'];
+                if ($returnQty <= 0) continue;
+                $curStmt = $pdo->prepare("SELECT stock FROM branch_inventory WHERE branch_id=? AND ingredient_id=? FOR UPDATE");
+                $curStmt->execute([$branchId, $ingId]);
+                $invRow = $curStmt->fetch();
+                if (!$invRow) continue;
+                $before = (float)$invRow['stock'];
+                $after  = $before + $returnQty;
+                $pdo->prepare("UPDATE branch_inventory SET stock=? WHERE branch_id=? AND ingredient_id=?")
+                    ->execute([$after, $branchId, $ingId]);
+                insertInventoryMovement($pdo, $branchId, $ingId, $returnQty, 'in', $before, $after,
+                    "Void transaksi #{$txId}", $by ?: null, 'void', (string)$txId);
+            }
+        }
 
         $pdo->commit();
         auditLog($authUser, 'transaction_void', 'transactions', $t, ['reason'=>$reason,'voided_by'=>$by], (int)$t['branch_id']);
@@ -4443,6 +4544,53 @@ function poFindMaterialMapping(PDO $pdo, string $materialId, int $branchId): ?ar
     return $stmt->fetch() ?: null;
 }
 
+// ── Helper: auto-map bahan PO ke ingredient POS berdasarkan kesamaan nama ─────
+// Dipakai sebagai fallback ketika tidak ada mapping manual di po_material_pos_mappings.
+// Jika nama material PO sama persis (case-insensitive) dengan nama ingredient POS,
+// simpan mapping otomatis dengan conversion_factor dari po_package_qty PO.
+function poAutoMapByExactName(PDO $pdo, string $materialId, string $materialName, float $packageQty): ?array {
+    if (trim($materialName) === '') return null;
+
+    $stmt = $pdo->prepare("
+        SELECT id, name FROM ingredients
+        WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+        LIMIT 1
+    ");
+    $stmt->execute([$materialName]);
+    $ingredient = $stmt->fetch();
+    if (!$ingredient) return null;
+
+    $ingredientId   = (int)$ingredient['id'];
+    $ingredientName = (string)$ingredient['name'];
+    $convNote = $packageQty != 1.0
+        ? "Auto: 1 unit PO = {$packageQty} unit POS (dari package_qty)"
+        : 'Auto: nama sama persis';
+
+    // Simpan mapping global jika belum ada (hindari duplikat)
+    try {
+        $pdo->prepare("
+            INSERT INTO po_material_pos_mappings
+                (po_material_id, po_material_name, pos_ingredient_id, pos_ingredient_name,
+                 pos_branch_id, conversion_factor, conversion_note, match_type, is_active)
+            SELECT ?, ?, ?, ?, NULL, ?, ?, 'auto_name', 1
+            FROM DUAL
+            WHERE NOT EXISTS (
+                SELECT 1 FROM po_material_pos_mappings
+                WHERE po_material_id = ? AND pos_branch_id IS NULL
+            )
+        ")->execute([$materialId, $materialName, $ingredientId, $ingredientName, $packageQty, $convNote, $materialId]);
+    } catch (\Exception $e) {
+        // Tetap lanjutkan meski penyimpanan mapping gagal
+    }
+
+    return [
+        'pos_ingredient_id'   => $ingredientId,
+        'pos_ingredient_name' => $ingredientName,
+        'conversion_factor'   => $packageQty,
+        'match_type'          => 'auto_name',
+    ];
+}
+
 // ── Helper: cek apakah bahan PO di-ignore global ─────────────────────────────
 function poIsMaterialGloballyIgnored(PDO $pdo, string $materialId, string $materialName = ''): bool {
     $stmt = $pdo->prepare("
@@ -4626,6 +4774,7 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
         $materialName   = (string)($item['po_material_name'] ?? '');
         $itemSource     = (string)($item['po_item_source']   ?? 'ordered');
         $qtyReceived    = (float)($item['qty_received']      ?? 0);
+        $poPackageQty   = max(1.0, (float)($item['po_package_qty'] ?? 1));
         $outletId       = (string)($item['outlet_id']        ?? '');
         $distributions  = is_array($item['branch_distributions'] ?? null) ? $item['branch_distributions'] : [];
 
@@ -4721,8 +4870,11 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
                 continue;
             }
 
-            // Cari mapping bahan
+            // Cari mapping bahan — coba manual dulu, lalu auto-map berdasarkan nama
             $mapping = poFindMaterialMapping($pdo, $materialId, $branchId);
+            if (!$mapping) {
+                $mapping = poAutoMapByExactName($pdo, $materialId, $materialName, $poPackageQty);
+            }
             if (!$mapping) {
                 $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'butuh_mapping_admin', 'error' => "Bahan '$materialName' belum dipetakan ke bahan POS"];
                 $skippedCount++;

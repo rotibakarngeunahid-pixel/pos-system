@@ -194,6 +194,7 @@ const depositService = {
         body: formData
       });
     } catch (networkErr) {
+      console.error('[depositService] uploadDepositProof network error:', networkErr);
       throw new Error('Upload bukti gagal: tidak dapat terhubung ke server. Periksa koneksi internet lalu coba lagi.');
     }
 
