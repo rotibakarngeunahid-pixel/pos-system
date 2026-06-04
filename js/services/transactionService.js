@@ -7,7 +7,8 @@ const transactionService = {
     cart, branchId, staffId, sessionId,
     paymentMethod, paymentAmount,
     discountAmount = 0, taxAmount = 0,
-    feeAmount = 0, notes = '', clientTxId
+    feeAmount = 0, notes = '', clientTxId,
+    memberId = null, redemptionCode = null
   }) {
     // Basic validation to avoid calling RPC with invalid payload
     if (!Array.isArray(cart) || cart.length === 0) throw new Error('Cart kosong');
@@ -34,7 +35,9 @@ const transactionService = {
       p_tax_amount: safeNum(taxAmount, 'Tax'),
       p_fee_amount: safeNum(feeAmount, 'Fee'),
       p_notes: notes || null,
-      p_client_tx_id: clientTxId || null
+      p_client_tx_id: clientTxId || null,
+      p_member_id: memberId || null,
+      p_redemption_code: redemptionCode || null
     });
 
     if (error) throw new Error(error.message);

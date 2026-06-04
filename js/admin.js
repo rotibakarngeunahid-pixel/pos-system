@@ -440,7 +440,8 @@ const ADMIN = {
       'api-keys': 'API Keys',           'investor-access': 'Investor Access',
       'finance-integration': 'Portal Integrasi Data',
       'transfer-monitoring': 'Monitoring Transfer Stok',
-      'po-sync': 'Sinkronisasi PO → Stok POS'
+      'po-sync': 'Sinkronisasi PO → Stok POS',
+      'member': 'Member & Loyalty'
     };
     document.getElementById('topbar-title').textContent = titles[section] || section;
     this.currentSection = section;
@@ -474,6 +475,9 @@ const ADMIN = {
       case 'finance-integration':   this.loadFinanceIntegration(); break;
       case 'transfer-monitoring':   this.loadTransferMonitoring(); break;
       case 'po-sync':               this.loadPoSyncSection();      break;
+      case 'member':
+        if (window.adminMemberUi) adminMemberUi.load();
+        break;
     }
   },
 

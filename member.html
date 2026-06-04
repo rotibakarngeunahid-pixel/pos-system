@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>Member — Roti Bakar Ngeunah</title>
+  <link rel="icon" type="image/png" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <link rel="apple-touch-icon" href="https://res.cloudinary.com/dckzmg6c3/image/upload/v1777572835/Untitled-2_tgjm4u.png" />
+  <meta name="theme-color" content="#DC2626" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="RBN Member" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <style>
+    /* ── Member App Layout ─────────────────────────────────── */
+    body.member-app {
+      background: var(--bg);
+      max-width: 480px;
+      margin: 0 auto;
+      min-height: 100dvh;
+      position: relative;
+    }
+    #app-root { min-height: 100dvh; }
+
+    /* ── Bottom Nav ────────────────────────────────────────── */
+    #bottom-nav {
+      position: fixed;
+      bottom: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 100%; max-width: 480px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: none;
+      padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
+      z-index: 100;
+      box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+    }
+    #bottom-nav.visible { display: flex !important; }
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      background: none;
+      border: none;
+      padding: 4px 0;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.14s;
+    }
+    .nav-item svg { width: 22px; height: 22px; }
+    .nav-item.active { color: var(--primary); }
+    .nav-item span { font-family: var(--font); }
+
+    /* ── Page Layouts ──────────────────────────────────────── */
+    .mem-page {
+      display: flex;
+      flex-direction: column;
+      min-height: 100dvh;
+      padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    }
+    .mem-header {
+      position: sticky; top: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      height: 52px;
+      padding: 0 4px;
+      z-index: 50;
+    }
+    .mem-header-title {
+      flex: 1;
+      text-align: center;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .mem-back, .mem-header-action {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: none; border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.14s;
+      flex-shrink: 0;
+    }
+    .mem-back:hover, .mem-header-action:hover { background: var(--bg); }
+    .mem-back svg, .mem-header-action svg { width: 20px; height: 20px; }
+    .mem-header-spacer { width: 40px; flex-shrink: 0; }
+    .mem-content {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    /* ── Auth Pages ────────────────────────────────────────── */
+    .auth-page {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: 32px 24px 24px;
+      background: var(--surface);
+    }
+    .auth-brand {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .auth-logo {
+      width: 72px; height: 72px;
+      border-radius: 16px;
+      margin: 0 auto 12px;
+      object-fit: cover;
+    }
+    .auth-brand h1 {
+      font-size: 18px; font-weight: 700;
+      color: var(--primary); margin-bottom: 2px;
+    }
+    .auth-brand p { font-size: 13px; color: var(--text-muted); }
+    .auth-header-back {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 24px;
+    }
+    .auth-header-back h2 { font-size: 16px; font-weight: 600; }
+    .auth-form { display: flex; flex-direction: column; gap: 14px; }
+    .auth-links {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .auth-links a { color: var(--primary); font-weight: 500; }
+
+    /* ── Forms ─────────────────────────────────────────────── */
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-label { font-size: 13px; font-weight: 500; color: var(--text-sub); }
+    .form-label .required { color: var(--danger); margin-left: 2px; }
+    .form-label .optional { color: var(--text-muted); font-weight: 400; }
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--r);
+      font-size: 14px;
+      color: var(--text);
+      background: var(--surface);
+      transition: border-color 0.14s;
+    }
+    .form-input:focus { border-color: var(--primary); }
+    .form-error {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-radius: var(--r-sm);
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+    .input-pw { position: relative; }
+    .input-pw .form-input { padding-right: 42px; }
+    .btn-eye {
+      position: absolute; right: 10px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      color: var(--text-muted); cursor: pointer;
+      padding: 4px;
+    }
+    .btn-eye svg { width: 16px; height: 16px; }
+    .form-check {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 13px; color: var(--text-sub);
+    }
+    .form-check input[type=checkbox] { margin-top: 2px; flex-shrink: 0; }
+    .form-check a { color: var(--primary); }
+    .mem-form { display: flex; flex-direction: column; gap: 14px; }
+    .form-section-title {
+      font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--text-muted);
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Buttons ───────────────────────────────────────────── */
+    .btn-primary {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px;
+      background: var(--primary);
+      color: #fff;
+      border: none; border-radius: var(--r);
+      padding: 11px 18px;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer;
+      transition: background 0.14s, opacity 0.14s;
+      text-decoration: none;
+    }
+    .btn-primary:hover { background: var(--primary-600); }
+    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary.btn-full { width: 100%; }
+    .btn-outline {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px;
+      background: transparent;
+      border: 1.5px solid var(--border-strong);
+      color: var(--text);
+      border-radius: var(--r);
+      padding: 10px 18px;
+      font-size: 14px; font-weight: 500;
+      cursor: pointer;
+      transition: border-color 0.14s, background 0.14s;
+      text-decoration: none;
+    }
+    .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-outline.btn-full { width: 100%; }
+    .btn-outline.btn-danger { border-color: var(--danger); color: var(--danger); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    /* ── Loading ───────────────────────────────────────────── */
+    .loading-center {
+      display: flex; align-items: center; justify-content: center;
+      padding: 48px 0;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-muted);
+    }
+    .empty-state svg { width: 40px; height: 40px; margin: 0 auto 12px; opacity: 0.4; }
+    .empty-state p { font-size: 14px; }
+    .error-msg { color: var(--danger); font-size: 14px; text-align: center; padding: 16px 0; }
+
+    /* ── Member Card ───────────────────────────────────────── */
+    .mem-card {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-700) 100%);
+      border-radius: var(--r-xl);
+      padding: 20px;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .mem-card-top { display: flex; align-items: center; justify-content: space-between; }
+    .mem-card-name { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .mem-card-code { font-size: 12px; opacity: 0.85; letter-spacing: 0.5px; }
+    .mem-qr-btn {
+      background: rgba(255,255,255,0.15);
+      border: 1.5px solid rgba(255,255,255,0.3);
+      border-radius: var(--r-lg);
+      padding: 6px;
+      cursor: pointer;
+      width: 72px; height: 72px;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .mem-qr-btn svg { max-width: 100%; max-height: 100%; }
+    .mem-qr-btn.sm { width: 52px; height: 52px; background: var(--bg); border-color: var(--border); }
+
+    /* ── Points Card ───────────────────────────────────────── */
+    .points-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+    .points-active { flex: 1; }
+    .points-active-val { font-size: 28px; font-weight: 800; color: var(--primary); line-height: 1; }
+    .points-active-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .points-pending { border-left: 1px solid var(--border); padding-left: 16px; }
+    .points-pending-val { font-size: 16px; font-weight: 700; color: var(--warning); }
+    .points-pending-label { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 2px; }
+
+    /* ── Claim Banner ──────────────────────────────────────── */
+    .claim-banner {
+      background: var(--success-bg);
+      border: 1px solid #bbf7d0;
+      border-radius: var(--r-lg);
+      padding: 12px 14px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--success-dark);
+      cursor: pointer; margin-bottom: 16px;
+    }
+    .claim-banner svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .claim-banner > i:last-child { margin-left: auto; }
+
+    /* ── Section headers ───────────────────────────────────── */
+    .section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .section-head span { font-size: 14px; font-weight: 600; color: var(--text); }
+    .section-more {
+      font-size: 12px; color: var(--primary);
+      display: flex; align-items: center; gap: 2px;
+    }
+    .section-more svg { width: 14px; height: 14px; }
+    .section-label {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--text-muted);
+      padding: 12px 0 6px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+    }
+
+    /* ── Rewards (horizontal scroll) ──────────────────────── */
+    .rewards-scroll {
+      display: flex; gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      margin-bottom: 16px;
+      scrollbar-width: none;
+    }
+    .rewards-scroll::-webkit-scrollbar { display: none; }
+    .reward-mini-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 10px;
+      min-width: 100px; max-width: 100px;
+      cursor: pointer;
+      transition: box-shadow 0.14s;
+      text-align: center;
+    }
+    .reward-mini-card:hover { box-shadow: var(--sh-sm); }
+    .reward-mini-card.dim { opacity: 0.6; }
+    .reward-mini-card img { width: 60px; height: 60px; object-fit: cover; border-radius: var(--r); margin: 0 auto 6px; }
+    .reward-img-placeholder { width: 60px; height: 60px; background: var(--bg); border-radius: var(--r); margin: 0 auto 6px; display: flex; align-items: center; justify-content: center; }
+    .reward-img-placeholder svg { width: 28px; height: 28px; color: var(--text-muted); }
+    .reward-mini-name { font-size: 11px; font-weight: 500; color: var(--text); margin-bottom: 4px; line-height: 1.3; }
+    .reward-mini-cost { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+    .reward-mini-cost.can { color: var(--primary); }
+
+    /* ── Rewards grid ──────────────────────────────────────── */
+    .rewards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .reward-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      cursor: pointer;
+      transition: box-shadow 0.14s, transform 0.14s;
+    }
+    .reward-card:hover { box-shadow: var(--sh-sm); transform: translateY(-1px); }
+    .reward-card-img { height: 110px; background: var(--bg); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .reward-card-img img { width: 100%; height: 100%; object-fit: cover; }
+    .reward-img-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+    .reward-img-ph svg { width: 40px; height: 40px; color: var(--border-strong); }
+    .reward-card-body { padding: 10px 10px 12px; }
+    .reward-card-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; line-height: 1.3; }
+    .reward-card-quota { color: var(--text-muted); margin-bottom: 6px; }
+    .reward-card-footer { display: flex; align-items: center; justify-content: space-between; }
+    .reward-cost { font-size: 13px; font-weight: 700; color: var(--text-muted); }
+    .reward-cost.can-claim { color: var(--primary); }
+    .badge-sm { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: var(--r-full); }
+    .badge-green { background: var(--success-bg); color: var(--success); }
+    .badge-gray { background: var(--bg-alt); color: var(--text-muted); }
+
+    /* ── Reward Detail ─────────────────────────────────────── */
+    .reward-detail-img { width: 100%; max-height: 220px; object-fit: cover; border-radius: var(--r-lg); margin-bottom: 16px; }
+    .reward-detail-body { display: flex; flex-direction: column; gap: 12px; }
+    .reward-detail-name { font-size: 20px; font-weight: 700; }
+    .reward-detail-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; font-weight: 600;
+      padding: 4px 10px; border-radius: var(--r-full);
+    }
+    .badge svg { width: 13px; height: 13px; }
+    .badge-primary { background: var(--danger-bg); color: var(--primary); }
+    .badge-neutral { background: var(--bg-alt); color: var(--text-sub); }
+    .reward-detail-desc { font-size: 14px; color: var(--text-sub); line-height: 1.6; }
+    .reward-detail-info { display: flex; flex-direction: column; gap: 6px; }
+    .info-row { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-sub); }
+    .info-row svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--text-muted); }
+    .info-warning { color: var(--warning); }
+    .tnc-details { font-size: 13px; color: var(--text-sub); }
+    .tnc-details summary { cursor: pointer; color: var(--primary); font-weight: 500; padding: 4px 0; }
+    .tnc-details p { padding: 8px 0; line-height: 1.6; }
+    .reward-detail-footer { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .your-pts { font-size: 13px; color: var(--text-muted); text-align: center; }
+    .your-pts b { color: var(--primary); }
+
+    /* ── Filter Tabs ───────────────────────────────────────── */
+    .filter-tabs {
+      display: flex;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+    }
+    .filter-tab {
+      flex: 1; text-align: center;
+      padding: 12px 0;
+      font-size: 13px; font-weight: 500;
+      color: var(--text-muted);
+      border: none; background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.14s, border-color 0.14s;
+    }
+    .filter-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    /* ── Transaction List ──────────────────────────────────── */
+    .tx-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+    .tx-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 12px 14px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .tx-item-date { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+    .tx-item-branch { color: var(--text-muted); }
+    .tx-item-total { font-size: 14px; font-weight: 700; text-align: right; }
+    .tx-item-pts { font-size: 11px; font-weight: 600; color: var(--success); text-align: right; margin-top: 2px; }
+
+    /* ── Ledger / Point History ────────────────────────────── */
+    .ledger-list { display: flex; flex-direction: column; gap: 1px; }
+    .ledger-item {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .ledger-icon {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .ledger-icon.in { background: var(--success-bg); color: var(--success); }
+    .ledger-icon.out { background: var(--danger-bg); color: var(--danger); }
+    .ledger-icon.none { background: var(--bg); color: var(--text-muted); }
+    .ledger-icon svg { width: 16px; height: 16px; }
+    .ledger-info { flex: 1; min-width: 0; }
+    .ledger-type { font-size: 13px; font-weight: 500; color: var(--text); }
+    .ledger-date, .ledger-reason { margin-top: 2px; }
+    .ledger-pts { font-size: 15px; font-weight: 700; flex-shrink: 0; }
+    .ledger-pts.in { color: var(--success); }
+    .ledger-pts.out { color: var(--danger); }
+
+    /* ── Claim Cards ───────────────────────────────────────── */
+    .claim-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-xl);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .claim-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .claim-card-name { font-size: 15px; font-weight: 600; }
+    .claim-qr-area { display: flex; justify-content: center; margin-bottom: 12px; }
+    .claim-qr-box { width: 160px; height: 160px; }
+    .claim-qr-box svg { width: 100%; height: 100%; }
+    .claim-code {
+      text-align: center;
+      font-size: 22px; font-weight: 800;
+      letter-spacing: 3px;
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+      margin-bottom: 6px;
+    }
+    .claim-countdown { text-align: center; margin-bottom: 12px; }
+    .claim-history-item {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .claim-history-name { font-size: 13px; font-weight: 500; }
+    .claim-status { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-full); margin-top: 4px; }
+    .claim-status.redeemable { background: var(--success-bg); color: var(--success); }
+    .claim-status.pending_approval { background: var(--warning-bg); color: var(--warning); }
+    .claim-status.redeemed { background: var(--bg-alt); color: var(--text-muted); }
+    .claim-status.cancelled { background: var(--danger-bg); color: var(--danger); }
+    .claim-status.expired { background: var(--bg-alt); color: var(--text-muted); }
+
+    /* ── Profile Card ──────────────────────────────────────── */
+    .profile-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-xl);
+      padding: 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .profile-card-info { display: flex; align-items: center; gap: 12px; }
+    .profile-avatar svg { width: 44px; height: 44px; color: var(--text-muted); }
+    .profile-name { font-size: 15px; font-weight: 700; }
+    .profile-code { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .info-block { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+
+    /* ── QR Modal ──────────────────────────────────────────── */
+    #qr-modal {
+      position: fixed; inset: 0;
+      z-index: 999;
+      display: none;
+      align-items: center; justify-content: center;
+    }
+    #qr-modal-backdrop {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.6);
+    }
+    #qr-modal-content {
+      position: relative;
+      background: var(--surface);
+      border-radius: var(--r-2xl);
+      padding: 24px 20px;
+      width: calc(100vw - 48px);
+      max-width: 340px;
+      text-align: center;
+      z-index: 1;
+    }
+    #qr-modal-close {
+      position: absolute; top: 12px; right: 12px;
+      background: var(--bg); border: none;
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      font-size: 18px; color: var(--text-muted);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      line-height: 1;
+    }
+    #qr-modal-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    #qr-modal-canvas { display: flex; justify-content: center; margin: 12px 0; }
+    #qr-modal-canvas svg { width: 220px; height: 220px; }
+    #qr-modal-code {
+      font-size: 18px; font-weight: 800;
+      letter-spacing: 2px;
+      font-family: 'Courier New', monospace;
+      color: var(--text);
+    }
+
+    /* ── Toast ─────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      top: 16px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex; flex-direction: column; gap: 8px;
+      width: calc(100vw - 32px); max-width: 400px;
+      pointer-events: none;
+    }
+    .toast {
+      padding: 12px 16px;
+      border-radius: var(--r-lg);
+      font-size: 13px; font-weight: 500;
+      box-shadow: var(--sh-md);
+      animation: toastIn 0.2s ease, toastOut 0.3s ease 3.2s forwards;
+      pointer-events: auto;
+    }
+    .toast-info    { background: #1e40af; color: #fff; }
+    .toast-success { background: var(--success); color: #fff; }
+    .toast-error   { background: var(--danger); color: #fff; }
+    .toast-warning { background: var(--warning); color: #fff; }
+    @keyframes toastIn  { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes toastOut { to { opacity:0; transform:translateY(-8px); } }
+
+    /* ── Utilities ─────────────────────────────────────────── */
+    .text-xs   { font-size: 11px; }
+    .text-muted { color: var(--text-muted); }
+  </style>
+</head>
+<body class="member-app">
+
+  <div id="toast-container"></div>
+  <div id="app-root"></div>
+
+  <!-- Bottom Navigation -->
+  <nav id="bottom-nav">
+    <button class="nav-item" data-nav="dashboard">
+      <i data-lucide="home"></i>
+      <span>Home</span>
+    </button>
+    <button class="nav-item" data-nav="rewards">
+      <i data-lucide="gift"></i>
+      <span>Reward</span>
+    </button>
+    <button class="nav-item" data-nav="my-claims">
+      <i data-lucide="ticket"></i>
+      <span>Klaim</span>
+    </button>
+    <button class="nav-item" data-nav="history">
+      <i data-lucide="clock"></i>
+      <span>Histori</span>
+    </button>
+    <button class="nav-item" data-nav="profile">
+      <i data-lucide="user"></i>
+      <span>Profil</span>
+    </button>
+  </nav>
+
+  <!-- QR Fullscreen Modal -->
+  <div id="qr-modal">
+    <div id="qr-modal-backdrop"></div>
+    <div id="qr-modal-content">
+      <button id="qr-modal-close">&times;</button>
+      <p id="qr-modal-name"></p>
+      <div id="qr-modal-canvas"></div>
+      <p id="qr-modal-code"></p>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">Tunjukkan kode ini ke kasir</p>
+    </div>
+  </div>
+
+  <script src="js/apiClient.js"></script>
+  <script src="https://unpkg.com/lucide@0.441.0/dist/umd/lucide.min.js"></script>
+  <script src="js/member.js"></script>
+</body>
+</html>

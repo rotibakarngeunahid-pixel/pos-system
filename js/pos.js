@@ -256,6 +256,7 @@ const POS = {
     if (window.depositUi && typeof depositUi.refreshWhenReady === 'function') {
       depositUi.refreshWhenReady();
     }
+    if (window.memberUi) memberUi.init();
 
     // Onboarding tutorial for new staff — non-blocking, never affects POS flow
     if (window.Onboarding && this.user) {
@@ -1484,6 +1485,7 @@ const POS = {
       }
     }
     window.dispatchEvent(new CustomEvent('rbn:cart:changed', { detail: { count, total } }));
+    if (window.memberUi) memberUi.updatePreview(subtotal);
 
     if (!this.cart.length) {
       if (itemsEl)  itemsEl.innerHTML = '';
@@ -1548,9 +1550,15 @@ const POS = {
     }, 0);
   },
   calcDiscount(subtotal) {
-    if (this.discount.type === 'pct')   return Math.round(subtotal * this.discount.value / 100);
-    if (this.discount.type === 'fixed') return Math.min(this.discount.value, subtotal);
-    return 0;
+    let d = 0;
+    if (this.discount.type === 'pct')        d = Math.round(subtotal * this.discount.value / 100);
+    else if (this.discount.type === 'fixed') d = Math.min(this.discount.value, subtotal);
+    // Diskon reward member (jika ada) — disertakan agar total & pembayaran sudah benar
+    // SEBELUM kasir menerima uang (hindari mismatch kas/kembalian).
+    if (window.memberUi && typeof memberUi.getRewardDiscount === 'function') {
+      d += memberUi.getRewardDiscount(subtotal);
+    }
+    return Math.min(d, subtotal);
   },
 
   // ── SPA View Swap ─────────────────────────────────────────────
@@ -3143,7 +3151,9 @@ const POS = {
         discountAmount: disc,
         taxAmount:      0,
         feeAmount:      fee,
-        clientTxId:     clientTxId
+        clientTxId:     clientTxId,
+        memberId:       window.memberUi?.getMemberId() || null,
+        redemptionCode: window.memberUi?.getRedemptionCode() || null,
       });
 
       closeModal('modal-payment');
@@ -3156,6 +3166,8 @@ const POS = {
 
       this.renderCart();
       this.showPostPaymentScreen(result, savedCart, method);
+
+      if (window.memberUi) memberUi.afterCheckout(result);
 
       // Run BOM deduction async without blocking UI
       this._applyBOMDeduction(savedCart, result.trx.id, preCheckoutStock);

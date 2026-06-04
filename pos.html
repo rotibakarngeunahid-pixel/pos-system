@@ -374,6 +374,9 @@
             <span class="cart-total-label">TOTAL</span>
             <span class="cart-total-value" id="cart-total-display">Rp 0</span>
           </div>
+          <!-- Member Panel (managed by memberUi.js, hidden if module off) -->
+          <div id="member-panel-container"></div>
+
           <button class="btn-checkout" id="btn-checkout" data-action="open-payment-modal">
             Bayar Sekarang →
           </button>
@@ -1511,7 +1514,68 @@
     🎓
   </button>
 
+  <!-- ══════════════════════════════════════════
+       MODAL: Cari Member
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-member-search">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title"><i data-lucide="users" class="icon-sm"></i> Cari Member</div>
+          <div class="modal-subtitle">Cari berdasarkan nomor HP atau kode member</div>
+        </div>
+        <button class="modal-close" onclick="document.getElementById('modal-member-search').classList.remove('active')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Nomor HP atau Kode Member</label>
+          <div class="flex gap-2">
+            <input type="text" class="form-control" id="pos-member-search-input"
+              placeholder="08xxxxxxxxxx atau RBN-..." inputmode="numeric" autocomplete="off" />
+            <button class="btn btn-primary btn-sm" id="pos-member-search-btn"
+              onclick="memberUi._doSearch()" style="white-space:nowrap">
+              <i data-lucide="search" class="icon-sm"></i> Cari
+            </button>
+          </div>
+        </div>
+        <div id="pos-member-search-result" style="margin-top:8px;min-height:40px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MODAL: Gunakan Reward Klaim
+  ══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-reward-redeem">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title"><i data-lucide="gift" class="icon-sm"></i> Gunakan Reward</div>
+          <div class="modal-subtitle">Masukkan kode klaim yang dimiliki member</div>
+        </div>
+        <button class="modal-close" onclick="document.getElementById('modal-reward-redeem').classList.remove('active')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Kode Klaim (8 karakter)</label>
+          <div class="flex gap-2">
+            <input type="text" class="form-control" id="pos-redeem-code-input"
+              placeholder="ABCD1234" maxlength="10"
+              style="text-transform:uppercase;letter-spacing:2px;font-family:monospace;font-size:16px;"
+              autocomplete="off" />
+            <button class="btn btn-primary btn-sm" id="pos-redeem-validate-btn"
+              data-action="pos-redeem-validate" style="white-space:nowrap">
+              Validasi
+            </button>
+          </div>
+        </div>
+        <div id="pos-redeem-result" style="margin-top:8px;min-height:40px;"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="js/onboarding.js?v=20260517-manual-deposit-2"></script>
+  <script src="js/memberUi.js"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>

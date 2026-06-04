@@ -217,6 +217,9 @@
       </button>
 
       <div class="sidebar-section-label">Manajemen</div>
+      <button class="nav-item" data-admin-action="navigate" data-section="member" title="Member Loyalty">
+        <i data-lucide="award"></i><span class="nav-text">Member Loyalty</span>
+      </button>
       <button class="nav-item" data-admin-action="navigate" data-section="ingredients" title="Bahan Baku">
         <i data-lucide="leaf"></i><span class="nav-text">Bahan Baku</span>
       </button>
@@ -1617,6 +1620,16 @@
           </div>
         </div>
       </div>
+
+      <!-- ══════════ MEMBER LOYALTY ══════════ -->
+      <section class="admin-section" id="section-member">
+        <!-- Content rendered by adminMemberUi.js -->
+        <div class="empty-state">
+          <div class="empty-icon"><i data-lucide="award" class="icon"></i></div>
+          <div class="empty-title">Member &amp; Loyalty</div>
+          <div class="empty-desc">Memuat...</div>
+        </div>
+      </section>
 
       <!-- ══════════ TOPPINGS ══════════ -->
       <section class="admin-section" id="section-toppings">
@@ -3221,6 +3234,7 @@ atau tidak aktif."
   <script src="js/adminBranchCashUi.js?v=20260520-branch-cash-outlet-1"></script>
   <script src="js/adminCashBranchTransferUi.js?v=20260528-admin-cbt-approve-1"></script>
   <script src="js/adminFinanceIntegrationUi.js?v=20260526-api-key-hardening-1"></script>
+  <script src="js/adminMemberUi.js"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/admin.js?v=20260601-security-hardening-1"></script>

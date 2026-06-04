@@ -42,7 +42,7 @@ if (isOriginAllowed($origin)) {
 }
 // Jika origin tidak diizinkan, tidak kirim CORS header — browser akan menolak otomatis.
 header('Access-Control-Allow-Methods: GET, POST, PATCH, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Session-Token, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Session-Token, X-Member-Session-Token, Authorization');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
@@ -95,6 +95,9 @@ $allowedTables = [
     // PO sync integration tables
     'po_outlet_branch_mappings','po_material_pos_mappings','po_ignored_materials',
     'po_stock_sync_runs','po_stock_sync_items','po_stock_sync_errors',
+    // Member & Loyalty (migration 064) — write ke ledger/sessions diblok di authorizeTableRequest
+    'members','member_sessions','member_point_ledger','member_rewards',
+    'member_reward_claims','member_fraud_flags','member_settings',
 ];
 if (!in_array($table, $allowedTables, true)) {
     respond(400, ['error' => ['message' => "Tabel '$table' tidak diizinkan"]]);
@@ -433,8 +436,12 @@ function validateCashLogWrite(array $user, string $method, array $params, array 
 function authorizeTableRequest(string $table, string $method, array $params, array $body): array {
     $user = requireSessionUser($params);
 
-    if ($table === 'app_sessions') {
+    if ($table === 'app_sessions' || $table === 'member_sessions') {
         denyHttp(403, 'Tabel session tidak boleh diakses langsung', 'TABLE_FORBIDDEN');
+    }
+    // Ledger point hanya boleh ditulis lewat RPC (jaga integritas saldo).
+    if ($table === 'member_point_ledger' && $method !== 'GET') {
+        denyHttp(403, 'Ledger point hanya bisa diubah lewat RPC', 'TABLE_FORBIDDEN');
     }
     if ($table === 'users') {
         $params = sanitizeUserSelectParams($params);
@@ -1275,6 +1282,7 @@ function publicRpcNames(): array {
         'get_sales_integration',
         'get_kas_keluar_integration',
         'get_integration_summary',
+        'get_buduk_calculator_integration',
     ];
 }
 
@@ -1326,6 +1334,20 @@ function authorizeRpcRequest(string $name, array $params): array {
         return [$params, null];
     }
 
+    // ── Member loyalty RPC: auth lewat X-Member-Session-Token (terpisah dari staff) ──
+    if (in_array($name, memberPublicRpcNames(), true)) {
+        if ($name === 'member_register') rateLimitAction('rpc_member_register', 5, 3600, 'ip:' . requestIp());
+        if ($name === 'member_login')    rateLimitAction('rpc_member_login_ip', 30, 300, 'ip:' . requestIp());
+        if ($name === 'member_forgot_password') rateLimitAction('rpc_member_forgot', 5, 600, 'ip:' . requestIp());
+        return [$params, null];
+    }
+    if (in_array($name, memberSessionRpcNames(), true)) {
+        $member = requireMemberSession();
+        $params['_member'] = $member;
+        rateLimitAction('rpc_member_act', 120, 60, 'member:' . $member['id']);
+        return [$params, null];
+    }
+
     // System RPC: dipanggil oleh integrasi internal menggunakan API key saja (tanpa session user).
     // API key sudah divalidasi di bagian atas api.php.
     if (in_array($name, systemRpcNames(), true)) {
@@ -1334,7 +1356,7 @@ function authorizeRpcRequest(string $name, array $params): array {
         return [$params, null];
     }
 
-    $roles = in_array($name, adminRpcNames(), true) ? ['admin','owner'] : null;
+    $roles = (in_array($name, adminRpcNames(), true) || in_array($name, memberAdminRpcNames(), true)) ? ['admin','owner'] : null;
     $user = requireSessionUser($params, $roles);
     $params['_auth_user'] = $user;
     if (($user['role'] ?? '') === 'investor' && !str_starts_with($name, 'investor_')) {
@@ -1701,6 +1723,8 @@ function rpc_process_transaction(array $p): mixed {
         $notes         = $p['p_notes']          ?? null;
         $clientTxId    = normalizeClientTxId($p['p_client_tx_id']   ?? null);
         $authUser      = $p['_auth_user'] ?? null;
+        $memberId      = !empty($p['p_member_id']) ? (int)$p['p_member_id'] : null;
+        $redemptionCode= isset($p['p_redemption_code']) ? strtoupper(trim((string)$p['p_redemption_code'])) : '';
 
         if (!is_array($cart) || !$cart || !$branchId || !$staffId || !$paymentMethod)
             throw new Exception('Parameter transaksi tidak lengkap');
@@ -1777,6 +1801,15 @@ function rpc_process_transaction(array $p): mixed {
             }
         }
 
+        // ── Member loyalty: validasi & lock klaim reward (jika ada) SEBELUM insert ──
+        // Diskon reward sudah disertakan frontend di $discountAmount; di sini kita pastikan
+        // klaim valid & cakupan diskonnya benar, lalu dikonsumsi setelah transaksi dibuat.
+        $redeemClaim = null;
+        if ($redemptionCode !== '' && memberLoyaltyEnabled($pdo)) {
+            $redeemClaim = memberValidateClaimForCheckout($pdo, $redemptionCode, $memberId, $subtotal, $cart, $discountAmount);
+            if (!$memberId) $memberId = (int)$redeemClaim['member_id']; // adopsi member dari klaim
+        }
+
         // Insert transaction
         $stmt = $pdo->prepare("
             INSERT INTO transactions
@@ -1830,6 +1863,34 @@ function rpc_process_transaction(array $p): mixed {
             }
         }
 
+        // ── Member loyalty: konsumsi klaim reward (atomic, di transaksi yang sama) ──
+        if ($redeemClaim) {
+            memberCommitClaimAtCheckout($pdo, $redeemClaim, $txId, $branchId, $staffId, $authUser);
+        }
+
+        // ── Member loyalty: award point (opt-in, atomic, non-breaking) ──────────
+        $pointResult = null;
+        if ($memberId && memberLoyaltyEnabled($pdo)) {
+            $S = memberGetSettings($pdo);
+            // Default: transaksi yang memakai reward tidak mendapat point (point_on_reward_transaction).
+            if ($redeemClaim && empty($S['point_on_reward_transaction'])) {
+                $pdo->prepare("UPDATE transactions SET member_id=?, member_attached_at=NOW(), points_awarded=0 WHERE id=?")->execute([$memberId, $txId]);
+                $pdo->prepare("UPDATE members SET last_transaction_at=NOW() WHERE id=?")->execute([$memberId]);
+                $pointResult = ['points_awarded' => 0, 'balance' => memberBalances($pdo, $memberId), 'note' => 'Transaksi memakai reward — tidak dapat point'];
+            } else {
+                $pointResult = memberAwardPointsForTransaction($pdo, [
+                    'tx_id'      => $txId,
+                    'branch_id'  => $branchId,
+                    'staff_id'   => $staffId,
+                    'member_id'  => $memberId,
+                    'subtotal'   => $subtotal,
+                    'discount'   => $discountAmount,
+                    'cart'       => $cart,
+                    'auth_user'  => $authUser,
+                ]);
+            }
+        }
+
         $pdo->commit();
         auditLog($authUser, 'transaction_create', 'transactions', null, ['id'=>$txId,'total'=>$total,'payment_method'=>$paymentMethod], $branchId);
         return [
@@ -1841,6 +1902,15 @@ function rpc_process_transaction(array $p): mixed {
             'total'           => $total,
             'change_amount'   => $changeAmount,
             'status'          => 'completed',
+            'member_id'       => $memberId,
+            'points_awarded'  => $pointResult['points_awarded'] ?? 0,
+            'member_balance'  => $pointResult['balance'] ?? null,
+            'point_note'      => $pointResult['note'] ?? null,
+            'reward_redeemed' => $redeemClaim ? [
+                'claim_id'    => (int)$redeemClaim['id'],
+                'reward_name' => $redeemClaim['_reward']['name'] ?? null,
+                'discount'    => (float)($redeemClaim['_reward_discount'] ?? 0),
+            ] : null,
         ];
     } catch (Throwable $e) {
         $pdo->rollBack();
@@ -3285,6 +3355,11 @@ function rpc_void_transaction(array $p): mixed {
         $pdo->prepare("UPDATE cash_logs SET is_void=1,void_reason=?,void_by=?,void_at=NOW() WHERE reference_type='sale' AND reference_id=?")
             ->execute([$reason,$by,$txId]);
 
+        // Member loyalty: balik point yang sudah diberikan + batalkan klaim reward terkait
+        if (memberLoyaltyEnabled($pdo)) {
+            memberReverseTransactionPoints($pdo, $t, null, $by, 'void: ' . $reason);
+        }
+
         // Kembalikan stok bahan baku berdasarkan BOM (recipe)
         $branchId = (int)$t['branch_id'];
         $itemsStmt = $pdo->prepare("SELECT variant_id, quantity FROM transaction_items WHERE transaction_id=?");
@@ -3364,6 +3439,11 @@ function rpc_refund_transaction(array $p): mixed {
         $pdo->prepare("INSERT INTO refund_transactions (transaction_id,reason,amount,refunded_by) VALUES (?,?,?,?)")
             ->execute([$txId,$reason,$amount,$by]);
         $refundId = (int)$pdo->lastInsertId();
+
+        // Member loyalty: balik point secara proporsional terhadap nominal refund
+        if (memberLoyaltyEnabled($pdo)) {
+            memberReverseTransactionPoints($pdo, $t, $amount, $by, 'refund: ' . $reason);
+        }
 
         // Catat ke cash_logs agar refund muncul di Riwayat Kas.
         // Hanya untuk transaksi tunai (cash) karena hanya itu yang memengaruhi kas fisik.
@@ -4043,6 +4123,111 @@ function rpc_get_integration_summary(array $p): mixed {
         ],
         'per_cabang'  => array_values($branchMap),
         'per_tanggal' => array_values($dailyMap),
+    ];
+}
+
+// ── get_buduk_calculator_integration ─────────────────────────────────────────
+function rpc_get_buduk_calculator_integration(array $p): mixed {
+    $pdo       = getDB();
+    $branchId  = !empty($p['p_branch_id'])  ? (int)$p['p_branch_id']  : null;
+    $entryDate = !empty($p['p_entry_date']) ? trim($p['p_entry_date']) : null;
+
+    // Outer X-API-Key header sudah divalidasi di bagian atas api.php — tidak perlu cek api_keys lagi
+
+    if (!$branchId)  throw new ApiHttpException(400, 'p_branch_id wajib diisi', 'INVALID_PARAM');
+    if (!$entryDate) throw new ApiHttpException(400, 'p_entry_date wajib diisi', 'INVALID_PARAM');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $entryDate)) {
+        throw new ApiHttpException(400, 'p_entry_date harus format YYYY-MM-DD', 'INVALID_PARAM');
+    }
+
+    $bStmt = $pdo->prepare("SELECT id, name FROM branches WHERE id=? AND COALESCE(is_active,1)=1 LIMIT 1");
+    $bStmt->execute([$branchId]);
+    $branch = $bStmt->fetch();
+    if (!$branch) throw new ApiHttpException(404, 'Cabang tidak ditemukan atau tidak aktif', 'BRANCH_NOT_FOUND');
+
+    $dateFrom = witaDateToUtc($entryDate);
+    $dateTo   = witaDateToUtc($entryDate, true);
+
+    // Agregasi penjualan tunai dan QRIS
+    $sStmt = $pdo->prepare("
+        SELECT
+          COALESCE(SUM(CASE WHEN LOWER(t.payment_method) = 'cash' THEN t.total ELSE 0 END), 0) AS tunai_roti,
+          COALESCE(SUM(CASE WHEN LOWER(t.payment_method) = 'qris'  THEN t.total ELSE 0 END), 0) AS qris_roti,
+          SUM(CASE WHEN LOWER(t.payment_method) = 'cash' THEN 1 ELSE 0 END) AS cash_count,
+          SUM(CASE WHEN LOWER(t.payment_method) = 'qris'  THEN 1 ELSE 0 END) AS qris_count
+        FROM transactions t
+        WHERE t.branch_id = ?
+          AND t.status = 'completed'
+          AND t.created_at >= ?
+          AND t.created_at <= ?
+    ");
+    $sStmt->execute([$branchId, $dateFrom, $dateTo]);
+    $sales = $sStmt->fetch();
+
+    // Detail kas manual (in dan out, non-void, reference_type = manual)
+    $cStmt = $pdo->prepare("
+        SELECT cl.id, cl.type, cl.amount, cl.note, cl.created_at,
+               cc.name AS category_name, u.name AS staff_name
+        FROM cash_logs cl
+        LEFT JOIN cash_categories cc ON cc.id = cl.category_id
+        LEFT JOIN users u ON u.id = cl.created_by
+        WHERE cl.branch_id = ?
+          AND cl.reference_type = 'manual'
+          AND COALESCE(cl.is_void, 0) = 0
+          AND cl.type IN ('in', 'out')
+          AND cl.created_at >= ?
+          AND cl.created_at <= ?
+        ORDER BY cl.created_at ASC, cl.id ASC
+    ");
+    $cStmt->execute([$branchId, $dateFrom, $dateTo]);
+    $cashRows = $cStmt->fetchAll();
+
+    $kasIn  = 0;
+    $kasOut = 0;
+    $cashDetails = [];
+    foreach ($cashRows as $r) {
+        $amount = (int)$r['amount'];
+        if ($r['type'] === 'in')  $kasIn  += $amount;
+        if ($r['type'] === 'out') $kasOut += $amount;
+        $dt = new DateTime($r['created_at']);
+        $dt->setTimezone(new DateTimeZone('Asia/Makassar'));
+        $cashDetails[] = [
+            'pos_cash_log_id' => (string)$r['id'],
+            'direction'       => $r['type'],
+            'created_at'      => $dt->format('Y-m-d H:i:s'),
+            'amount'          => $amount,
+            'category'        => $r['category_name'] ?? '',
+            'note'            => $r['note'] ?? '',
+            'recorded_by'     => $r['staff_name'] ?? '',
+        ];
+    }
+
+    $tunaiRoti = (int)($sales['tunai_roti'] ?? 0);
+    $qrisRoti  = (int)($sales['qris_roti']  ?? 0);
+    $now       = new DateTime('now', new DateTimeZone('Asia/Makassar'));
+
+    return [
+        'success' => true,
+        'source'  => 'point_of_sales',
+        'branch'  => ['id' => (int)$branch['id'], 'name' => $branch['name']],
+        'period'  => [
+            'entry_date' => $entryDate,
+            'timezone'   => 'Asia/Makassar',
+            'from'       => $dateFrom,
+            'to'         => $dateTo,
+        ],
+        'totals' => [
+            'tunai_roti' => $tunaiRoti,
+            'qris_roti'  => $qrisRoti,
+            'kas_masuk'  => $kasIn,
+            'kas_keluar' => $kasOut,
+        ],
+        'sales_breakdown' => [
+            'cash' => ['count' => (int)($sales['cash_count'] ?? 0), 'total' => $tunaiRoti],
+            'qris' => ['count' => (int)($sales['qris_count'] ?? 0), 'total' => $qrisRoti],
+        ],
+        'cash_details' => $cashDetails,
+        'generated_at' => $now->format('Y-m-d H:i:s'),
     ];
 }
 
@@ -5441,4 +5626,1269 @@ function poCalcSimilarity(string $a, string $b): int {
     // similar_text PHP built-in sebagai fallback
     similar_text($a, $b, $pct);
     return $pct >= 50 ? (int)round($pct * 0.5) : 0;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MEMBER & LOYALTY POINT MODULE (migration 064) — Fase 1 MVP
+// Lihat docs/PRD_Member_Loyalty_Point.md
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Daftar RPC member berdasarkan jenis auth ──────────────────────────────────
+function memberPublicRpcNames(): array {
+    return ['member_register', 'member_login', 'member_forgot_password'];
+}
+function memberSessionRpcNames(): array {
+    return [
+        'member_logout', 'member_me', 'member_update_profile', 'member_change_password',
+        'member_get_balance', 'member_get_point_history', 'member_get_transaction_history',
+        'member_list_rewards', 'member_claim_reward', 'member_cancel_claim', 'member_my_claims',
+    ];
+}
+function memberAdminRpcNames(): array {
+    return [
+        'member_admin_search', 'member_admin_get_detail', 'member_admin_set_active',
+        'member_admin_set_staff_link', 'member_admin_manual_adjust', 'member_admin_lock_points',
+        'member_admin_unlock_points', 'member_admin_reset_password', 'member_admin_void_claim',
+        'member_admin_approve_claim', 'member_admin_create', 'member_dashboard_stats',
+        'member_fraud_dashboard', 'member_fraud_resolve',
+    ];
+}
+// Staff/admin RPC (lewat X-Session-Token biasa): member_lookup, member_validate_qr,
+// member_preview_points, member_redeem_at_cashier, member_unattach_from_transaction.
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function memberGetSettings(PDO $pdo): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $cache = [];
+    try {
+        foreach ($pdo->query("SELECT setting_key,setting_value,value_type FROM member_settings")->fetchAll() as $r) {
+            $v = $r['setting_value'];
+            switch ($r['value_type']) {
+                case 'int':     $v = (int)$v; break;
+                case 'decimal': $v = (float)$v; break;
+                case 'bool':    $v = ($v === '1' || $v === 'true' || $v === 1 || $v === true); break;
+                case 'json':    $d = json_decode((string)$v, true); $v = is_array($d) ? $d : []; break;
+            }
+            $cache[$r['setting_key']] = $v;
+        }
+    } catch (Throwable) { $cache = []; }
+    return $cache;
+}
+function memberLoyaltyEnabled(PDO $pdo): bool {
+    if (!dbColumnExists($pdo, 'members', 'id')) return false; // tabel belum dimigrasi
+    return !empty(memberGetSettings($pdo)['enable_loyalty_module']);
+}
+
+// ── Utilitas ──────────────────────────────────────────────────────────────────
+function maskPhone(string $phone): string {
+    $phone = trim($phone);
+    if (strlen($phone) <= 6) return $phone;
+    return substr($phone, 0, 4) . str_repeat('*', max(1, strlen($phone) - 8)) . substr($phone, -4);
+}
+function memberGenCode(PDO $pdo): string {
+    $prefix = 'RBN-' . date('ym') . '-';
+    $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    for ($i = 0; $i < 25; $i++) {
+        $s = '';
+        for ($j = 0; $j < 5; $j++) $s .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        $code = $prefix . $s;
+        $chk = $pdo->prepare("SELECT 1 FROM members WHERE member_code=? LIMIT 1");
+        $chk->execute([$code]);
+        if (!$chk->fetch()) return $code;
+    }
+    return $prefix . strtoupper(bin2hex(random_bytes(3)));
+}
+function memberGenRedemptionCode(PDO $pdo): string {
+    $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // tanpa O,0,I,1
+    for ($i = 0; $i < 25; $i++) {
+        $s = '';
+        for ($j = 0; $j < 8; $j++) $s .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        $chk = $pdo->prepare("SELECT 1 FROM member_reward_claims WHERE redemption_code=? LIMIT 1");
+        $chk->execute([$s]);
+        if (!$chk->fetch()) return $s;
+    }
+    return strtoupper(bin2hex(random_bytes(4)));
+}
+function memberStaticQrToken(array $member): string {
+    $id  = (int)$member['id'];
+    $sig = substr(hash_hmac('sha256', 'MBR' . $id, (string)$member['qr_secret']), 0, 20);
+    return 'MBR.' . $id . '.' . $sig;
+}
+function memberValidateQrToken(PDO $pdo, string $token): ?array {
+    if (!str_starts_with($token, 'MBR.')) return null;
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) return null;
+    $id = (int)$parts[1];
+    if ($id <= 0) return null;
+    $m = $pdo->prepare("SELECT * FROM members WHERE id=? AND is_active=1 AND deleted_at IS NULL LIMIT 1");
+    $m->execute([$id]);
+    $member = $m->fetch();
+    if (!$member) return null;
+    $expected = substr(hash_hmac('sha256', 'MBR' . $id, (string)$member['qr_secret']), 0, 20);
+    return hash_equals($expected, $parts[2]) ? $member : null;
+}
+function memberPublicView(array $m, bool $includeContact = false): array {
+    $out = [
+        'id'                       => (int)$m['id'],
+        'member_code'              => $m['member_code'],
+        'name'                     => $m['name'],
+        'phone_masked'             => maskPhone((string)($m['phone'] ?? '')),
+        'gender'                   => $m['gender'] ?? null,
+        'birth_date'               => $m['birth_date'] ?? null,
+        'is_active'                => (int)($m['is_active'] ?? 1),
+        'lifetime_points_earned'   => (int)($m['lifetime_points_earned'] ?? 0),
+        'lifetime_points_redeemed' => (int)($m['lifetime_points_redeemed'] ?? 0),
+        'created_at'               => $m['created_at'] ?? null,
+        'qr_token'                 => isset($m['qr_secret']) ? memberStaticQrToken($m) : null,
+    ];
+    if ($includeContact) {
+        $out['phone'] = $m['phone'] ?? null;
+        $out['email'] = $m['email'] ?? null;
+    }
+    return $out;
+}
+
+// ── Validasi input ────────────────────────────────────────────────────────────
+function memberValidatePhone(string $p): string {
+    $p = trim($p);
+    if (!preg_match('/^08[0-9]{8,12}$/', $p)) throw new ApiHttpException(400, 'Nomor HP tidak valid (format 08xxxxxxxxxx)', 'VALIDATION_FAILED');
+    return $p;
+}
+function memberValidatePassword(string $pw): void {
+    if (strlen($pw) < 8 || !preg_match('/[A-Za-z]/', $pw) || !preg_match('/[0-9]/', $pw)) {
+        throw new ApiHttpException(400, 'Password minimal 8 karakter dan mengandung huruf & angka', 'VALIDATION_FAILED');
+    }
+}
+function memberSanitizeName(string $n): string {
+    $n = trim(strip_tags($n));
+    if (mb_strlen($n) < 2 || mb_strlen($n) > 80) throw new ApiHttpException(400, 'Nama harus 2-80 karakter', 'VALIDATION_FAILED');
+    return $n;
+}
+
+// ── Session member ────────────────────────────────────────────────────────────
+function currentMemberSession(): ?array {
+    static $cache = null; static $done = false;
+    if ($done) return $cache;
+    $done = true;
+    $token = trim((string)($_SERVER['HTTP_X_MEMBER_SESSION_TOKEN'] ?? ''));
+    if ($token === '' || strlen($token) < 32 || strlen($token) > 256) return $cache = null;
+    $pdo = getDB();
+    $hash = hash('sha256', $token);
+    $stmt = $pdo->prepare("
+        SELECT m.*, s.expires_at AS _session_expires
+        FROM member_sessions s JOIN members m ON m.id = s.member_id
+        WHERE s.token_hash = ? AND s.expires_at > NOW() AND m.is_active = 1 AND m.deleted_at IS NULL
+        LIMIT 1
+    ");
+    $stmt->execute([$hash]);
+    $row = $stmt->fetch();
+    if (!$row) return $cache = null;
+    try { $pdo->prepare("UPDATE member_sessions SET last_seen_at=NOW() WHERE token_hash=?")->execute([$hash]); } catch (Throwable) {}
+    return $cache = $row;
+}
+function requireMemberSession(): array {
+    $m = currentMemberSession();
+    if (!$m) denyHttp(401, 'Sesi member tidak valid atau sudah kedaluwarsa', 'MEMBER_SESSION_INVALID');
+    return $m;
+}
+function memberCreateSession(PDO $pdo, int $memberId): array {
+    $token   = bin2hex(random_bytes(32));
+    $hash    = hash('sha256', $token);
+    $expires = date('Y-m-d H:i:s', strtotime('+30 days'));
+    $pdo->prepare("INSERT INTO member_sessions (token_hash,member_id,expires_at,ip_address,user_agent) VALUES (?,?,?,?,?)")
+        ->execute([$hash, $memberId, $expires, requestIp(), substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255)]);
+    if (mt_rand(1, 20) === 1) { try { $pdo->exec("DELETE FROM member_sessions WHERE expires_at <= NOW() LIMIT 500"); } catch (Throwable) {} }
+    return ['session_token' => $token, 'expires_at' => date('c', strtotime($expires))];
+}
+
+// ── Ledger & saldo ────────────────────────────────────────────────────────────
+function memberMovementEffect(string $m): array {
+    // [direction, activeSign, pendingSign]
+    return match ($m) {
+        'earn_pending'      => ['in',   0, +1],
+        'earn_purchase'     => ['in',  +1,  0],
+        'pending_to_active' => ['none',+1, -1],
+        'redeem_reserve'    => ['out', -1,  0],
+        'redeem_commit'     => ['none', 0,  0],
+        'redeem_refund'     => ['in',  +1,  0],
+        'refund_reversal'   => ['out', -1,  0],
+        'manual_adjust_in'  => ['in',  +1,  0],
+        'manual_adjust_out' => ['out', -1,  0],
+        'expire'            => ['out', -1,  0],
+        'fraud_lock'        => ['out', -1,  0],
+        'fraud_unlock'      => ['in',  +1,  0],
+        default             => ['none', 0,  0],
+    };
+}
+function memberBalances(PDO $pdo, int $memberId): array {
+    $s = $pdo->prepare("SELECT balance_active_after,balance_pending_after FROM member_point_ledger WHERE member_id=? ORDER BY id DESC LIMIT 1");
+    $s->execute([$memberId]);
+    $r = $s->fetch();
+    return ['active' => $r ? (int)$r['balance_active_after'] : 0, 'pending' => $r ? (int)$r['balance_pending_after'] : 0];
+}
+function memberReservedPoints(PDO $pdo, int $memberId): int {
+    $s = $pdo->prepare("SELECT COALESCE(SUM(cost_point),0) FROM member_reward_claims WHERE member_id=? AND status IN('redeemable','pending_approval') AND expires_at>NOW()");
+    $s->execute([$memberId]);
+    return (int)$s->fetchColumn();
+}
+// Catatan: pemanggil WAJIB sudah berada dalam transaksi DB (beginTransaction).
+function memberInsertLedger(PDO $pdo, array $a): array {
+    $memberId = (int)$a['member_id'];
+    $movement = (string)$a['movement_type'];
+    $points   = max(0, (int)$a['points']);
+
+    $pdo->prepare("SELECT id FROM members WHERE id=? FOR UPDATE")->execute([$memberId]);
+    $last = $pdo->prepare("SELECT balance_active_after,balance_pending_after FROM member_point_ledger WHERE member_id=? ORDER BY id DESC LIMIT 1");
+    $last->execute([$memberId]);
+    $row     = $last->fetch();
+    $active  = $row ? (int)$row['balance_active_after']  : 0;
+    $pending = $row ? (int)$row['balance_pending_after'] : 0;
+
+    [$direction, $da, $dp] = memberMovementEffect($movement);
+    if (!empty($a['affect_pending'])) { $dp = $da; $da = 0; } // alihkan delta ke bucket pending
+
+    // Cegah overdraw akibat race (TOCTOU): movement "belanja" milik member tidak boleh
+    // membuat saldo aktif minus. Pengecekan ini berada DI DALAM lock FOR UPDATE sehingga
+    // atomic terhadap klaim/penukaran paralel. Movement lain tetap memakai clamp di bawah.
+    if (in_array($movement, ['redeem_reserve', 'manual_adjust_out'], true) && ($active + $da * $points) < 0) {
+        throw new ApiHttpException(400, 'Point tidak cukup', 'INSUFFICIENT_POINTS');
+    }
+
+    $newActive  = max(0, $active  + $da * $points);
+    $newPending = max(0, $pending + $dp * $points);
+
+    $pdo->prepare("
+        INSERT INTO member_point_ledger
+          (member_id,branch_id,transaction_id,reward_claim_id,movement_type,direction,points,
+           balance_active_before,balance_active_after,balance_pending_before,balance_pending_after,
+           expires_at,reason,source_table,source_id,created_by_user_id,metadata)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ")->execute([
+        $memberId,
+        $a['branch_id'] ?? null,
+        $a['transaction_id'] ?? null,
+        $a['reward_claim_id'] ?? null,
+        $movement, $direction, $points,
+        $active, $newActive, $pending, $newPending,
+        $a['expires_at'] ?? null,
+        $a['reason'] ?? null,
+        $a['source_table'] ?? null,
+        $a['source_id'] ?? null,
+        $a['created_by_user_id'] ?? null,
+        isset($a['metadata']) ? json_encode($a['metadata'], JSON_UNESCAPED_UNICODE) : null,
+    ]);
+    return ['id' => (int)$pdo->lastInsertId(), 'active' => $newActive, 'pending' => $newPending];
+}
+
+// Aktivasi point "pending" yang sudah melewati window jadi "active" (lazy/self-healing,
+// tanpa cron). Mengubah tiap lot `earn_pending` matang menjadi `pending_to_active`.
+// Idempoten: dijaga oleh uq_ledger_source (source_table+source_id+movement_type) DAN
+// klausa NOT EXISTS. Aman dipanggil dari endpoint read (kelola transaksi sendiri) maupun
+// dari dalam transaksi pemanggil (mis. claim_reward).
+function memberActivateMaturedPending(PDO $pdo, int $memberId): void {
+    if ($memberId <= 0) return;
+    $hours = (int)(memberGetSettings($pdo)['point_pending_window_hours'] ?? 24);
+    if ($hours <= 0) return; // point langsung aktif saat earn — tidak ada yang perlu dikonversi
+
+    $ownTx = !$pdo->inTransaction();
+    if ($ownTx) $pdo->beginTransaction();
+    try {
+        $pdo->prepare("SELECT id FROM members WHERE id=? FOR UPDATE")->execute([$memberId]);
+        $lots = $pdo->prepare("
+            SELECT l.id, l.transaction_id, l.points, l.branch_id, l.expires_at
+            FROM member_point_ledger l
+            WHERE l.member_id = ?
+              AND l.movement_type = 'earn_pending'
+              AND l.created_at <= (NOW() - INTERVAL $hours HOUR)
+              AND NOT EXISTS (
+                  SELECT 1 FROM member_point_ledger c
+                  WHERE c.movement_type = 'pending_to_active'
+                    AND c.source_table = 'member_point_ledger'
+                    AND c.source_id    = CAST(l.id AS CHAR)
+              )
+            ORDER BY l.id ASC
+        ");
+        $lots->execute([$memberId]);
+        foreach ($lots->fetchAll() as $lot) {
+            // Clamp ke saldo pending saat ini agar lot yang sebagian sudah di-refund
+            // (affect_pending) tidak meng-over-aktivasi saldo.
+            $pending = memberBalances($pdo, $memberId)['pending'];
+            if ($pending <= 0) break;
+            $convert = min((int)$lot['points'], $pending);
+            if ($convert <= 0) continue;
+            memberInsertLedger($pdo, [
+                'member_id'      => $memberId,
+                'branch_id'      => $lot['branch_id'] ?? null,
+                'transaction_id' => $lot['transaction_id'] ?? null,
+                'movement_type'  => 'pending_to_active',
+                'points'         => $convert,
+                'expires_at'     => $lot['expires_at'] ?? null,
+                'reason'         => 'Aktivasi point pending (window ' . $hours . ' jam)',
+                'source_table'   => 'member_point_ledger',
+                'source_id'      => (string)$lot['id'],
+            ]);
+        }
+        if ($ownTx) $pdo->commit();
+    } catch (Throwable $e) {
+        if ($ownTx) { $pdo->rollBack(); return; } // best-effort saat berdiri sendiri
+        throw $e; // di dalam transaksi pemanggil → biarkan rollback menangani
+    }
+}
+
+// ── Anti-fraud ────────────────────────────────────────────────────────────────
+function memberInsertFraudFlag(PDO $pdo, array $a): void {
+    try {
+        $pdo->prepare("
+            INSERT INTO member_fraud_flags (member_id,staff_user_id,transaction_id,flag_type,severity,risk_score,evidence,status)
+            VALUES (?,?,?,?,?,?,?, 'open')
+        ")->execute([
+            $a['member_id'] ?? null, $a['staff_user_id'] ?? null, $a['transaction_id'] ?? null,
+            substr((string)($a['flag_type'] ?? 'unknown'), 0, 80),
+            $a['severity'] ?? 'medium', (int)($a['risk_score'] ?? 50),
+            isset($a['evidence']) ? json_encode($a['evidence'], JSON_UNESCAPED_UNICODE) : null,
+        ]);
+    } catch (Throwable) {}
+}
+function memberDetectSelfTransaction(PDO $pdo, array $member, int $staffId): ?array {
+    if ($staffId > 0 && (int)($member['staff_link_user_id'] ?? 0) === $staffId)
+        return ['type' => 'direct_link', 'severity' => 'critical', 'score' => 95];
+    if (dbColumnExists($pdo, 'users', 'personal_phone')) {
+        $u = $pdo->prepare("SELECT personal_phone FROM users WHERE id=? LIMIT 1");
+        $u->execute([$staffId]);
+        $pp = trim((string)($u->fetchColumn() ?: ''));
+        if ($pp !== '' && $pp === trim((string)($member['phone'] ?? '')))
+            return ['type' => 'phone_match', 'severity' => 'high', 'score' => 80];
+    }
+    $c = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE member_id=? AND staff_id=? AND status='completed' AND created_at>=DATE_SUB(NOW(),INTERVAL 7 DAY)");
+    $c->execute([(int)$member['id'], $staffId]);
+    if ((int)$c->fetchColumn() > 20) return ['type' => 'cashier_member_repeat', 'severity' => 'high', 'score' => 75];
+    return null;
+}
+
+// ── Hitung point ──────────────────────────────────────────────────────────────
+function memberComputePreviewPoints(PDO $pdo, float $subtotal, array $cart): array {
+    $S        = memberGetSettings($pdo);
+    $ratio    = max(1, (int)($S['point_ratio_rupiah_per_point'] ?? 10000));
+    $rounding = $S['point_rounding_mode'] ?? 'floor';
+    $minTx    = (float)($S['min_transaction_for_point'] ?? 0);
+    $maxPerTx = (int)($S['max_point_per_transaction'] ?? 1000);
+    $exProd   = array_map('intval', is_array($S['excluded_product_ids'] ?? null) ? $S['excluded_product_ids'] : []);
+
+    $eligible = $subtotal;
+    if ($exProd) {
+        foreach ($cart as $it) {
+            $pid = (int)($it['product_id'] ?? 0);
+            if ($pid && in_array($pid, $exProd, true)) {
+                $eligible -= (float)($it['price'] ?? 0) * (float)($it['quantity'] ?? 0);
+            }
+        }
+    }
+    if ($eligible < 0) $eligible = 0;
+    if ($eligible < $minTx) return ['points' => 0, 'eligible' => $eligible, 'reason' => 'Transaksi di bawah minimum untuk point'];
+    $raw = $eligible / $ratio;
+    $pts = match ($rounding) { 'round' => (int)round($raw), 'ceil' => (int)ceil($raw), default => (int)floor($raw) };
+    if ($maxPerTx > 0) $pts = min($pts, $maxPerTx);
+    return ['points' => $pts, 'eligible' => $eligible, 'reason' => $pts > 0 ? null : 'Nominal belum cukup untuk 1 point'];
+}
+
+// ── Redeem reward saat checkout (dipanggil di dalam rpc_process_transaction) ───
+// Hitung nilai diskon reward secara OTORITATIF di server (jangan percaya frontend).
+function memberComputeRewardDiscount(array $reward, float $subtotal, array $cart): float {
+    $type = (string)($reward['reward_type'] ?? 'other');
+    $val  = $reward['discount_value'] !== null ? (float)$reward['discount_value'] : 0.0;
+    $disc = 0.0;
+    switch ($type) {
+        case 'discount_amount':  $disc = $val; break;
+        case 'discount_percent': $disc = round($subtotal * $val / 100); break;
+        case 'free_product':
+            $pid = !empty($reward['reward_product_id']) ? (int)$reward['reward_product_id'] : 0;
+            $vid = !empty($reward['reward_variant_id']) ? (int)$reward['reward_variant_id'] : 0;
+            foreach ($cart as $it) {
+                $ipid = (int)($it['product_id'] ?? 0);
+                $ivid = (int)($it['variant_id'] ?? 0);
+                if (($vid && $ivid === $vid) || (!$vid && $pid && $ipid === $pid)) {
+                    $disc = (float)($it['price'] ?? 0); // satu unit gratis (harga dasar)
+                    break;
+                }
+            }
+            break;
+        default: $disc = 0.0; // 'other' → tanpa diskon otomatis
+    }
+    if ($disc < 0)         $disc = 0.0;
+    if ($disc > $subtotal) $disc = $subtotal;
+    return $disc;
+}
+
+// Validasi + lock klaim reward untuk checkout. Throw bila tidak valid. Mengembalikan
+// claim + reward (_reward) + nilai diskon server (_reward_discount).
+function memberValidateClaimForCheckout(PDO $pdo, string $code, ?int $memberId, float $subtotal, array $cart, float $discountAmount): array {
+    $c = $pdo->prepare("SELECT * FROM member_reward_claims WHERE redemption_code=? FOR UPDATE");
+    $c->execute([$code]);
+    $claim = $c->fetch();
+    if (!$claim) throw new ApiHttpException(404, 'Kode reward tidak ditemukan', 'CLAIM_NOT_FOUND');
+    if ($claim['status'] === 'redeemed')         throw new ApiHttpException(409, 'Kode reward sudah dipakai', 'CLAIM_ALREADY_REDEEMED');
+    if ($claim['status'] === 'pending_approval') throw new ApiHttpException(400, 'Klaim reward menunggu persetujuan admin', 'CLAIM_PENDING_APPROVAL');
+    if ($claim['status'] !== 'redeemable')       throw new ApiHttpException(400, 'Kode reward tidak bisa dipakai', 'CLAIM_NOT_REDEEMABLE');
+    if ($claim['expires_at'] < date('Y-m-d H:i:s')) throw new ApiHttpException(400, 'Kode reward kedaluwarsa', 'CLAIM_EXPIRED');
+    if ($memberId && (int)$claim['member_id'] !== $memberId)
+        throw new ApiHttpException(400, 'Kode reward bukan milik member ini', 'CLAIM_MEMBER_MISMATCH');
+
+    $rw = $pdo->prepare("SELECT * FROM member_rewards WHERE id=?");
+    $rw->execute([(int)$claim['reward_id']]);
+    $reward = $rw->fetch();
+    if (!$reward) throw new ApiHttpException(404, 'Reward tidak ditemukan', 'REWARD_NOT_FOUND');
+
+    $rewardDisc = memberComputeRewardDiscount($reward, $subtotal, $cart);
+    if ((string)$reward['reward_type'] === 'free_product' && $rewardDisc <= 0)
+        throw new ApiHttpException(400, 'Produk reward belum ada di keranjang', 'REWARD_PRODUCT_NOT_IN_CART');
+    // Diskon transaksi WAJIB sudah mencakup nilai reward (frontend menambahkannya sebelum
+    // bayar) agar member benar-benar menerima manfaatnya. Toleransi 1 rupiah utk pembulatan.
+    if ($rewardDisc > 0 && ($discountAmount + 1) < $rewardDisc) {
+        throw new ApiHttpException(400, 'Diskon transaksi belum mencakup nilai reward. Muat ulang halaman kasir.', 'REWARD_DISCOUNT_NOT_APPLIED');
+    }
+    $claim['_reward']          = $reward;
+    $claim['_reward_discount'] = $rewardDisc;
+    return $claim;
+}
+
+// Konsumsi klaim: tandai redeemed + ledger redeem_commit + link ke transaksi. Atomic
+// (dipanggil di dalam transaksi DB rpc_process_transaction).
+function memberCommitClaimAtCheckout(PDO $pdo, array $claim, int $txId, int $branchId, ?int $staffId, ?array $authUser): void {
+    $claimId = (int)$claim['id'];
+    $by      = $staffId ?: ($authUser['id'] ?? null);
+    $pdo->prepare("UPDATE member_reward_claims SET status='redeemed', redeemed_at=NOW(), redeemed_by_user_id=?, redeemed_at_branch_id=?, transaction_id=? WHERE id=?")
+        ->execute([$by, $branchId ?: null, $txId, $claimId]);
+    // redeem_commit tidak mengubah saldo (point sudah dipotong saat redeem_reserve di klaim).
+    memberInsertLedger($pdo, [
+        'member_id'          => (int)$claim['member_id'],
+        'branch_id'          => $branchId ?: null,
+        'reward_claim_id'    => $claimId,
+        'transaction_id'     => $txId,
+        'movement_type'      => 'redeem_commit',
+        'points'             => (int)$claim['cost_point'],
+        'reason'             => 'Redeem reward saat checkout',
+        'source_table'       => 'member_reward_claims',
+        'source_id'          => $claimId . ':commit',
+        'created_by_user_id' => $by,
+    ]);
+    $pdo->prepare("UPDATE members SET lifetime_points_redeemed=lifetime_points_redeemed+? WHERE id=?")
+        ->execute([(int)$claim['cost_point'], (int)$claim['member_id']]);
+    $pdo->prepare("UPDATE transactions SET reward_claim_id=? WHERE id=?")->execute([$claimId, $txId]);
+}
+
+// Dipanggil di dalam rpc_process_transaction (sudah dalam transaksi DB).
+function memberAwardPointsForTransaction(PDO $pdo, array $a): array {
+    $memberId = (int)$a['member_id'];
+    $staffId  = (int)$a['staff_id'];
+    $branchId = (int)$a['branch_id'];
+    $txId     = (int)$a['tx_id'];
+    $subtotal = (float)$a['subtotal'];
+    $cart     = $a['cart'] ?? [];
+
+    $m = $pdo->prepare("SELECT * FROM members WHERE id=? AND is_active=1 AND deleted_at IS NULL LIMIT 1");
+    $m->execute([$memberId]);
+    $member = $m->fetch();
+    if (!$member) return ['points_awarded' => 0, 'balance' => null, 'note' => 'Member tidak ditemukan / nonaktif'];
+
+    $S       = memberGetSettings($pdo);
+    $preview = memberComputePreviewPoints($pdo, $subtotal, $cart);
+    $points  = (int)$preview['points'];
+    $note    = null;
+
+    // Self-transaction → block point
+    $self = memberDetectSelfTransaction($pdo, $member, $staffId);
+    if ($self && in_array($self['type'], ['direct_link', 'phone_match'], true)) {
+        memberInsertFraudFlag($pdo, [
+            'member_id' => $memberId, 'staff_user_id' => $staffId, 'transaction_id' => $txId,
+            'flag_type' => 'self_transaction', 'severity' => $self['severity'], 'risk_score' => $self['score'],
+            'evidence' => ['detector' => $self['type'], 'tx' => $txId],
+        ]);
+        $pdo->prepare("UPDATE transactions SET member_id=?, member_attached_at=NOW(), points_awarded=0 WHERE id=?")->execute([$memberId, $txId]);
+        $pdo->prepare("UPDATE members SET last_transaction_at=NOW() WHERE id=?")->execute([$memberId]);
+        return ['points_awarded' => 0, 'balance' => memberBalances($pdo, $memberId), 'note' => 'Transaksi masuk review anti-fraud (kasir = member). Point tidak diberikan.'];
+    }
+
+    // Batas harian
+    $maxDaily = (int)($S['max_point_per_member_per_day'] ?? 50);
+    if ($maxDaily > 0 && $points > 0) {
+        $today = $pdo->prepare("SELECT COALESCE(SUM(points),0) FROM member_point_ledger WHERE member_id=? AND direction='in' AND movement_type IN('earn_purchase','earn_pending','manual_adjust_in') AND DATE(created_at)=CURDATE()");
+        $today->execute([$memberId]);
+        $remaining = max(0, $maxDaily - (int)$today->fetchColumn());
+        if ($points > $remaining) {
+            $points = $remaining;
+            $note   = 'Sebagian point tidak diberikan: batas harian tercapai';
+            memberInsertFraudFlag($pdo, ['member_id' => $memberId, 'staff_user_id' => $staffId, 'transaction_id' => $txId, 'flag_type' => 'daily_cap_reached', 'severity' => 'low', 'risk_score' => 30, 'evidence' => ['max_daily' => $maxDaily]]);
+        }
+    }
+
+    if ($points > 0) {
+        $pendingHours = (int)($S['point_pending_window_hours'] ?? 24);
+        $validityDays = (int)($S['point_validity_days'] ?? 365);
+        $expiresAt    = $validityDays > 0 ? date('Y-m-d H:i:s', strtotime("+{$validityDays} days")) : null;
+        $movement     = $pendingHours > 0 ? 'earn_pending' : 'earn_purchase';
+        memberInsertLedger($pdo, [
+            'member_id' => $memberId, 'branch_id' => $branchId, 'transaction_id' => $txId,
+            'movement_type' => $movement, 'points' => $points, 'expires_at' => $expiresAt,
+            'reason' => 'Earn dari transaksi #' . $txId,
+            'source_table' => 'transactions', 'source_id' => (string)$txId,
+            'created_by_user_id' => $staffId,
+            'metadata' => ['subtotal' => $subtotal, 'eligible' => $preview['eligible']],
+        ]);
+        $pdo->prepare("UPDATE members SET lifetime_points_earned=lifetime_points_earned+?, last_transaction_at=NOW() WHERE id=?")->execute([$points, $memberId]);
+    } else {
+        $pdo->prepare("UPDATE members SET last_transaction_at=NOW() WHERE id=?")->execute([$memberId]);
+        if (!$note) $note = $preview['reason'] ?? 'Tidak ada point untuk transaksi ini';
+    }
+
+    if ($self && in_array($self['type'], ['cashier_member_repeat', 'exclusive_cashier'], true)) {
+        memberInsertFraudFlag($pdo, ['member_id' => $memberId, 'staff_user_id' => $staffId, 'transaction_id' => $txId, 'flag_type' => $self['type'], 'severity' => $self['severity'], 'risk_score' => $self['score'], 'evidence' => ['tx' => $txId]]);
+    }
+
+    $pdo->prepare("UPDATE transactions SET member_id=?, member_attached_at=NOW(), points_awarded=? WHERE id=?")->execute([$memberId, $points, $txId]);
+    return ['points_awarded' => $points, 'balance' => memberBalances($pdo, $memberId), 'note' => $note];
+}
+
+// Reversal point saat void/refund. Dipanggil di dalam transaksi DB.
+function memberReverseTransactionPoints(PDO $pdo, array $t, ?float $refundAmount, ?int $by, string $reason): void {
+    $txId     = (int)$t['id'];
+    $memberId = !empty($t['member_id']) ? (int)$t['member_id'] : 0;
+    $awarded  = (int)($t['points_awarded'] ?? 0);
+
+    if ($memberId && $awarded > 0) {
+        $total   = (float)$t['total'];
+        $reverse = $awarded;
+        if ($refundAmount !== null && $total > 0 && $refundAmount < $total) {
+            $reverse = (int)floor($awarded * ($refundAmount / $total));
+        }
+        if ($reverse > 0) {
+            $conv = $pdo->prepare("SELECT COUNT(*) FROM member_point_ledger WHERE transaction_id=? AND movement_type='pending_to_active'");
+            $conv->execute([$txId]);
+            $wasConverted = ((int)$conv->fetchColumn()) > 0;
+            $earnStmt = $pdo->prepare("SELECT movement_type FROM member_point_ledger WHERE transaction_id=? AND movement_type IN('earn_pending','earn_purchase') ORDER BY id ASC LIMIT 1");
+            $earnStmt->execute([$txId]);
+            $earnType = (string)$earnStmt->fetchColumn();
+            $affectPending = ($earnType === 'earn_pending' && !$wasConverted);
+            memberInsertLedger($pdo, [
+                'member_id' => $memberId, 'branch_id' => (int)$t['branch_id'], 'transaction_id' => $txId,
+                'movement_type' => 'refund_reversal', 'points' => $reverse, 'reason' => $reason,
+                'source_table' => 'transactions', 'source_id' => $txId . ':rev:' . ($refundAmount !== null ? (int)$refundAmount : 'full'),
+                'created_by_user_id' => $by, 'affect_pending' => $affectPending,
+            ]);
+            $pdo->prepare("UPDATE members SET lifetime_points_earned=GREATEST(0,lifetime_points_earned-?) WHERE id=?")->execute([$reverse, $memberId]);
+            $pdo->prepare("UPDATE transactions SET points_awarded=GREATEST(0,points_awarded-?) WHERE id=?")->execute([$reverse, $txId]);
+        }
+    }
+
+    if (!empty($t['reward_claim_id'])) {
+        $claimId = (int)$t['reward_claim_id'];
+        $cl = $pdo->prepare("SELECT * FROM member_reward_claims WHERE id=? FOR UPDATE");
+        $cl->execute([$claimId]);
+        $claim = $cl->fetch();
+        if ($claim && $claim['status'] === 'redeemed') {
+            $pdo->prepare("UPDATE member_reward_claims SET status='cancelled', cancelled_at=NOW(), cancel_reason=? WHERE id=?")->execute([$reason, $claimId]);
+            memberInsertLedger($pdo, [
+                'member_id' => (int)$claim['member_id'], 'reward_claim_id' => $claimId,
+                'movement_type' => 'redeem_refund', 'points' => (int)$claim['cost_point'],
+                'reason' => 'Refund klaim karena ' . $reason,
+                'source_table' => 'member_reward_claims', 'source_id' => $claimId . ':refund_tx' . $txId,
+                'created_by_user_id' => $by,
+            ]);
+            $pdo->prepare("UPDATE members SET lifetime_points_redeemed=GREATEST(0,lifetime_points_redeemed-?) WHERE id=?")->execute([(int)$claim['cost_point'], (int)$claim['member_id']]);
+            $pdo->prepare("UPDATE member_rewards SET quota_used=GREATEST(0,quota_used-1) WHERE id=?")->execute([(int)$claim['reward_id']]);
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RPC: Member auth (public)
+// ══════════════════════════════════════════════════════════════════════════════
+function rpc_member_register(array $p): mixed {
+    $pdo   = getDB();
+    $phone = memberValidatePhone((string)($p['phone'] ?? ''));
+    $name  = memberSanitizeName((string)($p['name'] ?? ''));
+    $pw    = (string)($p['password'] ?? '');
+    memberValidatePassword($pw);
+    $email = trim((string)($p['email'] ?? ''));
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new ApiHttpException(400, 'Email tidak valid', 'VALIDATION_FAILED');
+    $birth = trim((string)($p['birth_date'] ?? ''));
+    if ($birth !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $birth)) $birth = '';
+    $gender   = in_array($p['gender'] ?? '', ['M', 'F', 'other'], true) ? $p['gender'] : null;
+    $branchId = !empty($p['signup_branch_id']) ? (int)$p['signup_branch_id'] : null;
+
+    $chk = $pdo->prepare("SELECT id FROM members WHERE phone=? LIMIT 1");
+    $chk->execute([$phone]);
+    if ($chk->fetch()) throw new ApiHttpException(409, 'Nomor HP sudah terdaftar. Silakan login.', 'PHONE_ALREADY_EXISTS');
+    if ($email !== '') {
+        $e = $pdo->prepare("SELECT id FROM members WHERE email=? LIMIT 1");
+        $e->execute([$email]);
+        if ($e->fetch()) throw new ApiHttpException(409, 'Email sudah terdaftar', 'EMAIL_ALREADY_EXISTS');
+    }
+
+    $code   = memberGenCode($pdo);
+    $secret = bin2hex(random_bytes(32));
+    $hash   = password_hash($pw, PASSWORD_BCRYPT);
+    $pdo->prepare("INSERT INTO members (member_code,name,phone,email,password,birth_date,gender,qr_secret,signup_branch_id) VALUES (?,?,?,?,?,?,?,?,?)")
+        ->execute([$code, $name, $phone, $email ?: null, $hash, $birth ?: null, $gender, $secret, $branchId]);
+    $id = (int)$pdo->lastInsertId();
+    auditLog(null, 'member_register', 'members', null, ['id' => $id, 'member_code' => $code, 'phone' => maskPhone($phone)], $branchId);
+    $sess = memberCreateSession($pdo, $id);
+    $m = $pdo->prepare("SELECT * FROM members WHERE id=?");
+    $m->execute([$id]);
+    return ['member' => memberPublicView($m->fetch(), true), 'session_token' => $sess['session_token'], 'expires_at' => $sess['expires_at']];
+}
+
+function rpc_member_login(array $p): mixed {
+    $pdo = getDB();
+    $identifier = trim((string)($p['identifier'] ?? $p['phone'] ?? $p['email'] ?? ''));
+    $pw = (string)($p['password'] ?? '');
+    if ($identifier === '' || $pw === '') throw new ApiHttpException(400, 'Identifier & password wajib diisi', 'VALIDATION_FAILED');
+    rateLimitAction('member_login_id', 10, 300, 'member:' . strtolower($identifier));
+
+    $stmt = $pdo->prepare("SELECT * FROM members WHERE (phone=? OR email=?) AND deleted_at IS NULL LIMIT 1");
+    $stmt->execute([$identifier, $identifier]);
+    $m = $stmt->fetch();
+    if (!$m || !password_verify($pw, (string)$m['password'])) {
+        if ($m) auditLog(null, 'member_login_failed', 'members', null, ['id' => (int)$m['id']], null);
+        throw new ApiHttpException(401, 'Nomor HP/email atau password salah', 'MEMBER_LOGIN_FAILED');
+    }
+    if ((int)$m['is_active'] !== 1) throw new ApiHttpException(403, 'Akun member nonaktif. Hubungi admin.', 'MEMBER_INACTIVE');
+    $sess = memberCreateSession($pdo, (int)$m['id']);
+    auditLog(null, 'member_login', 'members', null, ['id' => (int)$m['id']], null);
+    return ['member' => memberPublicView($m, true), 'session_token' => $sess['session_token'], 'expires_at' => $sess['expires_at']];
+}
+
+function rpc_member_forgot_password(array $p): mixed {
+    // Fase 1: catat permintaan untuk admin. Tidak membocorkan apakah nomor terdaftar.
+    $phone = trim((string)($p['phone'] ?? ''));
+    if ($phone !== '') auditLog(null, 'member_forgot_password', 'members', null, ['phone' => maskPhone($phone)], null);
+    return ['ok' => true, 'message' => 'Jika nomor terdaftar, admin akan membantu reset password.'];
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RPC: Member self (butuh X-Member-Session-Token)
+// ══════════════════════════════════════════════════════════════════════════════
+function rpc_member_logout(array $p): mixed {
+    $token = trim((string)($_SERVER['HTTP_X_MEMBER_SESSION_TOKEN'] ?? ''));
+    if ($token !== '') getDB()->prepare("DELETE FROM member_sessions WHERE token_hash=?")->execute([hash('sha256', $token)]);
+    return ['ok' => true];
+}
+
+function rpc_member_me(array $p): mixed {
+    $m   = $p['_member'];
+    $pdo = getDB();
+    $id  = (int)$m['id'];
+    memberActivateMaturedPending($pdo, $id);
+    $bal = memberBalances($pdo, $id);
+    $exp = $pdo->prepare("SELECT COALESCE(SUM(points),0) FROM member_point_ledger WHERE member_id=? AND direction='in' AND movement_type IN('earn_purchase','pending_to_active') AND expires_at IS NOT NULL AND expires_at BETWEEN NOW() AND DATE_ADD(NOW(),INTERVAL 30 DAY)");
+    $exp->execute([$id]);
+    return [
+        'member'  => memberPublicView($m, true),
+        'balance' => ['active' => $bal['active'], 'pending' => $bal['pending'], 'reserved' => memberReservedPoints($pdo, $id)],
+        'expiring_soon_points' => (int)$exp->fetchColumn(),
+    ];
+}
+
+function rpc_member_get_balance(array $p): mixed {
+    $m   = $p['_member'];
+    $pdo = getDB();
+    memberActivateMaturedPending($pdo, (int)$m['id']);
+    $bal = memberBalances($pdo, (int)$m['id']);
+    return [
+        'active'            => $bal['active'],
+        'pending'          => $bal['pending'],
+        'reserved'         => memberReservedPoints($pdo, (int)$m['id']),
+        'lifetime_earned'  => (int)($m['lifetime_points_earned'] ?? 0),
+        'lifetime_redeemed' => (int)($m['lifetime_points_redeemed'] ?? 0),
+    ];
+}
+
+function rpc_member_update_profile(array $p): mixed {
+    $m   = $p['_member'];
+    $pdo = getDB();
+    $id  = (int)$m['id'];
+    if (!password_verify((string)($p['current_password'] ?? ''), (string)$m['password']))
+        throw new ApiHttpException(403, 'Password saat ini salah', 'INVALID_PASSWORD');
+
+    $fields = [];
+    $args   = [];
+    if (isset($p['name']))       { $fields[] = 'name=?';       $args[] = memberSanitizeName((string)$p['name']); }
+    if (array_key_exists('gender', $p)) { $g = in_array($p['gender'], ['M', 'F', 'other'], true) ? $p['gender'] : null; $fields[] = 'gender=?'; $args[] = $g; }
+    if (isset($p['birth_date'])) { $b = trim((string)$p['birth_date']); if ($b !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $b)) $b = null; $fields[] = 'birth_date=?'; $args[] = $b ?: null; }
+    if (isset($p['email'])) {
+        $email = trim((string)$p['email']);
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new ApiHttpException(400, 'Email tidak valid', 'VALIDATION_FAILED');
+        if ($email !== '') {
+            $e = $pdo->prepare("SELECT id FROM members WHERE email=? AND id<>? LIMIT 1");
+            $e->execute([$email, $id]);
+            if ($e->fetch()) throw new ApiHttpException(409, 'Email sudah dipakai member lain', 'EMAIL_ALREADY_EXISTS');
+        }
+        $fields[] = 'email=?'; $args[] = $email ?: null;
+    }
+    if (!$fields) throw new ApiHttpException(400, 'Tidak ada perubahan', 'VALIDATION_FAILED');
+    $args[] = $id;
+    $pdo->prepare("UPDATE members SET " . implode(',', $fields) . " WHERE id=?")->execute($args);
+    auditLog(null, 'member_update_profile', 'members', null, ['id' => $id], null);
+    $r = $pdo->prepare("SELECT * FROM members WHERE id=?");
+    $r->execute([$id]);
+    return ['ok' => true, 'member' => memberPublicView($r->fetch(), true)];
+}
+
+function rpc_member_change_password(array $p): mixed {
+    $m   = $p['_member'];
+    $pdo = getDB();
+    if (!password_verify((string)($p['old_password'] ?? ''), (string)$m['password']))
+        throw new ApiHttpException(403, 'Password lama salah', 'INVALID_PASSWORD');
+    $new = (string)($p['new_password'] ?? '');
+    memberValidatePassword($new);
+    $pdo->prepare("UPDATE members SET password=? WHERE id=?")->execute([password_hash($new, PASSWORD_BCRYPT), (int)$m['id']]);
+    // invalidasi sesi lain
+    $token = trim((string)($_SERVER['HTTP_X_MEMBER_SESSION_TOKEN'] ?? ''));
+    $pdo->prepare("DELETE FROM member_sessions WHERE member_id=? AND token_hash<>?")->execute([(int)$m['id'], $token !== '' ? hash('sha256', $token) : '']);
+    auditLog(null, 'member_change_password', 'members', null, ['id' => (int)$m['id']], null);
+    return ['ok' => true];
+}
+
+function rpc_member_get_point_history(array $p): mixed {
+    $m      = $p['_member'];
+    $pdo    = getDB();
+    $limit  = min(100, max(1, (int)($p['limit'] ?? 30)));
+    $offset = max(0, (int)($p['offset'] ?? 0));
+    $st = $pdo->prepare("SELECT id,movement_type,direction,points,balance_active_after,balance_pending_after,reason,transaction_id,reward_claim_id,created_at FROM member_point_ledger WHERE member_id=? ORDER BY id DESC LIMIT $limit OFFSET $offset");
+    $st->execute([(int)$m['id']]);
+    return $st->fetchAll();
+}
+
+function rpc_member_get_transaction_history(array $p): mixed {
+    $m      = $p['_member'];
+    $pdo    = getDB();
+    $limit  = min(100, max(1, (int)($p['limit'] ?? 20)));
+    $offset = max(0, (int)($p['offset'] ?? 0));
+    $st = $pdo->prepare("SELECT id,branch_id,total,subtotal,discount_amount,points_awarded,status,payment_method,created_at FROM transactions WHERE member_id=? ORDER BY id DESC LIMIT $limit OFFSET $offset");
+    $st->execute([(int)$m['id']]);
+    $txs = $st->fetchAll();
+    if ($txs) {
+        $ids = array_column($txs, 'id');
+        $in  = implode(',', array_fill(0, count($ids), '?'));
+        $it  = $pdo->prepare("SELECT transaction_id,product_name,variant_name,quantity,price,subtotal FROM transaction_items WHERE transaction_id IN ($in)");
+        $it->execute($ids);
+        $byTx = [];
+        foreach ($it->fetchAll() as $row) $byTx[(int)$row['transaction_id']][] = $row;
+        foreach ($txs as &$t) $t['items'] = $byTx[(int)$t['id']] ?? [];
+    }
+    return $txs;
+}
+
+function rpc_member_list_rewards(array $p): mixed {
+    $m   = $p['_member'];
+    $pdo = getDB();
+    memberActivateMaturedPending($pdo, (int)$m['id']);
+    $bal = memberBalances($pdo, (int)$m['id']);
+    $now = date('Y-m-d H:i:s');
+    $st  = $pdo->query("SELECT * FROM member_rewards WHERE is_active=1 AND deleted_at IS NULL ORDER BY cost_point ASC");
+    $out = [];
+    foreach ($st->fetchAll() as $r) {
+        $reason = null;
+        $canClaim = true;
+        if (!empty($r['valid_from']) && $r['valid_from'] > $now)   { $canClaim = false; $reason = 'Belum berlaku'; }
+        if (!empty($r['valid_until']) && $r['valid_until'] < $now) { $canClaim = false; $reason = 'Sudah berakhir'; }
+        if ($r['quota_total'] !== null && (int)$r['quota_used'] >= (int)$r['quota_total']) { $canClaim = false; $reason = 'Kuota habis'; }
+        if ($bal['active'] < (int)$r['cost_point']) { $canClaim = false; $reason = 'Point belum cukup'; }
+        $out[] = [
+            'id' => (int)$r['id'], 'name' => $r['name'], 'description' => $r['description'],
+            'image_url' => $r['image_url'], 'cost_point' => (int)$r['cost_point'],
+            'reward_type' => $r['reward_type'], 'discount_value' => $r['discount_value'] !== null ? (float)$r['discount_value'] : null,
+            'quota_total' => $r['quota_total'] !== null ? (int)$r['quota_total'] : null,
+            'quota_used' => (int)$r['quota_used'], 'valid_until' => $r['valid_until'],
+            'terms_and_conditions' => $r['terms_and_conditions'],
+            'requires_admin_approval' => (int)$r['requires_admin_approval'],
+            'can_claim' => $canClaim, 'reason_if_not' => $reason,
+        ];
+    }
+    return $out;
+}
+
+function rpc_member_claim_reward(array $p): mixed {
+    $pdo      = getDB();
+    $m        = $p['_member'];
+    $memberId = (int)$m['id'];
+    $rewardId = (int)($p['reward_id'] ?? 0);
+    if (!$rewardId) throw new ApiHttpException(400, 'reward_id wajib', 'VALIDATION_FAILED');
+    $pdo->beginTransaction();
+    try {
+        memberActivateMaturedPending($pdo, $memberId); // pastikan point matang ikut terhitung
+        $r = $pdo->prepare("SELECT * FROM member_rewards WHERE id=? AND deleted_at IS NULL FOR UPDATE");
+        $r->execute([$rewardId]);
+        $reward = $r->fetch();
+        if (!$reward || (int)$reward['is_active'] !== 1) throw new ApiHttpException(404, 'Reward tidak tersedia', 'REWARD_NOT_FOUND');
+        $now = date('Y-m-d H:i:s');
+        if (!empty($reward['valid_from']) && $reward['valid_from'] > $now)   throw new ApiHttpException(400, 'Reward belum berlaku', 'REWARD_EXPIRED');
+        if (!empty($reward['valid_until']) && $reward['valid_until'] < $now) throw new ApiHttpException(400, 'Reward sudah berakhir', 'REWARD_EXPIRED');
+        if ($reward['quota_total'] !== null && (int)$reward['quota_used'] >= (int)$reward['quota_total']) throw new ApiHttpException(409, 'Kuota reward habis', 'REWARD_OUT_OF_STOCK');
+        if ($reward['quota_per_member'] !== null) {
+            $c = $pdo->prepare("SELECT COUNT(*) FROM member_reward_claims WHERE member_id=? AND reward_id=? AND status IN('redeemable','redeemed','pending_approval')");
+            $c->execute([$memberId, $rewardId]);
+            if ((int)$c->fetchColumn() >= (int)$reward['quota_per_member']) throw new ApiHttpException(409, 'Anda sudah mencapai batas klaim reward ini', 'QUOTA_PER_MEMBER');
+        }
+        $cost = (int)$reward['cost_point'];
+        $bal  = memberBalances($pdo, $memberId);
+        if ($bal['active'] < $cost) throw new ApiHttpException(400, 'Point tidak cukup', 'INSUFFICIENT_POINTS');
+
+        $status   = (int)$reward['requires_admin_approval'] === 1 ? 'pending_approval' : 'redeemable';
+        $code     = memberGenRedemptionCode($pdo);
+        $validDays = (int)(memberGetSettings($pdo)['claim_validity_days'] ?? 30);
+        $expires  = date('Y-m-d H:i:s', strtotime("+{$validDays} days"));
+        $pdo->prepare("INSERT INTO member_reward_claims (member_id,reward_id,redemption_code,redemption_qr_token,cost_point,status,expires_at) VALUES (?,?,?,?,?,?,?)")
+            ->execute([$memberId, $rewardId, $code, 'MBR-CLAIM-pending', $cost, $status, $expires]);
+        $claimId = (int)$pdo->lastInsertId();
+        $qrToken = 'MBR-CLAIM-' . $claimId . '.' . substr(hash_hmac('sha256', $claimId . '.' . $expires, (string)$m['qr_secret']), 0, 16);
+        $pdo->prepare("UPDATE member_reward_claims SET redemption_qr_token=? WHERE id=?")->execute([$qrToken, $claimId]);
+
+        // Reserve: potong point dari saldo aktif sekarang
+        memberInsertLedger($pdo, [
+            'member_id' => $memberId, 'reward_claim_id' => $claimId, 'movement_type' => 'redeem_reserve',
+            'points' => $cost, 'reason' => 'Klaim reward: ' . $reward['name'],
+            'source_table' => 'member_reward_claims', 'source_id' => (string)$claimId,
+        ]);
+        $pdo->prepare("UPDATE member_rewards SET quota_used=quota_used+1 WHERE id=?")->execute([$rewardId]);
+        $pdo->commit();
+        auditLog(null, 'member_claim_reward', 'member_reward_claims', null, ['claim_id' => $claimId, 'member_id' => $memberId, 'reward_id' => $rewardId, 'cost' => $cost], null);
+        return [
+            'ok' => true,
+            'claim' => ['id' => $claimId, 'redemption_code' => $code, 'qr_token' => $qrToken, 'status' => $status, 'expires_at' => $expires, 'cost_point' => $cost, 'reward_name' => $reward['name']],
+            'balance' => memberBalances($pdo, $memberId),
+        ];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_cancel_claim(array $p): mixed {
+    $pdo      = getDB();
+    $m        = $p['_member'];
+    $memberId = (int)$m['id'];
+    $claimId  = (int)($p['claim_id'] ?? 0);
+    if (!$claimId) throw new ApiHttpException(400, 'claim_id wajib', 'VALIDATION_FAILED');
+    $pdo->beginTransaction();
+    try {
+        $c = $pdo->prepare("SELECT * FROM member_reward_claims WHERE id=? AND member_id=? FOR UPDATE");
+        $c->execute([$claimId, $memberId]);
+        $claim = $c->fetch();
+        if (!$claim) throw new ApiHttpException(404, 'Klaim tidak ditemukan', 'CLAIM_NOT_FOUND');
+        if (!in_array($claim['status'], ['redeemable', 'pending_approval'], true)) throw new ApiHttpException(400, 'Klaim tidak bisa dibatalkan', 'CLAIM_NOT_CANCELLABLE');
+        $pdo->prepare("UPDATE member_reward_claims SET status='cancelled', cancelled_at=NOW(), cancel_reason='Dibatalkan member' WHERE id=?")->execute([$claimId]);
+        memberInsertLedger($pdo, [
+            'member_id' => $memberId, 'reward_claim_id' => $claimId, 'movement_type' => 'redeem_refund',
+            'points' => (int)$claim['cost_point'], 'reason' => 'Pembatalan klaim oleh member',
+            'source_table' => 'member_reward_claims', 'source_id' => $claimId . ':cancel',
+        ]);
+        $pdo->prepare("UPDATE member_rewards SET quota_used=GREATEST(0,quota_used-1) WHERE id=?")->execute([(int)$claim['reward_id']]);
+        $pdo->commit();
+        auditLog(null, 'member_cancel_claim', 'member_reward_claims', null, ['claim_id' => $claimId], null);
+        return ['ok' => true, 'points_refunded' => (int)$claim['cost_point'], 'balance' => memberBalances($pdo, $memberId)];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_my_claims(array $p): mixed {
+    $pdo = getDB();
+    $m   = $p['_member'];
+    $st  = $pdo->prepare("
+        SELECT c.id,c.reward_id,c.redemption_code,c.redemption_qr_token,c.cost_point,c.status,
+               c.claimed_at,c.expires_at,c.redeemed_at,r.name AS reward_name,r.reward_type,r.image_url
+        FROM member_reward_claims c JOIN member_rewards r ON r.id=c.reward_id
+        WHERE c.member_id=? ORDER BY c.id DESC LIMIT 100
+    ");
+    $st->execute([(int)$m['id']]);
+    return $st->fetchAll();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RPC: Cashier workflow (staff/admin via X-Session-Token)
+// ══════════════════════════════════════════════════════════════════════════════
+function rpc_member_lookup(array $p): mixed {
+    $pdo = getDB();
+    if (!memberLoyaltyEnabled($pdo)) throw new ApiHttpException(400, 'Modul loyalty nonaktif', 'MODULE_DISABLED');
+    $query = trim((string)($p['query'] ?? ''));
+    if ($query === '') throw new ApiHttpException(400, 'Query wajib diisi', 'VALIDATION_FAILED');
+    $st = $pdo->prepare("SELECT * FROM members WHERE (phone=? OR member_code=?) AND deleted_at IS NULL LIMIT 1");
+    $st->execute([$query, strtoupper($query)]);
+    $m = $st->fetch();
+    if (!$m) throw new ApiHttpException(404, 'Member tidak ditemukan', 'MEMBER_NOT_FOUND');
+    if ((int)$m['is_active'] !== 1) throw new ApiHttpException(403, 'Member nonaktif', 'MEMBER_INACTIVE');
+    memberActivateMaturedPending($pdo, (int)$m['id']);
+    $bal = memberBalances($pdo, (int)$m['id']);
+    return ['member' => [
+        'id' => (int)$m['id'], 'name' => $m['name'], 'member_code' => $m['member_code'],
+        'phone_masked' => maskPhone((string)$m['phone']), 'balance_active' => $bal['active'], 'balance_pending' => $bal['pending'],
+    ]];
+}
+
+function rpc_member_validate_qr(array $p): mixed {
+    $pdo = getDB();
+    if (!memberLoyaltyEnabled($pdo)) throw new ApiHttpException(400, 'Modul loyalty nonaktif', 'MODULE_DISABLED');
+    $token = trim((string)($p['qr_token'] ?? ''));
+    $member = $token !== '' ? memberValidateQrToken($pdo, $token) : null;
+    if (!$member) throw new ApiHttpException(400, 'QR tidak valid atau member nonaktif', 'INVALID_QR_SIGNATURE');
+    memberActivateMaturedPending($pdo, (int)$member['id']);
+    $bal = memberBalances($pdo, (int)$member['id']);
+    return ['ok' => true, 'member' => [
+        'id' => (int)$member['id'], 'name' => $member['name'], 'member_code' => $member['member_code'],
+        'phone_masked' => maskPhone((string)$member['phone']), 'balance_active' => $bal['active'], 'balance_pending' => $bal['pending'],
+    ]];
+}
+
+function rpc_member_preview_points(array $p): mixed {
+    $pdo      = getDB();
+    $subtotal = (float)($p['subtotal'] ?? 0);
+    $cart     = is_array($p['items'] ?? null) ? $p['items'] : (is_array($p['cart'] ?? null) ? $p['cart'] : []);
+    $res = memberComputePreviewPoints($pdo, $subtotal, $cart);
+    return ['points_to_earn' => $res['points'], 'eligible_subtotal' => $res['eligible'], 'reason_if_zero' => $res['points'] > 0 ? null : $res['reason']];
+}
+
+function rpc_member_redeem_at_cashier(array $p): mixed {
+    $pdo      = getDB();
+    $authUser = $p['_auth_user'] ?? null;
+    if (!memberLoyaltyEnabled($pdo)) throw new ApiHttpException(400, 'Modul loyalty nonaktif', 'MODULE_DISABLED');
+    $code     = strtoupper(trim((string)($p['redemption_code'] ?? '')));
+    $qr       = trim((string)($p['qr_token'] ?? ''));
+    $branchId = (int)($p['branch_id'] ?? ($authUser['branch_id'] ?? 0));
+    $txId     = !empty($p['transaction_id']) ? (int)$p['transaction_id'] : null;
+    if ($code === '' && $qr === '') throw new ApiHttpException(400, 'Kode redeem wajib diisi', 'VALIDATION_FAILED');
+    if ($branchId) requireBranchAccess($authUser, $branchId);
+
+    $pdo->beginTransaction();
+    try {
+        if ($code !== '') {
+            $c = $pdo->prepare("SELECT * FROM member_reward_claims WHERE redemption_code=? FOR UPDATE");
+            $c->execute([$code]);
+        } else {
+            $c = $pdo->prepare("SELECT * FROM member_reward_claims WHERE redemption_qr_token=? FOR UPDATE");
+            $c->execute([$qr]);
+        }
+        $claim = $c->fetch();
+        if (!$claim) throw new ApiHttpException(404, 'Kode klaim tidak ditemukan', 'CLAIM_NOT_FOUND');
+        if ($claim['status'] === 'redeemed')  throw new ApiHttpException(409, 'Kode sudah dipakai', 'CLAIM_ALREADY_REDEEMED');
+        if ($claim['status'] === 'pending_approval') throw new ApiHttpException(400, 'Klaim menunggu persetujuan admin', 'CLAIM_PENDING_APPROVAL');
+        if ($claim['status'] !== 'redeemable') throw new ApiHttpException(400, 'Klaim tidak bisa di-redeem', 'CLAIM_NOT_REDEEMABLE');
+        if ($claim['expires_at'] < date('Y-m-d H:i:s')) throw new ApiHttpException(400, 'Kode klaim kedaluwarsa', 'CLAIM_EXPIRED');
+
+        $rw = $pdo->prepare("SELECT * FROM member_rewards WHERE id=?");
+        $rw->execute([(int)$claim['reward_id']]);
+        $reward = $rw->fetch();
+
+        $pdo->prepare("UPDATE member_reward_claims SET status='redeemed', redeemed_at=NOW(), redeemed_by_user_id=?, redeemed_at_branch_id=?, transaction_id=? WHERE id=?")
+            ->execute([$authUser['id'] ?? null, $branchId ?: null, $txId, (int)$claim['id']]);
+        memberInsertLedger($pdo, [
+            'member_id' => (int)$claim['member_id'], 'branch_id' => $branchId ?: null, 'reward_claim_id' => (int)$claim['id'],
+            'transaction_id' => $txId, 'movement_type' => 'redeem_commit', 'points' => (int)$claim['cost_point'],
+            'reason' => 'Redeem di kasir', 'source_table' => 'member_reward_claims', 'source_id' => $claim['id'] . ':commit',
+            'created_by_user_id' => $authUser['id'] ?? null,
+        ]);
+        $pdo->prepare("UPDATE members SET lifetime_points_redeemed=lifetime_points_redeemed+? WHERE id=?")->execute([(int)$claim['cost_point'], (int)$claim['member_id']]);
+        if ($txId) $pdo->prepare("UPDATE transactions SET reward_claim_id=? WHERE id=?")->execute([(int)$claim['id'], $txId]);
+        $pdo->commit();
+        auditLog($authUser, 'member_redeem', 'member_reward_claims', $claim, ['redeemed_by' => $authUser['id'] ?? null, 'tx' => $txId], $branchId ?: null);
+        return [
+            'ok' => true,
+            'claim' => ['id' => (int)$claim['id'], 'status' => 'redeemed', 'cost_point' => (int)$claim['cost_point']],
+            'reward' => [
+                'id' => (int)$reward['id'], 'name' => $reward['name'], 'reward_type' => $reward['reward_type'],
+                'reward_product_id' => $reward['reward_product_id'] ? (int)$reward['reward_product_id'] : null,
+                'reward_variant_id' => $reward['reward_variant_id'] ? (int)$reward['reward_variant_id'] : null,
+                'discount_value' => $reward['discount_value'] !== null ? (float)$reward['discount_value'] : null,
+            ],
+        ];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_unattach_from_transaction(array $p): mixed {
+    $pdo      = getDB();
+    $authUser = $p['_auth_user'] ?? null;
+    $txId     = (int)($p['transaction_id'] ?? 0);
+    $reason   = trim((string)($p['reason'] ?? ''));
+    if (!$txId) throw new ApiHttpException(400, 'transaction_id wajib', 'VALIDATION_FAILED');
+    if (mb_strlen($reason) < 5) throw new ApiHttpException(400, 'Alasan minimal 5 karakter', 'VALIDATION_FAILED');
+    $S = memberGetSettings($pdo);
+    $windowMin = (int)($S['member_late_attach_window_minutes'] ?? 5);
+    $pdo->beginTransaction();
+    try {
+        $tx = $pdo->prepare("SELECT * FROM transactions WHERE id=? FOR UPDATE");
+        $tx->execute([$txId]);
+        $t = $tx->fetch();
+        if (!$t || empty($t['member_id'])) throw new ApiHttpException(404, 'Transaksi tanpa member', 'NOT_FOUND');
+        if ($authUser) requireBranchAccess($authUser, (int)$t['branch_id']);
+        if (!isAdminUser($authUser ?? []) && strtotime((string)$t['created_at']) < time() - $windowMin * 60)
+            throw new ApiHttpException(400, 'Window lepas member sudah lewat. Hubungi admin.', 'LATE_ATTACH_WINDOW_EXPIRED');
+        memberReverseTransactionPoints($pdo, $t, null, $authUser['id'] ?? null, 'unattach: ' . $reason);
+        $pdo->prepare("UPDATE transactions SET member_id=NULL, member_attached_at=NULL, points_awarded=0 WHERE id=?")->execute([$txId]);
+        memberInsertFraudFlag($pdo, ['member_id' => (int)$t['member_id'], 'staff_user_id' => $authUser['id'] ?? null, 'transaction_id' => $txId, 'flag_type' => 'late_attach', 'severity' => 'medium', 'risk_score' => 50, 'evidence' => ['reason' => $reason]]);
+        $pdo->commit();
+        auditLog($authUser, 'member_unattach_tx', 'transactions', $t, ['reason' => $reason], (int)$t['branch_id']);
+        return ['ok' => true];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RPC: Admin management (admin/owner)
+// ══════════════════════════════════════════════════════════════════════════════
+function rpc_member_admin_search(array $p): mixed {
+    $pdo    = getDB();
+    $q      = trim((string)($p['query'] ?? ''));
+    $limit  = min(200, max(1, (int)($p['limit'] ?? 50)));
+    $offset = max(0, (int)($p['offset'] ?? 0));
+    $where  = ['m.deleted_at IS NULL'];
+    $args   = [];
+    if ($q !== '') {
+        $where[] = '(m.name LIKE ? OR m.phone LIKE ? OR m.member_code LIKE ? OR m.email LIKE ?)';
+        $like = "%$q%";
+        array_push($args, $like, $like, $like, $like);
+    }
+    if (isset($p['is_active']) && $p['is_active'] !== '' && $p['is_active'] !== null) {
+        $where[] = 'm.is_active=?';
+        $args[]  = ((int)$p['is_active'] ? 1 : 0);
+    }
+    $sort = in_array($p['sort'] ?? '', ['created_at', 'name', 'last_transaction_at', 'lifetime_points_earned'], true) ? $p['sort'] : 'created_at';
+    $wsql = implode(' AND ', $where);
+    $sql  = "SELECT m.id,m.member_code,m.name,m.phone,m.email,m.is_active,m.last_transaction_at,m.created_at,
+                    m.lifetime_points_earned,m.lifetime_points_redeemed,m.staff_link_user_id,
+                    (SELECT balance_active_after FROM member_point_ledger l WHERE l.member_id=m.id ORDER BY l.id DESC LIMIT 1) AS point_active
+             FROM members m WHERE $wsql ORDER BY m.$sort DESC LIMIT $limit OFFSET $offset";
+    $st = $pdo->prepare($sql);
+    $st->execute($args);
+    $rows = $st->fetchAll();
+    foreach ($rows as &$r) { $r['point_active'] = (int)($r['point_active'] ?? 0); }
+    return $rows;
+}
+
+function rpc_member_admin_get_detail(array $p): mixed {
+    $pdo = getDB();
+    $id  = (int)($p['member_id'] ?? 0);
+    if (!$id) throw new ApiHttpException(400, 'member_id wajib', 'VALIDATION_FAILED');
+    $m = $pdo->prepare("SELECT * FROM members WHERE id=?");
+    $m->execute([$id]);
+    $member = $m->fetch();
+    if (!$member) throw new ApiHttpException(404, 'Member tidak ditemukan', 'MEMBER_NOT_FOUND');
+    $bal = memberBalances($pdo, $id);
+    $tx  = $pdo->prepare("SELECT id,branch_id,total,points_awarded,status,created_at FROM transactions WHERE member_id=? ORDER BY id DESC LIMIT 20");
+    $tx->execute([$id]);
+    $led = $pdo->prepare("SELECT id,movement_type,direction,points,balance_active_after,reason,transaction_id,created_at FROM member_point_ledger WHERE member_id=? ORDER BY id DESC LIMIT 30");
+    $led->execute([$id]);
+    $fl = $pdo->prepare("SELECT id,flag_type,severity,risk_score,status,detected_at FROM member_fraud_flags WHERE member_id=? ORDER BY id DESC LIMIT 20");
+    $fl->execute([$id]);
+    $cl = $pdo->prepare("SELECT c.id,c.cost_point,c.status,c.claimed_at,c.redeemed_at,r.name AS reward_name FROM member_reward_claims c JOIN member_rewards r ON r.id=c.reward_id WHERE c.member_id=? ORDER BY c.id DESC LIMIT 20");
+    $cl->execute([$id]);
+    unset($member['password'], $member['qr_secret']);
+    $member['balance'] = ['active' => $bal['active'], 'pending' => $bal['pending'], 'reserved' => memberReservedPoints($pdo, $id)];
+    return [
+        'member' => $member, 'recent_tx' => $tx->fetchAll(), 'recent_ledger' => $led->fetchAll(),
+        'flags' => $fl->fetchAll(), 'claims' => $cl->fetchAll(),
+    ];
+}
+
+function rpc_member_admin_set_active(array $p): mixed {
+    $pdo    = getDB();
+    $admin  = $p['_auth_user'];
+    $id     = (int)($p['member_id'] ?? 0);
+    $active = (int)((int)($p['is_active'] ?? 0) ? 1 : 0);
+    $reason = trim((string)($p['reason'] ?? ''));
+    if (!$id) throw new ApiHttpException(400, 'member_id wajib', 'VALIDATION_FAILED');
+    $pdo->prepare("UPDATE members SET is_active=? WHERE id=?")->execute([$active, $id]);
+    if (!$active) $pdo->prepare("DELETE FROM member_sessions WHERE member_id=?")->execute([$id]);
+    auditLog($admin, 'member_set_active', 'members', null, ['member_id' => $id, 'is_active' => $active, 'reason' => $reason], null);
+    return ['ok' => true];
+}
+
+function rpc_member_admin_set_staff_link(array $p): mixed {
+    $pdo   = getDB();
+    $admin = $p['_auth_user'];
+    $id    = (int)($p['member_id'] ?? 0);
+    $staff = !empty($p['staff_user_id']) ? (int)$p['staff_user_id'] : null;
+    if (!$id) throw new ApiHttpException(400, 'member_id wajib', 'VALIDATION_FAILED');
+    $pdo->prepare("UPDATE members SET staff_link_user_id=? WHERE id=?")->execute([$staff, $id]);
+    auditLog($admin, 'member_set_staff_link', 'members', null, ['member_id' => $id, 'staff_user_id' => $staff], null);
+    return ['ok' => true];
+}
+
+function rpc_member_admin_manual_adjust(array $p): mixed {
+    $pdo    = getDB();
+    $admin  = $p['_auth_user'];
+    $id     = (int)($p['member_id'] ?? 0);
+    $dir    = $p['direction'] ?? '';
+    $points = (int)($p['points'] ?? 0);
+    $reason = trim((string)($p['reason'] ?? ''));
+    if (!$id || !in_array($dir, ['in', 'out'], true) || $points <= 0) throw new ApiHttpException(400, 'Parameter adjust tidak valid', 'VALIDATION_FAILED');
+    if (mb_strlen($reason) < 10) throw new ApiHttpException(400, 'Alasan wajib diisi minimal 10 karakter', 'VALIDATION_FAILED');
+    $pdo->beginTransaction();
+    try {
+        if ($dir === 'out') {
+            $bal = memberBalances($pdo, $id);
+            if ($bal['active'] < $points) throw new ApiHttpException(400, 'Saldo tidak cukup untuk pengurangan', 'INSUFFICIENT_POINTS');
+        }
+        $mv  = $dir === 'in' ? 'manual_adjust_in' : 'manual_adjust_out';
+        $led = memberInsertLedger($pdo, ['member_id' => $id, 'movement_type' => $mv, 'points' => $points, 'reason' => $reason, 'created_by_user_id' => (int)$admin['id']]);
+        if ($dir === 'in') $pdo->prepare("UPDATE members SET lifetime_points_earned=lifetime_points_earned+? WHERE id=?")->execute([$points, $id]);
+        $pdo->commit();
+        auditLog($admin, 'member_manual_adjust', 'member_point_ledger', null, ['member_id' => $id, 'direction' => $dir, 'points' => $points, 'reason' => $reason], null);
+        if ($points > 100) memberInsertFraudFlag($pdo, ['member_id' => $id, 'staff_user_id' => (int)$admin['id'], 'flag_type' => 'large_manual_adjust', 'severity' => 'high', 'risk_score' => 72, 'evidence' => ['points' => $points, 'direction' => $dir]]);
+        return ['ok' => true, 'ledger_entry' => $led];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_admin_lock_points(array $p): mixed {
+    $pdo    = getDB();
+    $admin  = $p['_auth_user'];
+    $id     = (int)($p['member_id'] ?? 0);
+    $points = (int)($p['points'] ?? 0);
+    $reason = trim((string)($p['reason'] ?? ''));
+    if (!$id || $points <= 0 || mb_strlen($reason) < 5) throw new ApiHttpException(400, 'Parameter lock tidak valid', 'VALIDATION_FAILED');
+    $pdo->beginTransaction();
+    try {
+        $bal = memberBalances($pdo, $id);
+        $points = min($points, $bal['active']);
+        if ($points <= 0) throw new ApiHttpException(400, 'Tidak ada saldo aktif untuk dikunci', 'INSUFFICIENT_POINTS');
+        $led = memberInsertLedger($pdo, ['member_id' => $id, 'movement_type' => 'fraud_lock', 'points' => $points, 'reason' => $reason, 'created_by_user_id' => (int)$admin['id']]);
+        $pdo->commit();
+        auditLog($admin, 'member_lock_points', 'member_point_ledger', null, ['member_id' => $id, 'points' => $points, 'reason' => $reason], null);
+        return ['ok' => true, 'ledger_entry' => $led];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_admin_unlock_points(array $p): mixed {
+    $pdo    = getDB();
+    $admin  = $p['_auth_user'];
+    $id     = (int)($p['member_id'] ?? 0);
+    $points = (int)($p['points'] ?? 0);
+    $reason = trim((string)($p['reason'] ?? ''));
+    if (!$id || $points <= 0 || mb_strlen($reason) < 5) throw new ApiHttpException(400, 'Parameter unlock tidak valid', 'VALIDATION_FAILED');
+    $pdo->beginTransaction();
+    try {
+        $led = memberInsertLedger($pdo, ['member_id' => $id, 'movement_type' => 'fraud_unlock', 'points' => $points, 'reason' => $reason, 'created_by_user_id' => (int)$admin['id']]);
+        $pdo->commit();
+        auditLog($admin, 'member_unlock_points', 'member_point_ledger', null, ['member_id' => $id, 'points' => $points, 'reason' => $reason], null);
+        return ['ok' => true, 'ledger_entry' => $led];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_admin_reset_password(array $p): mixed {
+    $pdo   = getDB();
+    $admin = $p['_auth_user'];
+    $id    = (int)($p['member_id'] ?? 0);
+    if (!$id) throw new ApiHttpException(400, 'member_id wajib', 'VALIDATION_FAILED');
+    $temp  = 'RBN' . random_int(1000, 9999) . substr(strtoupper(bin2hex(random_bytes(2))), 0, 3);
+    $pdo->prepare("UPDATE members SET password=? WHERE id=?")->execute([password_hash($temp, PASSWORD_BCRYPT), $id]);
+    $pdo->prepare("DELETE FROM member_sessions WHERE member_id=?")->execute([$id]);
+    auditLog($admin, 'member_reset_password', 'members', null, ['member_id' => $id], null);
+    return ['ok' => true, 'temp_password' => $temp];
+}
+
+function rpc_member_admin_void_claim(array $p): mixed {
+    $pdo    = getDB();
+    $admin  = $p['_auth_user'];
+    $cid    = (int)($p['claim_id'] ?? 0);
+    $reason = trim((string)($p['reason'] ?? ''));
+    if (!$cid || mb_strlen($reason) < 5) throw new ApiHttpException(400, 'Parameter void tidak valid', 'VALIDATION_FAILED');
+    $pdo->beginTransaction();
+    try {
+        $c = $pdo->prepare("SELECT * FROM member_reward_claims WHERE id=? FOR UPDATE");
+        $c->execute([$cid]);
+        $claim = $c->fetch();
+        if (!$claim) throw new ApiHttpException(404, 'Klaim tidak ditemukan', 'CLAIM_NOT_FOUND');
+        if (!in_array($claim['status'], ['redeemable', 'pending_approval'], true)) throw new ApiHttpException(400, 'Klaim tidak bisa di-void', 'CLAIM_NOT_VOIDABLE');
+        $pdo->prepare("UPDATE member_reward_claims SET status='cancelled', cancelled_at=NOW(), cancel_reason=? WHERE id=?")->execute([$reason, $cid]);
+        memberInsertLedger($pdo, ['member_id' => (int)$claim['member_id'], 'reward_claim_id' => $cid, 'movement_type' => 'redeem_refund', 'points' => (int)$claim['cost_point'], 'reason' => 'Void klaim oleh admin: ' . $reason, 'source_table' => 'member_reward_claims', 'source_id' => $cid . ':void', 'created_by_user_id' => (int)$admin['id']]);
+        $pdo->prepare("UPDATE member_rewards SET quota_used=GREATEST(0,quota_used-1) WHERE id=?")->execute([(int)$claim['reward_id']]);
+        $pdo->commit();
+        auditLog($admin, 'member_void_claim', 'member_reward_claims', $claim, ['reason' => $reason], null);
+        return ['ok' => true];
+    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+}
+
+function rpc_member_admin_approve_claim(array $p): mixed {
+    $pdo   = getDB();
+    $admin = $p['_auth_user'];
+    $cid   = (int)($p['claim_id'] ?? 0);
+    if (!$cid) throw new ApiHttpException(400, 'claim_id wajib', 'VALIDATION_FAILED');
+    $c = $pdo->prepare("SELECT * FROM member_reward_claims WHERE id=? LIMIT 1");
+    $c->execute([$cid]);
+    $claim = $c->fetch();
+    if (!$claim) throw new ApiHttpException(404, 'Klaim tidak ditemukan', 'CLAIM_NOT_FOUND');
+    if ($claim['status'] !== 'pending_approval') throw new ApiHttpException(400, 'Klaim tidak menunggu approval', 'CLAIM_NOT_PENDING');
+    $pdo->prepare("UPDATE member_reward_claims SET status='redeemable', approved_at=NOW(), approved_by_user_id=? WHERE id=?")->execute([(int)$admin['id'], $cid]);
+    auditLog($admin, 'member_approve_claim', 'member_reward_claims', null, ['claim_id' => $cid], null);
+    return ['ok' => true];
+}
+
+function rpc_member_admin_create(array $p): mixed {
+    // Admin daftarkan member walk-in. Password default = HP (member ganti nanti).
+    $pdo   = getDB();
+    $admin = $p['_auth_user'];
+    $phone = memberValidatePhone((string)($p['phone'] ?? ''));
+    $name  = memberSanitizeName((string)($p['name'] ?? ''));
+    $email = trim((string)($p['email'] ?? ''));
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new ApiHttpException(400, 'Email tidak valid', 'VALIDATION_FAILED');
+    $chk = $pdo->prepare("SELECT id FROM members WHERE phone=? LIMIT 1");
+    $chk->execute([$phone]);
+    if ($chk->fetch()) throw new ApiHttpException(409, 'Nomor HP sudah terdaftar', 'PHONE_ALREADY_EXISTS');
+    $temp   = (string)($p['password'] ?? $phone);
+    if (strlen($temp) < 8) $temp = $phone; // HP indonesia >= 10 digit
+    $code   = memberGenCode($pdo);
+    $secret = bin2hex(random_bytes(32));
+    $branchId = !empty($p['signup_branch_id']) ? (int)$p['signup_branch_id'] : ($admin['branch_id'] ?? null);
+    $pdo->prepare("INSERT INTO members (member_code,name,phone,email,password,qr_secret,signup_branch_id) VALUES (?,?,?,?,?,?,?)")
+        ->execute([$code, $name, $phone, $email ?: null, password_hash($temp, PASSWORD_BCRYPT), $secret, $branchId]);
+    $id = (int)$pdo->lastInsertId();
+    auditLog($admin, 'member_admin_create', 'members', null, ['id' => $id, 'member_code' => $code], $branchId);
+    return ['ok' => true, 'member_id' => $id, 'member_code' => $code, 'temp_password' => $temp];
+}
+
+function rpc_member_dashboard_stats(array $p): mixed {
+    $pdo = getDB();
+    $totalMembers = (int)$pdo->query("SELECT COUNT(*) FROM members WHERE deleted_at IS NULL")->fetchColumn();
+    $activeMonth  = (int)$pdo->query("SELECT COUNT(*) FROM members WHERE deleted_at IS NULL AND last_transaction_at >= DATE_FORMAT(NOW(),'%Y-%m-01')")->fetchColumn();
+    $pointsOut    = (int)$pdo->query("SELECT COALESCE(SUM(balance_active_after),0) FROM (SELECT member_id, MAX(id) AS mid FROM member_point_ledger GROUP BY member_id) t JOIN member_point_ledger l ON l.id=t.mid")->fetchColumn();
+    $redeemedMonth = (int)$pdo->query("SELECT COALESCE(SUM(points),0) FROM member_point_ledger WHERE movement_type='redeem_commit' AND created_at >= DATE_FORMAT(NOW(),'%Y-%m-01')")->fetchColumn();
+    $newWeek = $pdo->query("SELECT DATE(created_at) AS d, COUNT(*) AS c FROM members WHERE created_at >= DATE_SUB(NOW(),INTERVAL 8 WEEK) GROUP BY DATE(created_at) ORDER BY d")->fetchAll();
+    $topMembers = $pdo->query("SELECT m.id,m.name,m.member_code,(SELECT balance_active_after FROM member_point_ledger l WHERE l.member_id=m.id ORDER BY l.id DESC LIMIT 1) AS point_active FROM members m WHERE m.deleted_at IS NULL ORDER BY point_active DESC LIMIT 10")->fetchAll();
+    $topRewards = $pdo->query("SELECT r.id,r.name,COUNT(c.id) AS claims FROM member_reward_claims c JOIN member_rewards r ON r.id=c.reward_id WHERE c.status='redeemed' GROUP BY r.id ORDER BY claims DESC LIMIT 5")->fetchAll();
+    foreach ($topMembers as &$tm) $tm['point_active'] = (int)($tm['point_active'] ?? 0);
+    return [
+        'total_members' => $totalMembers, 'active_this_month' => $activeMonth,
+        'total_points_outstanding' => $pointsOut, 'points_redeemed_this_month' => $redeemedMonth,
+        'new_members_weekly' => $newWeek, 'top_members' => $topMembers, 'top_rewards' => $topRewards,
+    ];
+}
+
+function rpc_member_fraud_dashboard(array $p): mixed {
+    $pdo      = getDB();
+    $where    = ['1=1'];
+    $args     = [];
+    if (!empty($p['severity'])) { $where[] = 'severity=?'; $args[] = $p['severity']; }
+    if (!empty($p['status']))   { $where[] = 'status=?';   $args[] = $p['status']; }
+    $wsql = implode(' AND ', $where);
+    $st = $pdo->prepare("
+        SELECT f.*, m.name AS member_name, m.member_code, u.name AS staff_name
+        FROM member_fraud_flags f
+        LEFT JOIN members m ON m.id=f.member_id
+        LEFT JOIN users u ON u.id=f.staff_user_id
+        WHERE $wsql ORDER BY f.detected_at DESC LIMIT 200
+    ");
+    $st->execute($args);
+    $summary = $pdo->query("SELECT
+        SUM(status='open') AS open_count,
+        SUM(severity='critical' AND status='open') AS critical_open,
+        SUM(severity='high' AND status='open') AS high_open,
+        COUNT(*) AS total
+        FROM member_fraud_flags")->fetch();
+    return ['summary' => $summary, 'flags' => $st->fetchAll()];
+}
+
+function rpc_member_fraud_resolve(array $p): mixed {
+    $pdo    = getDB();
+    $admin  = $p['_auth_user'];
+    $fid    = (int)($p['flag_id'] ?? 0);
+    $status = $p['status'] ?? '';
+    $note   = trim((string)($p['resolution_note'] ?? ''));
+    if (!$fid || !in_array($status, ['acknowledged', 'dismissed', 'action_taken'], true)) throw new ApiHttpException(400, 'Parameter resolve tidak valid', 'VALIDATION_FAILED');
+    $pdo->prepare("UPDATE member_fraud_flags SET status=?, reviewed_by_user_id=?, reviewed_at=NOW(), resolution_note=? WHERE id=?")
+        ->execute([$status, (int)$admin['id'], $note, $fid]);
+    auditLog($admin, 'member_fraud_resolve', 'member_fraud_flags', null, ['flag_id' => $fid, 'status' => $status], null);
+    return ['ok' => true];
 }
