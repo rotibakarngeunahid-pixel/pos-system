@@ -4887,6 +4887,109 @@ function poGetPreviouslySyncedBranches(PDO $pdo, string $poId, string $poItemId)
     return $stmt->fetchAll();
 }
 
+function poNormalizeTargetBranches(array $targetBranches, float $qtyReceived, bool $isCancelled): array {
+    if (!$targetBranches) return [];
+
+    if ($isCancelled || $qtyReceived <= 0) {
+        foreach ($targetBranches as &$tb) $tb['qty'] = 0.0;
+        unset($tb);
+        return $targetBranches;
+    }
+
+    foreach ($targetBranches as &$tb) {
+        $tb['qty'] = max(0.0, (float)($tb['qty'] ?? 0));
+    }
+    unset($tb);
+
+    $positiveBranches = array_values(array_filter(
+        $targetBranches,
+        fn($tb) => ((float)($tb['qty'] ?? 0)) > 0
+    ));
+
+    if (count($positiveBranches) === 1) {
+        $branchId = (int)$positiveBranches[0]['branch_id'];
+        foreach ($targetBranches as &$tb) {
+            $tb['qty'] = ((int)$tb['branch_id'] === $branchId) ? $qtyReceived : 0.0;
+        }
+        unset($tb);
+    }
+
+    return $targetBranches;
+}
+
+function poLockSyncItem(
+    PDO $pdo,
+    int $syncRunId,
+    string $poId,
+    string $poItemId,
+    string $materialId,
+    string $materialName,
+    string $poStatus,
+    string $itemSource,
+    float $qtyReceived,
+    int $branchId,
+    ?int $ingredientId,
+    ?string $ingredientName
+): array {
+    $idempotencyKey = "purchase_order:{$poId}:{$poItemId}:{$branchId}";
+    $stmt = $pdo->prepare("
+        INSERT INTO po_stock_sync_items
+          (sync_run_id, po_id, po_item_id, po_material_id, po_material_name,
+           po_status, po_item_source, po_qty_received,
+           pos_branch_id, pos_ingredient_id, pos_ingredient_name,
+           target_sync_qty, previous_synced_qty, delta_qty, sync_status, idempotency_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,0,'belum_disinkronkan',?)
+        ON DUPLICATE KEY UPDATE
+          id = LAST_INSERT_ID(id),
+          sync_run_id = VALUES(sync_run_id),
+          po_material_id = VALUES(po_material_id),
+          po_material_name = VALUES(po_material_name),
+          po_status = VALUES(po_status),
+          po_item_source = VALUES(po_item_source),
+          po_qty_received = VALUES(po_qty_received),
+          pos_ingredient_id = COALESCE(VALUES(pos_ingredient_id), pos_ingredient_id),
+          pos_ingredient_name = COALESCE(VALUES(pos_ingredient_name), pos_ingredient_name),
+          idempotency_key = VALUES(idempotency_key),
+          updated_at = NOW()
+    ");
+    $stmt->execute([
+        $syncRunId, $poId, $poItemId, $materialId, $materialName,
+        $poStatus, $itemSource, $qtyReceived,
+        $branchId, $ingredientId, $ingredientName,
+        $idempotencyKey,
+    ]);
+
+    $rowId = (int)$pdo->lastInsertId();
+    $lock = $pdo->prepare("SELECT * FROM po_stock_sync_items WHERE id=? FOR UPDATE");
+    $lock->execute([$rowId]);
+    $row = $lock->fetch();
+    if (!$row) throw new Exception('Gagal mengunci item sync PO');
+    return $row;
+}
+
+function poFetchRemovedSyncedItems(PDO $pdo, string $poId, array $currentPoItemIds): array {
+    $params = [$poId];
+    $notInSql = '';
+    $currentPoItemIds = array_values(array_unique(array_filter($currentPoItemIds)));
+    if ($currentPoItemIds) {
+        $placeholders = implode(',', array_fill(0, count($currentPoItemIds), '?'));
+        $notInSql = "AND po_item_id NOT IN ($placeholders)";
+        $params = array_merge($params, $currentPoItemIds);
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM po_stock_sync_items
+        WHERE po_id = ?
+          $notInSql
+          AND pos_branch_id IS NOT NULL
+          AND pos_ingredient_id IS NOT NULL
+          AND ABS(COALESCE(previous_synced_qty, 0) + COALESCE(delta_qty, 0)) >= 0.0001
+    ");
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
 // ── Helper: tulis log inventory + update stok dalam satu transaksi ────────────
 function poApplyStockDelta(
     PDO $pdo,
@@ -4991,6 +5094,7 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
     $skippedCount = 0;
     $errorCount   = 0;
     $results      = [];
+    $currentPoItemIds = [];
 
     foreach ($items as $item) {
         $poItemId       = (string)($item['po_item_id']       ?? '');
@@ -5007,6 +5111,7 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
             $errorCount++;
             continue;
         }
+        $currentPoItemIds[] = $poItemId;
 
         // Bahan yang di-ignore global tidak perlu mapping bahan maupun alokasi cabang.
         if (poIsMaterialGloballyIgnored($pdo, $materialId, $materialName)) {
@@ -5081,6 +5186,8 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
             }
         }
 
+        $targetBranches = poNormalizeTargetBranches($targetBranches, $qtyReceived, $isCancelled);
+
         // Proses setiap target cabang
         foreach ($targetBranches as $tb) {
             $branchId   = (int)$tb['branch_id'];
@@ -5114,48 +5221,54 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
             // Hitung target qty di POS setelah konversi satuan
             $targetSyncQty = round($branchQty * $convFactor, 4);
 
-            // Ambil previous synced qty
-            $prevStmt = $pdo->prepare("
-                SELECT previous_synced_qty + COALESCE(delta_qty, 0) AS total_synced
-                FROM po_stock_sync_items
-                WHERE po_id=? AND po_item_id=? AND pos_branch_id=?
-                LIMIT 1
-            ");
-            $prevStmt->execute([$poId, $poItemId, $branchId]);
-            $prevRow        = $prevStmt->fetch();
-            $prevSyncedQty  = $prevRow ? (float)$prevRow['total_synced'] : 0.0;
-
-            $deltaQty = round($targetSyncQty - $prevSyncedQty, 4);
-
-            // Tidak ada yang perlu diubah
-            if (abs($deltaQty) < 0.0001) {
-                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'sudah_disinkronkan', 'delta' => 0];
-                $successCount++;
-                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'sudah_disinkronkan', null);
-                continue;
-            }
-
-            // Untuk cancel: cek stok cukup jika perlu rollback
-            if ($isCancelled && $deltaQty < 0) {
-                $stockCheck = $pdo->prepare("SELECT COALESCE(stock,0) FROM branch_inventory WHERE branch_id=? AND ingredient_id=?");
-                $stockCheck->execute([$branchId, $ingredientId]);
-                $currentStock = (float)($stockCheck->fetchColumn() ?? 0);
-                if ($currentStock + $deltaQty < 0) {
-                    $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'rollback_butuh_review_admin', 'error' => "Stok tidak cukup untuk rollback: stok=$currentStock, perlu dikurangi=" . abs($deltaQty)];
-                    $skippedCount++;
-                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'rollback_butuh_review_admin', "Stok tidak cukup: stok=$currentStock, perlu=" . abs($deltaQty));
-                    insertDynamic($pdo, 'po_stock_sync_errors', [
-                        'sync_run_id' => $syncRunId, 'po_id' => $poId, 'po_item_id' => $poItemId,
-                        'error_code' => 'ROLLBACK_INSUFFICIENT_STOCK',
-                        'error_message' => "Stok tidak cukup untuk rollback PO. Stok saat ini: $currentStock, perlu dikurangi: " . abs($deltaQty),
-                    ]);
-                    continue;
-                }
-            }
-
-            // Terapkan delta ke stok secara atomik
+            $prevSyncedQty = 0.0;
+            $deltaQty = 0.0;
             $pdo->beginTransaction();
             try {
+                $lockedSync = poLockSyncItem(
+                    $pdo,
+                    $syncRunId,
+                    $poId,
+                    $poItemId,
+                    $materialId,
+                    $materialName,
+                    $poStatus,
+                    $itemSource,
+                    $branchQty,
+                    $branchId,
+                    $ingredientId,
+                    $ingredientName
+                );
+                $prevSyncedQty = (float)$lockedSync['previous_synced_qty'] + (float)($lockedSync['delta_qty'] ?? 0);
+                $deltaQty = round($targetSyncQty - $prevSyncedQty, 4);
+
+                if (abs($deltaQty) < 0.0001) {
+                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'sudah_disinkronkan', null);
+                    $pdo->commit();
+                    $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'sudah_disinkronkan', 'delta' => 0];
+                    $successCount++;
+                    continue;
+                }
+
+                // Untuk cancel: cek stok cukup jika perlu rollback
+                if ($isCancelled && $deltaQty < 0) {
+                    $stockCheck = $pdo->prepare("SELECT COALESCE(stock,0) FROM branch_inventory WHERE branch_id=? AND ingredient_id=?");
+                    $stockCheck->execute([$branchId, $ingredientId]);
+                    $currentStock = (float)($stockCheck->fetchColumn() ?? 0);
+                    if ($currentStock + $deltaQty < 0) {
+                        poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'rollback_butuh_review_admin', "Stok tidak cukup: stok=$currentStock, perlu=" . abs($deltaQty));
+                        insertDynamic($pdo, 'po_stock_sync_errors', [
+                            'sync_run_id' => $syncRunId, 'po_id' => $poId, 'po_item_id' => $poItemId,
+                            'error_code' => 'ROLLBACK_INSUFFICIENT_STOCK',
+                            'error_message' => "Stok tidak cukup untuk rollback PO. Stok saat ini: $currentStock, perlu dikurangi: " . abs($deltaQty),
+                        ]);
+                        $pdo->commit();
+                        $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'rollback_butuh_review_admin', 'error' => "Stok tidak cukup untuk rollback: stok=$currentStock, perlu dikurangi=" . abs($deltaQty)];
+                        $skippedCount++;
+                        continue;
+                    }
+                }
+
                 $actionType  = match($triggerType) {
                     'po_cancelled' => 'po_cancelled',
                     'po_revised'   => 'po_revised',
@@ -5172,7 +5285,7 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
                 $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'sudah_disinkronkan', 'delta' => $deltaQty];
                 $successCount++;
             } catch (Throwable $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) $pdo->rollBack();
                 $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'gagal_sinkron', 'error' => $e->getMessage()];
                 $errorCount++;
                 try {
@@ -5181,6 +5294,69 @@ function rpc_sync_purchase_order_to_inventory(array $p): mixed {
                         'error_code' => 'SYNC_ERROR', 'error_message' => $e->getMessage(),
                     ]);
                     poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, $branchQty, $branchId, $ingredientId, $ingredientName, $targetSyncQty, $prevSyncedQty, null, 'gagal_sinkron', $e->getMessage());
+                } catch (Throwable) {}
+            }
+        }
+    }
+
+    if (in_array($triggerType, ['po_revised', 'po_cancelled'], true)) {
+        foreach (poFetchRemovedSyncedItems($pdo, $poId, $currentPoItemIds) as $removed) {
+            $poItemId = (string)$removed['po_item_id'];
+            $branchId = (int)$removed['pos_branch_id'];
+            $ingredientId = (int)$removed['pos_ingredient_id'];
+            $ingredientName = (string)($removed['pos_ingredient_name'] ?? '');
+            $materialId = (string)($removed['po_material_id'] ?? '');
+            $materialName = (string)($removed['po_material_name'] ?? '');
+            $itemSource = (string)($removed['po_item_source'] ?? 'ordered');
+            $prevSyncedQty = 0.0;
+            $deltaQty = 0.0;
+
+            if ($branchId <= 0 || $ingredientId <= 0) continue;
+
+            $pdo->beginTransaction();
+            try {
+                $lockedSync = poLockSyncItem(
+                    $pdo,
+                    $syncRunId,
+                    $poId,
+                    $poItemId,
+                    $materialId,
+                    $materialName,
+                    $poStatus,
+                    $itemSource,
+                    0.0,
+                    $branchId,
+                    $ingredientId,
+                    $ingredientName
+                );
+                $prevSyncedQty = (float)$lockedSync['previous_synced_qty'] + (float)($lockedSync['delta_qty'] ?? 0);
+                $deltaQty = round(0.0 - $prevSyncedQty, 4);
+
+                if (abs($deltaQty) < 0.0001) {
+                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, 0.0, $branchId, $ingredientId, $ingredientName, 0.0, $prevSyncedQty, null, 'sudah_disinkronkan', null);
+                    $pdo->commit();
+                    continue;
+                }
+
+                $actionType = $triggerType === 'po_cancelled' ? 'po_cancelled' : 'po_revised';
+                $noteText = $triggerType === 'po_cancelled'
+                    ? "Rollback PO #{$poId}"
+                    : "Item dihapus dari penerimaan PO #{$poId}";
+                $logId = poApplyStockDelta($pdo, $branchId, $ingredientId, $deltaQty, $poId, $poItemId, $noteText, $triggeredBy, $actionType);
+                poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, 0.0, $branchId, $ingredientId, $ingredientName, 0.0, $prevSyncedQty, $logId, 'sudah_disinkronkan', null);
+                $pdo->commit();
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'sudah_disinkronkan', 'delta' => $deltaQty, 'removed' => true];
+                $successCount++;
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                $results[] = ['po_item_id' => $poItemId, 'branch_id' => $branchId, 'status' => 'gagal_sinkron', 'error' => $e->getMessage(), 'removed' => true];
+                $errorCount++;
+                try {
+                    insertDynamic($pdo, 'po_stock_sync_errors', [
+                        'sync_run_id' => $syncRunId, 'po_id' => $poId, 'po_item_id' => $poItemId,
+                        'error_code' => 'REMOVED_ITEM_SYNC_ERROR', 'error_message' => $e->getMessage(),
+                    ]);
+                    poUpsertSyncItem($pdo, $syncRunId, $poId, $poItemId, $materialId, $materialName, $poStatus, $itemSource, 0.0, $branchId, $ingredientId, $ingredientName, 0.0, $prevSyncedQty, null, 'gagal_sinkron', $e->getMessage());
                 } catch (Throwable) {}
             }
         }
