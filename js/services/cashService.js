@@ -179,6 +179,21 @@ const cashService = {
         .select('opening_cash, total_sales').eq('id', sessionId).maybeSingle();
       openingCash = parseFloat(sess?.opening_cash || 0);
       totalSales  = parseFloat(sess?.total_sales  || 0);
+    } else {
+      // Date-range report: use opening_cash of the first session in the range
+      try {
+        let sessQ = db.from('cashier_sessions')
+          .select('opening_cash')
+          .eq('branch_id', branchId)
+          .order('opened_at', { ascending: true })
+          .limit(1);
+        if (dateFrom) sessQ = sessQ.gte('opened_at', dateFrom + 'T00:00:00+08:00');
+        if (dateTo)   sessQ = sessQ.lte('opened_at', dateTo   + 'T23:59:59+08:00');
+        const { data: sessions } = await sessQ;
+        if (sessions?.length) openingCash = parseFloat(sessions[0].opening_cash || 0);
+      } catch (e) {
+        console.warn('cashService.getSummary: fallback to opening log for opening cash', e);
+      }
     }
 
     try {
