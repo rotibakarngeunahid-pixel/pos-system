@@ -3587,7 +3587,7 @@ const ADMIN = {
 
       const { openingCash, salesIn, manualIn, manualOut, refundOut, voidOut, depositOut = 0, expectedCash } = summary;
       const totalMasuk  = salesIn + manualIn;
-      const totalKeluar = manualOut + refundOut + voidOut;
+      const totalKeluar = manualOut + refundOut + voidOut + depositOut;
       const isOk = expectedCash >= 0;
       const statusClass = isOk ? 'ok' : 'warn';
 
@@ -3630,7 +3630,7 @@ const ADMIN = {
         <div class="stat-card"><div class="stat-label">Kas Keluar Manual</div><div class="stat-value text-danger">−${fRp(manualOut)}</div></div>
         <div class="stat-card"><div class="stat-label">Refund</div><div class="stat-value text-danger">−${fRp(refundOut)}</div></div>
         ${voidOut > 0 ? `<div class="stat-card"><div class="stat-label">Void</div><div class="stat-value text-danger">−${fRp(voidOut)}</div></div>` : ''}
-        ${depositOut > 0 ? `<div class="stat-card"><div class="stat-label">Setoran Outlet</div><div class="stat-value text-danger">−${fRp(depositOut)}</div><div class="stat-hint">Di luar expected shift</div></div>` : ''}
+        ${depositOut > 0 ? `<div class="stat-card"><div class="stat-label">Setoran Outlet</div><div class="stat-value text-danger">−${fRp(depositOut)}</div></div>` : ''}
         <div class="stat-card stat-card-hero"><div class="stat-label">Saldo Ekspektasi</div><div class="stat-value">${fRp(expectedCash)}</div></div>`;
 
       // ── Show tabs & reset to first tab ────────────────────

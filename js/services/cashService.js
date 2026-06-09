@@ -215,14 +215,24 @@ const cashService = {
           .eq('session_id', sessionId)
           .eq('status', 'confirmed');
         if (!depErr) depositOut = sum(deps || []);
+      } else {
+        // Date-range: fetch confirmed deposits directly from cash_deposits (covers standard kasir flow
+        // which doesn't create cash_logs, unlike admin_create_manual_deposit which does)
+        let depQ = db.from('cash_deposits')
+          .select('amount')
+          .eq('branch_id', branchId)
+          .eq('status', 'confirmed');
+        if (dateFrom) depQ = depQ.gte('created_at', dateFrom + 'T00:00:00+08:00');
+        if (dateTo)   depQ = depQ.lte('created_at', dateTo   + 'T23:59:59+08:00');
+        const { data: deps, error: depErr } = await depQ;
+        if (!depErr) depositOut = sum(deps || []);
       }
     } catch (e) {
       console.warn('cashService.getSummary: fallback to cash_logs deposit total', e);
     }
 
-    // Setoran approved adalah mutasi saldo outlet setelah shift closed.
-    // Jangan kurangi expected cash shift lama dari setoran tersebut.
-    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut;
+    // Setoran yang sudah diapprove dihitung sebagai kas keluar (mengurangi saldo ekspektasi)
+    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut - depositOut;
 
     return {
       openingCash,
