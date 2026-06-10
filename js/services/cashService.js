@@ -231,8 +231,23 @@ const cashService = {
       console.warn('cashService.getSummary: fallback to cash_logs deposit total', e);
     }
 
-    // Setoran yang sudah diapprove dihitung sebagai kas keluar (mengurangi saldo ekspektasi)
-    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut - depositOut;
+    // Fetch authoritative branch balance — includes transfers, deposits, and session closes.
+    // Used as the definitive saldo in reports (formula can diverge due to transfers between branches).
+    let branchBalance = null;
+    if (!sessionId) {
+      try {
+        const { data: bal } = await db.from('branch_cash_balances')
+          .select('current_balance')
+          .eq('branch_id', branchId)
+          .maybeSingle();
+        if (bal != null) branchBalance = parseFloat(bal.current_balance || 0);
+      } catch (e) {
+        console.warn('cashService.getSummary: failed to fetch branch balance', e);
+      }
+    }
+
+    // Formula-based expected cash (operational view — excludes transfers between branches)
+    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut;
 
     return {
       openingCash,
@@ -245,6 +260,7 @@ const cashService = {
       voidOut,
       depositOut,
       expectedCash,
+      branchBalance,
       totalIn:  openingCash + salesIn + manualIn,
       totalOut: manualOut + refundOut + voidOut
     };

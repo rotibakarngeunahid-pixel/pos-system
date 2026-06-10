@@ -3585,10 +3585,11 @@ const ADMIN = {
         cashService.getLogs({ branchId: parseInt(branchId), dateFrom, dateTo, includeVoided: true })
       ]);
 
-      const { openingCash, salesIn, manualIn, manualOut, refundOut, voidOut, depositOut = 0, expectedCash } = summary;
+      const { openingCash, salesIn, manualIn, manualOut, refundOut, voidOut, depositOut = 0, expectedCash, branchBalance } = summary;
       const totalMasuk  = salesIn + manualIn;
-      const totalKeluar = manualOut + refundOut + voidOut + depositOut;
-      const isOk = expectedCash >= 0;
+      const totalKeluar = manualOut + refundOut + voidOut;
+      const saldo = branchBalance ?? expectedCash;
+      const isOk = saldo >= 0;
       const statusClass = isOk ? 'ok' : 'warn';
 
       // ── Balance card ───────────────────────────────────────
@@ -3597,7 +3598,7 @@ const ADMIN = {
           <div class="cbc-icon">${isOk ? '✅' : '⚠️'}</div>
           <div class="cbc-main">
             <div class="cbc-label">${isOk ? 'Saldo Kas Berjalan' : 'Perhatian — Saldo Minus'}</div>
-            <div class="cbc-amount ${statusClass}">${fRp(expectedCash)}</div>
+            <div class="cbc-amount ${statusClass}">${fRp(saldo)}</div>
           </div>
           <div class="cbc-formula">
             <div class="cbf-item">
@@ -3611,12 +3612,12 @@ const ADMIN = {
             </div>
             <div class="cbf-op">−</div>
             <div class="cbf-item">
-              <div class="cbf-val text-danger">−${fRp(totalKeluar)}</div>
+              <div class="cbf-val text-danger">−${fRp(totalKeluar + depositOut)}</div>
               <div class="cbf-lbl">Total Keluar</div>
             </div>
             <div class="cbf-op">=</div>
             <div class="cbf-item">
-              <div class="cbf-val fw-700 ${statusClass === 'ok' ? 'text-green' : 'text-danger'}" style="font-size:16px">${fRp(expectedCash)}</div>
+              <div class="cbf-val fw-700 ${statusClass === 'ok' ? 'text-green' : 'text-danger'}" style="font-size:16px">${fRp(saldo)}</div>
               <div class="cbf-lbl">Saldo</div>
             </div>
           </div>
@@ -3630,8 +3631,8 @@ const ADMIN = {
         <div class="stat-card"><div class="stat-label">Kas Keluar Manual</div><div class="stat-value text-danger">−${fRp(manualOut)}</div></div>
         <div class="stat-card"><div class="stat-label">Refund</div><div class="stat-value text-danger">−${fRp(refundOut)}</div></div>
         ${voidOut > 0 ? `<div class="stat-card"><div class="stat-label">Void</div><div class="stat-value text-danger">−${fRp(voidOut)}</div></div>` : ''}
-        ${depositOut > 0 ? `<div class="stat-card"><div class="stat-label">Setoran Outlet</div><div class="stat-value text-danger">−${fRp(depositOut)}</div></div>` : ''}
-        <div class="stat-card stat-card-hero"><div class="stat-label">Saldo Ekspektasi</div><div class="stat-value">${fRp(expectedCash)}</div></div>`;
+        ${depositOut > 0 ? `<div class="stat-card"><div class="stat-label">Setoran Outlet</div><div class="stat-value text-danger">−${fRp(depositOut)}</div><div class="stat-hint">Di luar expected shift</div></div>` : ''}
+        <div class="stat-card stat-card-hero"><div class="stat-label">Saldo Kas Aktual</div><div class="stat-value">${fRp(saldo)}</div></div>`;
 
       // ── Show tabs & reset to first tab ────────────────────
       if (tabsEl) {
