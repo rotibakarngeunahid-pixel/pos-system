@@ -3434,7 +3434,14 @@ function rpc_refund_transaction(array $p): mixed {
             }
         }
 
-        $amount = $refundAmount && $refundAmount > 0 ? $refundAmount : (float)$t['total'];
+        // Nominal refund TIDAK boleh melebihi total transaksi. Frontend sudah
+        // memvalidasi, tapi server adalah otoritas (lihat pola "hitung ulang dari DB"
+        // di rpc_process_transaction) — jangan percaya nilai dari klien.
+        // Tanpa cap ini, refund > total menyuntik kas keluar palsu ke laporan kas
+        // dan rekonsiliasi branch_cash_balances.
+        $txTotal = (float)$t['total'];
+        $amount  = ($refundAmount !== null && $refundAmount > 0) ? min($refundAmount, $txTotal) : $txTotal;
+        if ($amount <= 0) throw new Exception('Nominal refund tidak valid');
         $pdo->prepare("UPDATE transactions SET status='refunded' WHERE id=?")->execute([$txId]);
         $pdo->prepare("INSERT INTO refund_transactions (transaction_id,reason,amount,refunded_by) VALUES (?,?,?,?)")
             ->execute([$txId,$reason,$amount,$by]);
