@@ -212,6 +212,279 @@
     .deposit-incoming-from { font-size: 13px; color: var(--text-muted); }
     .deposit-incoming-actions { display: flex; gap: 8px; margin-top: 4px; }
     .deposit-incoming-proof { font-size: 12px; }
+
+    /* ═══════════════════════════════════════════════
+       PANDUAN OVERLAY
+    ═══════════════════════════════════════════════ */
+    .pos-guide-btn-text { display:none; }
+    @media(min-width:900px){ .pos-guide-btn-text { display:inline; } }
+
+    #guide-overlay {
+      position:fixed; inset:0; z-index:9990;
+      background:var(--bg); display:flex; flex-direction:column;
+      opacity:0; transform:translateY(10px);
+      transition:opacity .22s ease, transform .22s ease;
+      pointer-events:none;
+    }
+    #guide-overlay.guide-active { opacity:1; transform:translateY(0); pointer-events:auto; }
+
+    /* Top bar */
+    .gd-topbar {
+      height:52px; background:#0D1117; flex-shrink:0;
+      display:flex; align-items:center; padding:0 16px; gap:10px;
+    }
+    .gd-topbar-logo {
+      width:32px; height:32px; background:var(--primary);
+      border-radius:8px; display:flex; align-items:center; justify-content:center;
+      font-size:11px; font-weight:900; color:#fff; flex-shrink:0; letter-spacing:-.5px;
+    }
+    .gd-topbar-title { font-size:14px; font-weight:700; color:#fff; flex:1; }
+    .gd-topbar-close {
+      width:32px; height:32px; background:rgba(255,255,255,.1);
+      border:none; border-radius:8px; color:#fff; font-size:16px;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; flex-shrink:0; transition:background .14s;
+    }
+    .gd-topbar-close:hover { background:rgba(255,255,255,.22); }
+
+    /* Body */
+    .gd-body { flex:1; display:flex; overflow:hidden; }
+
+    /* Sidebar */
+    .gd-sidebar {
+      width:210px; flex-shrink:0;
+      background:var(--surface); border-right:1px solid var(--border);
+      overflow-y:auto; padding:8px 6px;
+    }
+    .gd-nav-sep {
+      font-size:10px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.06em; color:var(--text-muted); padding:12px 10px 4px;
+    }
+    .gd-nav-btn {
+      display:flex; align-items:center; gap:8px; width:100%;
+      padding:8px 10px; border-radius:8px; border:none; background:none;
+      text-align:left; font-size:13px; font-weight:500; color:var(--text-sub);
+      cursor:pointer; transition:background .13s, color .13s;
+    }
+    .gd-nav-btn:hover { background:var(--bg-alt); color:var(--text); }
+    .gd-nav-btn.gd-active { background:var(--danger-bg); color:var(--primary); font-weight:700; }
+    .gd-nav-btn svg { width:15px; height:15px; flex-shrink:0; }
+
+    /* Content */
+    .gd-content { flex:1; overflow-y:auto; padding:28px 32px; }
+
+    /* Sections */
+    .gd-sec { display:none; }
+    .gd-sec.gd-active { display:block; }
+
+    /* Typography */
+    .gd-h1 { font-size:22px; font-weight:800; color:var(--text); margin:0 0 4px; }
+    .gd-sub { font-size:14px; color:var(--text-muted); line-height:1.55; margin-bottom:22px; }
+    .gd-h2 { font-size:16px; font-weight:700; color:var(--text); margin:22px 0 10px; }
+    .gd-divider { border:none; border-top:1px solid var(--border); margin:22px 0; }
+
+    /* Steps */
+    .gd-steps { display:flex; flex-direction:column; gap:13px; margin:12px 0; }
+    .gd-step { display:flex; gap:12px; align-items:flex-start; }
+    .gd-step-n {
+      width:28px; height:28px; border-radius:50%;
+      background:var(--primary); color:#fff;
+      font-weight:800; font-size:13px;
+      display:flex; align-items:center; justify-content:center;
+      flex-shrink:0; margin-top:1px;
+    }
+    .gd-step-n.gd-icon { background:var(--bg-alt); color:var(--text); font-size:14px; }
+    .gd-step-body { flex:1; }
+    .gd-step-title { font-size:14px; font-weight:700; color:var(--text); margin-bottom:3px; }
+    .gd-step-desc { font-size:13px; color:var(--text-sub); line-height:1.6; }
+
+    /* Callouts */
+    .gd-tip  { background:#f0fdf4; border-left:3px solid var(--success); border-radius:0 8px 8px 0; padding:10px 14px; margin:12px 0; font-size:13px; color:#166534; line-height:1.5; }
+    .gd-warn { background:#fff7ed; border-left:3px solid var(--warning); border-radius:0 8px 8px 0; padding:10px 14px; margin:12px 0; font-size:13px; color:#9a3412; line-height:1.5; }
+    .gd-info { background:#eff6ff; border-left:3px solid var(--info);    border-radius:0 8px 8px 0; padding:10px 14px; margin:12px 0; font-size:13px; color:#1e40af; line-height:1.5; }
+
+    /* UI button replicas for inline text */
+    .gd-btn {
+      display:inline-block; padding:2px 9px; border-radius:5px;
+      font-size:11px; font-weight:700; border:1.5px solid;
+      vertical-align:middle; line-height:1.6;
+    }
+    .gd-btn-r { background:#fff1f1; border-color:#dc2626; color:#dc2626; }
+    .gd-btn-g { background:#f0fdf4; border-color:#16a34a; color:#16a34a; }
+    .gd-btn-k { background:#111827; border-color:#111827; color:#fff; }
+    .gd-btn-o { background:#f9fafb; border-color:#d1d5db; color:#374151; }
+
+    /* Feature grid (home) */
+    .gd-feat-grid {
+      display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr));
+      gap:10px; margin:16px 0;
+    }
+    .gd-feat-card {
+      background:var(--surface); border:1.5px solid var(--border);
+      border-radius:12px; padding:15px 12px; cursor:pointer; text-align:center;
+      transition:border-color .14s, box-shadow .14s;
+    }
+    .gd-feat-card:hover { border-color:var(--primary); box-shadow:var(--sh-sm); }
+    .gd-feat-icon {
+      width:42px; height:42px; border-radius:10px;
+      background:var(--danger-bg); color:var(--primary);
+      display:flex; align-items:center; justify-content:center;
+      margin:0 auto 9px; font-size:18px;
+    }
+    .gd-feat-title { font-size:13px; font-weight:700; color:var(--text); margin-bottom:2px; }
+    .gd-feat-sub   { font-size:11px; color:var(--text-muted); }
+
+    /* ── UI Mockup frames ─────────────────── */
+    .gd-mockup {
+      border:1.5px solid var(--border); border-radius:12px;
+      overflow:hidden; margin:14px 0; box-shadow:var(--sh-sm);
+      max-width:440px; background:#f8f8f8; font-family:var(--font);
+    }
+    .gd-mockup.gd-full { max-width:100%; }
+    /* mockup header bar */
+    .gm-bar {
+      background:#fff; border-bottom:1px solid #e5e7eb;
+      padding:7px 11px; display:flex; align-items:center; justify-content:space-between;
+    }
+    .gm-brand { display:flex; align-items:center; gap:6px; }
+    .gm-brand-dot { width:22px; height:22px; background:#dc2626; border-radius:6px; flex-shrink:0; }
+    .gm-brand-name { font-size:11px; font-weight:800; color:#111; line-height:1; }
+    .gm-brand-branch { font-size:9px; color:#6b7280; }
+    .gm-bar-btns { display:flex; gap:4px; }
+    .gm-bar-btn { padding:3px 7px; border-radius:5px; font-size:9px; font-weight:600; border:1px solid #e5e7eb; color:#6b7280; background:#fff; }
+    .gm-bar-btn.r { border-color:#dc2626; color:#dc2626; }
+    /* mockup tab row */
+    .gm-tabs { display:flex; background:#fff; border-bottom:1px solid #e5e7eb; }
+    .gm-tab { flex:1; padding:7px 2px; text-align:center; font-size:9px; font-weight:600; color:#6b7280; }
+    .gm-tab.a { color:#dc2626; border-bottom:2px solid #dc2626; }
+    /* mockup body */
+    .gm-body { background:#f8f8f8; padding:8px; }
+    .gm-search {
+      background:#fff; border:1.5px solid #e5e7eb; border-radius:7px;
+      padding:5px 9px; margin-bottom:7px; font-size:9px; color:#9ca3af;
+      display:flex; align-items:center; gap:5px;
+    }
+    /* product grid */
+    .gm-pgrid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; }
+    .gm-pcard { background:#fff; border-radius:7px; border:1px solid #e5e7eb; overflow:hidden; }
+    .gm-pcard-img {
+      width:100%; aspect-ratio:4/3;
+      display:flex; align-items:center; justify-content:center;
+      font-size:18px; color:#9ca3af;
+    }
+    .gm-pcard-body { padding:4px 5px 6px; }
+    .gm-pcard-name  { font-size:7px; font-weight:700; color:#111; margin-bottom:2px; }
+    .gm-pcard-price { font-size:7px; font-weight:800; color:#dc2626; }
+    /* FAB */
+    .gm-fab {
+      background:#111827; border-radius:9px; padding:8px 11px; margin-top:7px;
+      display:flex; justify-content:space-between; align-items:center; color:#fff;
+    }
+    .gm-fab-total-l { font-size:8px; opacity:.7; }
+    .gm-fab-total-v { font-size:12px; font-weight:800; }
+    .gm-fab-btn {
+      display:flex; align-items:center; gap:4px;
+      background:rgba(255,255,255,.15); border-radius:6px; padding:4px 8px;
+      font-size:9px; font-weight:700;
+    }
+    .gm-fab-badge {
+      background:#dc2626; border-radius:50%; width:15px; height:15px;
+      font-size:8px; font-weight:800; display:flex; align-items:center; justify-content:center;
+    }
+    /* cart items */
+    .gm-cart-items { padding:7px 7px 0; }
+    .gm-ci {
+      background:#fff; border-radius:7px; border:1px solid #e5e7eb;
+      padding:6px 8px; display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:5px;
+    }
+    .gm-ci-name  { font-size:9px; font-weight:700; color:#111; }
+    .gm-ci-price { font-size:8px; color:#dc2626; font-weight:700; }
+    .gm-ci-qty   { display:flex; align-items:center; gap:4px; font-size:9px; font-weight:700; }
+    .gm-ci-qb    { width:15px; height:15px; border-radius:50%; border:1px solid #e5e7eb; background:#f3f4f6; display:flex; align-items:center; justify-content:center; font-size:10px; }
+    /* cart footer */
+    .gm-cfooter { background:#fff; border-top:1px solid #e5e7eb; padding:9px 11px; }
+    .gm-ctotal  { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; }
+    .gm-ctotal-l { font-size:9px; font-weight:700; color:#6b7280; text-transform:uppercase; }
+    .gm-ctotal-v { font-size:14px; font-weight:900; color:#111; }
+    .gm-checkout { width:100%; padding:9px; background:#111827; color:#fff; border-radius:7px; text-align:center; font-size:10px; font-weight:700; }
+    /* payment modal */
+    .gm-pay-box { background:#fff; border-radius:10px; border:1.5px solid var(--border); padding:13px; max-width:320px; margin:14px 0; }
+    .gm-pay-methods { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin:10px 0; }
+    .gm-pay-method { border:1.5px solid #e5e7eb; border-radius:8px; padding:8px 4px; text-align:center; }
+    .gm-pay-method.a { border-color:#dc2626; background:#fff1f1; }
+    .gm-pay-icon { font-size:18px; margin-bottom:3px; }
+    .gm-pay-name { font-size:8px; font-weight:700; color:#111; }
+    .gm-pay-confirm { width:100%; padding:9px; background:#16a34a; color:#fff; border-radius:8px; text-align:center; font-size:11px; font-weight:700; }
+    /* member card */
+    .gm-member-card {
+      background:linear-gradient(135deg,#dc2626,#991b1b);
+      border-radius:10px; padding:14px; color:#fff; max-width:300px; margin:10px 0;
+    }
+    .gm-mc-name  { font-size:13px; font-weight:800; margin-bottom:2px; }
+    .gm-mc-id    { font-size:9px; opacity:.75; margin-bottom:8px; }
+    .gm-mc-pts   { font-size:22px; font-weight:900; }
+    .gm-mc-ptsl  { font-size:9px; opacity:.75; }
+    /* stock grid */
+    .gm-sgrid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+    .gm-si { background:#fff; border:1px solid #e5e7eb; border-radius:7px; padding:8px 9px; }
+    .gm-si-n { font-size:9px; font-weight:700; color:#111; margin-bottom:2px; }
+    .gm-si-v { font-size:12px; font-weight:800; }
+    .gm-si-u { font-size:8px; color:#6b7280; }
+    .gm-si-bar  { height:3px; border-radius:2px; background:#e5e7eb; margin-top:5px; }
+    .gm-si-fill { height:100%; border-radius:2px; background:#16a34a; }
+    .gm-si-fill.lo { background:#dc2626; }
+    /* cash card */
+    .gm-cash-card {
+      background:linear-gradient(135deg,#dc2626,#991b1b);
+      border-radius:10px; padding:16px; color:#fff; max-width:320px; margin:10px 0;
+    }
+    .gm-cash-l { font-size:10px; opacity:.8; margin-bottom:3px; }
+    .gm-cash-v { font-size:22px; font-weight:900; margin-bottom:2px; }
+    .gm-cash-s { font-size:10px; opacity:.7; }
+
+    /* Deposit method cards */
+    .gd-deposit-methods { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:12px 0 16px; }
+    .gd-dep-card { border:1.5px solid var(--border); border-radius:10px; padding:12px 8px; text-align:center; }
+    .gd-dep-icon { font-size:22px; margin-bottom:6px; }
+    .gd-dep-name { font-size:11px; font-weight:700; color:var(--text); }
+    .gd-dep-sub  { font-size:10px; color:var(--text-muted); margin-top:2px; }
+
+    /* Summary stat mockup */
+    .gm-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+    .gm-stat { background:#fff; border-radius:8px; border:1px solid #e5e7eb; padding:9px 11px; }
+    .gm-stat-l { font-size:9px; color:#6b7280; margin-bottom:3px; }
+    .gm-stat-v { font-size:15px; font-weight:900; color:#111; }
+
+    /* Mobile nav */
+    .gd-mob-nav {
+      display:none; background:var(--surface);
+      border-top:1px solid var(--border); flex-shrink:0; padding:6px 8px;
+    }
+    .gd-mob-tabs {
+      display:flex; gap:4px; overflow-x:auto;
+      scrollbar-width:none; -webkit-overflow-scrolling:touch;
+    }
+    .gd-mob-tabs::-webkit-scrollbar { display:none; }
+    .gd-mob-tab {
+      padding:7px 12px; border-radius:20px; border:none;
+      font-size:12px; font-weight:600; white-space:nowrap;
+      background:var(--bg-alt); color:var(--text-sub);
+      cursor:pointer; transition:background .13s, color .13s; flex-shrink:0;
+    }
+    .gd-mob-tab.gd-active { background:var(--danger-bg); color:var(--primary); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .gd-sidebar { display:none; }
+      .gd-mob-nav { display:block; }
+      .gd-content { padding:16px 14px; }
+      .gd-feat-grid { grid-template-columns:1fr 1fr; }
+      .gd-deposit-methods { grid-template-columns:1fr 1fr 1fr; }
+    }
+    @media (max-width: 400px) {
+      .gd-deposit-methods { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body class="pos-page">
@@ -242,6 +515,10 @@
       <button class="btn btn-outline btn-sm" data-action="open-close-shift" style="color:var(--danger);border-color:var(--danger);margin-left:8px;">
         <i data-lucide="clock" class="icon-sm"></i>
         <span>Tutup Shift</span>
+      </button>
+      <button class="btn btn-ghost btn-sm" id="guide-open-btn" title="Panduan Penggunaan" style="gap:4px;">
+        <i data-lucide="book-open" class="icon-sm"></i>
+        <span class="pos-guide-btn-text">Panduan</span>
       </button>
       <button class="btn btn-ghost btn-sm" data-action="confirm-logout">Keluar</button>
     </div>
@@ -1577,5 +1854,826 @@
   <script src="js/onboarding.js?v=20260517-manual-deposit-2"></script>
   <script src="js/memberUi.js"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       PANDUAN PENGGUNAAN — Overlay full-screen
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="guide-overlay">
+
+    <!-- Top bar -->
+    <div class="gd-topbar">
+      <div class="gd-topbar-logo">RBN</div>
+      <span class="gd-topbar-title">Panduan Penggunaan Sistem POS</span>
+      <button class="gd-topbar-close" id="guide-close-btn" title="Tutup Panduan">✕</button>
+    </div>
+
+    <!-- Body: sidebar + content -->
+    <div class="gd-body">
+
+      <!-- ── Sidebar (desktop/tablet) ── -->
+      <nav class="gd-sidebar">
+        <div class="gd-nav-sep">Mulai dari sini</div>
+        <button class="gd-nav-btn gd-active" data-gdsec="beranda">
+          <i data-lucide="home"></i> Beranda
+        </button>
+        <button class="gd-nav-btn" data-gdsec="login">
+          <i data-lucide="log-in"></i> Login &amp; Shift
+        </button>
+
+        <div class="gd-nav-sep">Untuk Kasir</div>
+        <button class="gd-nav-btn" data-gdsec="kasir">
+          <i data-lucide="shopping-bag"></i> Jual Produk
+        </button>
+        <button class="gd-nav-btn" data-gdsec="bayar">
+          <i data-lucide="credit-card"></i> Proses Pembayaran
+        </button>
+        <button class="gd-nav-btn" data-gdsec="member">
+          <i data-lucide="users"></i> Member &amp; Poin
+        </button>
+        <button class="gd-nav-btn" data-gdsec="stok">
+          <i data-lucide="package"></i> Stok &amp; Inventori
+        </button>
+        <button class="gd-nav-btn" data-gdsec="kas">
+          <i data-lucide="banknote"></i> Kas &amp; Setoran
+        </button>
+        <button class="gd-nav-btn" data-gdsec="laporan">
+          <i data-lucide="bar-chart-2"></i> Ringkasan
+        </button>
+      </nav>
+
+      <!-- ── Content area ── -->
+      <main class="gd-content" id="gd-content">
+
+        <!-- ═══ BERANDA ═══ -->
+        <section class="gd-sec gd-active" id="gd-sec-beranda">
+          <h1 class="gd-h1">Selamat Datang di Panduan RBN POS 👋</h1>
+          <p class="gd-sub">Panduan lengkap penggunaan sistem Point of Sale Roti Bakar Ngeunah. Pilih topik di bawah untuk mulai belajar — atau gunakan menu di sebelah kiri layar.</p>
+
+          <div class="gd-feat-grid">
+            <div class="gd-feat-card" onclick="gdGoTo('login')">
+              <div class="gd-feat-icon">🔑</div>
+              <div class="gd-feat-title">Login &amp; Shift</div>
+              <div class="gd-feat-sub">Cara masuk &amp; buka/tutup shift</div>
+            </div>
+            <div class="gd-feat-card" onclick="gdGoTo('kasir')">
+              <div class="gd-feat-icon">🛒</div>
+              <div class="gd-feat-title">Jual Produk</div>
+              <div class="gd-feat-sub">Pilih produk &amp; kelola keranjang</div>
+            </div>
+            <div class="gd-feat-card" onclick="gdGoTo('bayar')">
+              <div class="gd-feat-icon">💳</div>
+              <div class="gd-feat-title">Pembayaran</div>
+              <div class="gd-feat-sub">Cash, QRIS, &amp; Transfer</div>
+            </div>
+            <div class="gd-feat-card" onclick="gdGoTo('member')">
+              <div class="gd-feat-icon">👤</div>
+              <div class="gd-feat-title">Member &amp; Poin</div>
+              <div class="gd-feat-sub">Scan member &amp; tukar poin</div>
+            </div>
+            <div class="gd-feat-card" onclick="gdGoTo('stok')">
+              <div class="gd-feat-icon">📦</div>
+              <div class="gd-feat-title">Stok Bahan Baku</div>
+              <div class="gd-feat-sub">Kelola &amp; transfer stok</div>
+            </div>
+            <div class="gd-feat-card" onclick="gdGoTo('kas')">
+              <div class="gd-feat-icon">💰</div>
+              <div class="gd-feat-title">Kas &amp; Setoran</div>
+              <div class="gd-feat-sub">Saldo kas &amp; setor uang</div>
+            </div>
+            <div class="gd-feat-card" onclick="gdGoTo('laporan')">
+              <div class="gd-feat-icon">📊</div>
+              <div class="gd-feat-title">Ringkasan</div>
+              <div class="gd-feat-sub">Laporan penjualan harian</div>
+            </div>
+          </div>
+
+          <div class="gd-info" style="margin-top:20px;">
+            💡 <strong>Tips navigasi:</strong> Di tablet/komputer, klik menu di sebelah kiri. Di HP, geser tab di bagian bawah layar untuk pindah topik.
+          </div>
+        </section>
+
+        <!-- ═══ LOGIN & SHIFT ═══ -->
+        <section class="gd-sec" id="gd-sec-login">
+          <h1 class="gd-h1">Login &amp; Shift</h1>
+          <p class="gd-sub">Sebelum mulai bekerja, Anda harus login dan membuka shift. Shift mencatat semua transaksi selama Anda bertugas.</p>
+
+          <h2 class="gd-h2">Cara Login</h2>
+          <div class="gd-steps">
+            <div class="gd-step">
+              <div class="gd-step-n">1</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Buka browser &amp; akses halaman POS</div>
+                <div class="gd-step-desc">Buka Chrome atau Safari di tablet/HP. Ketik alamat sistem POS yang diberikan oleh admin.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">2</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Masukkan username &amp; password</div>
+                <div class="gd-step-desc">Ketik username (biasanya nama Anda) dan password yang diberikan admin saat pertama bekerja.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">3</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Klik tombol <span class="gd-btn gd-btn-r">Masuk</span></div>
+                <div class="gd-step-desc">Sistem akan langsung membawa Anda ke halaman POS sesuai peran Anda (kasir atau admin).</div>
+              </div>
+            </div>
+          </div>
+          <div class="gd-warn">⚠️ <strong>Jangan bagikan password</strong> ke orang lain. Setiap transaksi tercatat atas nama pengguna yang login.</div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Buka Shift</h2>
+          <p style="font-size:13px;color:var(--text-sub);margin-bottom:12px;">Shift harus dibuka sebelum bisa melayani pelanggan. Jika shift belum dibuka, tombol Kasir tidak bisa digunakan.</p>
+
+          <!-- Open shift mockup -->
+          <div class="gd-mockup" style="max-width:300px;">
+            <div style="background:#fff;padding:18px;text-align:center;">
+              <div style="font-size:32px;margin-bottom:8px;">🕐</div>
+              <div style="font-size:14px;font-weight:800;color:#111;margin-bottom:3px;">Buka Shift Baru</div>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:14px;">Kasir: <strong>Ahmad</strong> · Outlet Utama</div>
+              <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:11px;margin-bottom:12px;text-align:left;">
+                <div style="font-size:10px;color:#6b7280;margin-bottom:3px;text-transform:uppercase;font-weight:700;">Kas Awal</div>
+                <div style="font-size:22px;font-weight:900;color:#111;">Rp 200.000</div>
+                <div style="font-size:10px;color:#6b7280;margin-top:2px;">Siapkan uang ini di laci sebelum mulai</div>
+              </div>
+              <div style="background:#dc2626;color:#fff;border-radius:8px;padding:10px;font-size:12px;font-weight:700;">✓ Konfirmasi &amp; Buka Shift</div>
+            </div>
+          </div>
+
+          <div class="gd-steps">
+            <div class="gd-step">
+              <div class="gd-step-n">1</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Saat pertama login, sistem otomatis meminta buka shift</div>
+                <div class="gd-step-desc">Jika shift belum ada, pop-up Buka Shift muncul otomatis. Anda juga bisa klik tombol <span class="gd-btn gd-btn-r">Buka Shift</span> di banner atas.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">2</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Cek jumlah kas awal &amp; siapkan uangnya</div>
+                <div class="gd-step-desc">Sistem menampilkan jumlah uang yang harus ada di laci kas. Siapkan uang fisik tersebut terlebih dahulu.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">3</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Klik <span class="gd-btn gd-btn-r">Konfirmasi &amp; Buka Shift</span></div>
+                <div class="gd-step-desc">Shift langsung terbuka. Tab Kasir aktif dan Anda siap melayani pelanggan.</div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Tutup Shift</h2>
+          <div class="gd-steps">
+            <div class="gd-step">
+              <div class="gd-step-n">1</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Klik <span class="gd-btn gd-btn-r">⏰ Tutup Shift</span> di pojok kanan atas</div>
+                <div class="gd-step-desc">Tombol ini selalu terlihat di bagian atas halaman. Klik saat jam kerja Anda sudah selesai.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">2</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Hitung uang di laci &amp; masukkan jumlahnya</div>
+                <div class="gd-step-desc">Hitung semua uang tunai yang ada. Masukkan total ke kolom "Kas Aktual Akhir Shift" di form tutup shift.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">3</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Klik <span class="gd-btn gd-btn-r">Tutup Shift</span></div>
+                <div class="gd-step-desc">Semua data shift tersimpan otomatis. Sistem akan mengarahkan ke halaman Setoran.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">4</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Lakukan setoran uang (jika perlu)</div>
+                <div class="gd-step-desc">Setor uang hasil penjualan ke bank atau titipkan ke outlet lain. Lihat bagian <button class="gd-btn gd-btn-o" onclick="gdGoTo('kas')">Kas &amp; Setoran</button> untuk panduan lengkap.</div>
+              </div>
+            </div>
+          </div>
+          <div class="gd-warn">⚠️ <strong>Wajib tutup shift</strong> sebelum pulang! Data yang tidak ditutup bisa menyebabkan selisih di laporan keuangan.</div>
+        </section>
+
+        <!-- ═══ KASIR ═══ -->
+        <section class="gd-sec" id="gd-sec-kasir">
+          <h1 class="gd-h1">Kasir — Jual Produk</h1>
+          <p class="gd-sub">Tab Kasir adalah tempat utama untuk melayani pelanggan dan memproses penjualan.</p>
+
+          <!-- Kasir screen mockup -->
+          <div class="gd-mockup gd-full">
+            <div class="gm-bar">
+              <div class="gm-brand">
+                <div class="gm-brand-dot"></div>
+                <div>
+                  <div class="gm-brand-name">Roti Bakar Ngeunah</div>
+                  <div class="gm-brand-branch">Outlet Utama · Ahmad</div>
+                </div>
+              </div>
+              <div class="gm-bar-btns">
+                <div class="gm-bar-btn">🖨️</div>
+                <div class="gm-bar-btn">Ahmad</div>
+                <div class="gm-bar-btn r">⏰ Tutup Shift</div>
+                <div class="gm-bar-btn">📖 Panduan</div>
+                <div class="gm-bar-btn">Keluar</div>
+              </div>
+            </div>
+            <div class="gm-tabs">
+              <div class="gm-tab a">🛒 Kasir</div>
+              <div class="gm-tab">📊 Ringkasan</div>
+              <div class="gm-tab">📋 Transaksi</div>
+              <div class="gm-tab">📦 Stok</div>
+              <div class="gm-tab">💵 Kas</div>
+              <div class="gm-tab">💳 Setoran</div>
+            </div>
+            <div class="gm-body">
+              <div class="gm-search">🔍 Cari produk... &nbsp;<span style="background:#f3f4f6;border-radius:4px;padding:2px 6px;font-size:8px;margin-left:auto;">Semua Kategori ▾</span></div>
+              <div class="gm-pgrid">
+                <div class="gm-pcard">
+                  <div class="gm-pcard-img" style="background:#fff8f0;">🍞</div>
+                  <div class="gm-pcard-body">
+                    <div class="gm-pcard-name">Roti Bakar Original</div>
+                    <div class="gm-pcard-price">Rp 12.000</div>
+                  </div>
+                </div>
+                <div class="gm-pcard">
+                  <div class="gm-pcard-img" style="background:#fff0f3;">🍫</div>
+                  <div class="gm-pcard-body">
+                    <div class="gm-pcard-name">Roti Bakar Coklat</div>
+                    <div class="gm-pcard-price">Rp 15.000</div>
+                  </div>
+                </div>
+                <div class="gm-pcard">
+                  <div class="gm-pcard-img" style="background:#f0fff4;">🧀</div>
+                  <div class="gm-pcard-body">
+                    <div class="gm-pcard-name">Roti Bakar Keju</div>
+                    <div class="gm-pcard-price">Rp 16.000</div>
+                  </div>
+                </div>
+              </div>
+              <div class="gm-fab">
+                <div>
+                  <div class="gm-fab-total-l">Total Belanja</div>
+                  <div class="gm-fab-total-v">Rp 27.000</div>
+                </div>
+                <div class="gm-fab-btn">
+                  🛒 Keranjang <div class="gm-fab-badge">2</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <h2 class="gd-h2">Cara Memilih Produk</h2>
+          <div class="gd-steps">
+            <div class="gd-step">
+              <div class="gd-step-n">1</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Cari atau scroll untuk menemukan produk</div>
+                <div class="gd-step-desc">Gunakan kotak pencarian 🔍 di bagian atas untuk mengetik nama produk. Atau tap kategori (misal: "Minuman", "Roti") untuk filter produk berdasarkan jenisnya.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">2</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Tap kartu produk untuk menambah ke keranjang</div>
+                <div class="gd-step-desc">Cukup tap/klik produk yang diinginkan. Produk langsung masuk keranjang. Jika ada <strong>varian</strong> (misal: ukuran S/M/L) atau <strong>topping</strong>, pilihan akan muncul dulu.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">3</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Lihat total di tombol Keranjang (bawah)</div>
+                <div class="gd-step-desc">Setiap kali produk ditambah, total dan jumlah item diperbarui di tombol hitam di bagian bawah layar.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n">4</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Tap tombol Keranjang untuk lanjut ke checkout</div>
+                <div class="gd-step-desc">Klik tombol <span class="gd-btn gd-btn-k">🛒 Keranjang</span> untuk membuka halaman keranjang dan melanjutkan ke pembayaran.</div>
+              </div>
+            </div>
+          </div>
+          <div class="gd-tip">💡 <strong>Tip:</strong> Tidak perlu scroll terlalu jauh — gunakan kolom pencarian dan filter kategori untuk menemukan produk dengan cepat.</div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Mengelola Keranjang Belanja</h2>
+
+          <!-- Cart mockup -->
+          <div class="gd-mockup" style="max-width:380px;">
+            <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 11px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-size:11px;font-weight:700;color:#111;display:flex;align-items:center;gap:7px;">
+                ← Kembali
+                <span>Keranjang <span style="background:#dc2626;color:#fff;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;">2</span></span>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:3px 6px;color:#6b7280;">⏸ Tahan</div>
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:3px 6px;color:#6b7280;">📚</div>
+                <div style="font-size:9px;color:#dc2626;padding:3px 6px;font-weight:700;">Hapus</div>
+              </div>
+            </div>
+            <div class="gm-cart-items">
+              <div class="gm-ci">
+                <div>
+                  <div class="gm-ci-name">Roti Bakar Original</div>
+                  <div class="gm-ci-price">Rp 12.000</div>
+                </div>
+                <div class="gm-ci-qty">
+                  <div class="gm-ci-qb">−</div><span>1</span><div class="gm-ci-qb">+</div>
+                </div>
+              </div>
+              <div class="gm-ci">
+                <div>
+                  <div class="gm-ci-name">Roti Bakar Coklat</div>
+                  <div class="gm-ci-price">Rp 15.000</div>
+                </div>
+                <div class="gm-ci-qty">
+                  <div class="gm-ci-qb">−</div><span>1</span><div class="gm-ci-qb">+</div>
+                </div>
+              </div>
+            </div>
+            <div class="gm-cfooter">
+              <div class="gm-ctotal">
+                <span class="gm-ctotal-l">Total</span>
+                <span class="gm-ctotal-v">Rp 27.000</span>
+              </div>
+              <div class="gm-checkout">Bayar Sekarang →</div>
+            </div>
+          </div>
+
+          <div class="gd-steps">
+            <div class="gd-step">
+              <div class="gd-step-n gd-icon">±</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Ubah jumlah item</div>
+                <div class="gd-step-desc">Tap tombol <strong>−</strong> atau <strong>+</strong> di sebelah kanan item. Jika dikurangi hingga 0, item otomatis terhapus dari keranjang.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n gd-icon">%</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Tambah diskon</div>
+                <div class="gd-step-desc">Tap nama item untuk membuka opsi diskon — bisa diskon persen (%) atau nominal (Rp). Diskon total keranjang ada di bagian bawah form checkout.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n gd-icon">⏸</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Tahan keranjang — untuk melayani pelanggan lain</div>
+                <div class="gd-step-desc">Jika ada pelanggan lain yang harus dilayani lebih dulu, tap <span class="gd-btn gd-btn-o">⏸ Tahan</span>. Pesanan disimpan sementara. Tap ikon <strong>📚</strong> kapan saja untuk mengambilnya kembali. Bisa menahan hingga 5 keranjang sekaligus.</div>
+              </div>
+            </div>
+          </div>
+          <div class="gd-info">ℹ️ <strong>Fitur Hold Keranjang</strong> sangat berguna saat antrian ramai. Tidak perlu input ulang — tinggal ambil keranjang yang sudah ditahan.</div>
+        </section>
+
+        <!-- ═══ PEMBAYARAN ═══ -->
+        <section class="gd-sec" id="gd-sec-bayar">
+          <h1 class="gd-h1">Proses Pembayaran</h1>
+          <p class="gd-sub">Sistem mendukung tiga metode pembayaran: Tunai (Cash), QRIS, dan Transfer Bank.</p>
+
+          <!-- Payment mockup -->
+          <div class="gm-pay-box">
+            <div style="font-size:13px;font-weight:800;color:#111;margin-bottom:3px;">💳 Pembayaran</div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:10px;">Total: <strong style="color:#111;font-size:15px;">Rp 27.000</strong></div>
+            <div class="gm-pay-methods">
+              <div class="gm-pay-method a">
+                <div class="gm-pay-icon">💵</div>
+                <div class="gm-pay-name" style="color:#dc2626;">Tunai</div>
+              </div>
+              <div class="gm-pay-method">
+                <div class="gm-pay-icon">📱</div>
+                <div class="gm-pay-name">QRIS</div>
+              </div>
+              <div class="gm-pay-method">
+                <div class="gm-pay-icon">🏦</div>
+                <div class="gm-pay-name">Transfer</div>
+              </div>
+            </div>
+            <div style="margin-bottom:7px;">
+              <div style="font-size:9px;font-weight:700;color:#6b7280;margin-bottom:3px;">JUMLAH DITERIMA</div>
+              <div style="background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:7px;padding:8px 11px;font-size:15px;font-weight:900;color:#111;">Rp 30.000</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px;">
+              <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:6px;text-align:center;font-size:9px;font-weight:700;">+5.000</div>
+              <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:6px;text-align:center;font-size:9px;font-weight:700;">+10.000</div>
+              <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:6px;text-align:center;font-size:9px;font-weight:700;">+50.000</div>
+            </div>
+            <div class="gm-pay-confirm">✓ Proses Pembayaran — Kembalian Rp 3.000</div>
+          </div>
+
+          <h2 class="gd-h2">💵 Bayar Tunai</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pilih metode <span class="gd-btn gd-btn-r">💵 Tunai</span></div>
+              <div class="gd-step-desc">Tap pilihan Tunai di bagian atas modal pembayaran.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Masukkan jumlah uang yang diterima dari pelanggan</div>
+              <div class="gd-step-desc">Ketik nominalnya, atau tap tombol cepat (+5.000, +10.000, +50.000, dst.) untuk input lebih cepat. Sistem otomatis menghitung kembalian.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Klik <span class="gd-btn gd-btn-g">✓ Proses Pembayaran</span> &amp; berikan kembalian</div>
+              <div class="gd-step-desc">Kembalian muncul di tombol hijau. Berikan uang kembalian tersebut kepada pelanggan. Struk bisa dicetak otomatis jika printer sudah terhubung.</div></div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">📱 Bayar QRIS</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pilih <span class="gd-btn gd-btn-o">📱 QRIS</span></div>
+              <div class="gd-step-desc">Tap pilihan QRIS di modal pembayaran.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Perlihatkan QR code toko ke pelanggan</div>
+              <div class="gd-step-desc">Arahkan pelanggan untuk scan QR code menggunakan GoPay, OVO, Dana, ShopeePay, atau aplikasi bank manapun.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tunggu notifikasi masuk, lalu konfirmasi</div>
+              <div class="gd-step-desc">Setelah muncul notifikasi pembayaran masuk di HP Anda, klik <span class="gd-btn gd-btn-g">✓ Konfirmasi</span>.</div></div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">🏦 Bayar Transfer Bank</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pilih <span class="gd-btn gd-btn-o">🏦 Transfer</span></div>
+              <div class="gd-step-desc">Detail nomor rekening toko akan tampil.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Berikan nomor rekening kepada pelanggan</div>
+              <div class="gd-step-desc">Pelanggan mentransfer sesuai nominal total belanja.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Konfirmasi setelah transfer masuk</div>
+              <div class="gd-step-desc">Pastikan transfer sudah masuk, lalu klik <span class="gd-btn gd-btn-g">✓ Konfirmasi</span>.</div></div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">🔁 Void / Batalkan Transaksi</h2>
+          <p style="font-size:13px;color:var(--text-sub);margin-bottom:12px;">Digunakan jika transaksi perlu dibatalkan setelah selesai — misalnya karena salah input atau pelanggan batal.</p>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Buka tab <span class="gd-btn gd-btn-o">📋 Transaksi</span></div>
+              <div class="gd-step-desc">Klik tab Transaksi di bar atas.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Temukan transaksi yang ingin dibatalkan &amp; tap</div>
+              <div class="gd-step-desc">Daftar transaksi shift aktif ditampilkan. Tap transaksi untuk melihat detailnya.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Klik tombol <span class="gd-btn gd-btn-r">Void</span> &amp; konfirmasi</div>
+              <div class="gd-step-desc">Sistem meminta konfirmasi. Void tidak bisa dibatalkan dan selalu tercatat di log untuk diaudit admin.</div></div>
+            </div>
+          </div>
+          <div class="gd-warn">⚠️ <strong>Void permanen</strong> — tidak bisa di-undo. Pastikan benar-benar perlu sebelum melakukan void.</div>
+        </section>
+
+        <!-- ═══ MEMBER & POIN ═══ -->
+        <section class="gd-sec" id="gd-sec-member">
+          <h1 class="gd-h1">Member &amp; Poin</h1>
+          <p class="gd-sub">Pelanggan setia bisa daftar jadi Member untuk mengumpulkan poin dari setiap pembelian, lalu tukar poin dengan reward menarik.</p>
+
+          <!-- Member card mockup -->
+          <div class="gm-member-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <div class="gm-mc-name">Budi Santoso</div>
+                <div class="gm-mc-id">MBR-00123 · Member sejak Jan 2025</div>
+              </div>
+              <div style="font-size:9px;background:rgba(255,255,255,.2);padding:3px 8px;border-radius:20px;font-weight:700;">Gold</div>
+            </div>
+            <div style="margin-top:12px;">
+              <div class="gm-mc-ptsl">POIN AKTIF</div>
+              <div class="gm-mc-pts">1.250 pts</div>
+            </div>
+          </div>
+
+          <h2 class="gd-h2">Cara Menambah Member ke Transaksi</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Buka keranjang, tap area "Tambah Member"</div>
+              <div class="gd-step-desc">Di halaman keranjang (sebelum checkout), ada panel "Member" di bagian bawah. Tap di area tersebut untuk menambahkan member.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Scan QR code dari aplikasi member pelanggan</div>
+              <div class="gd-step-desc">Minta pelanggan membuka aplikasi RBN Member di HP mereka dan tampilkan QR code mereka. Scan menggunakan kamera, atau ketik nomor member secara manual.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Data member langsung muncul</div>
+              <div class="gd-step-desc">Nama, level, dan poin aktif member tampil. Poin dari transaksi ini otomatis ditambahkan setelah pembayaran berhasil.</div></div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Cara Gunakan Reward (Tukar Poin)</h2>
+          <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Pelanggan bisa klaim reward di aplikasi member mereka, lalu gunakan kode klaim di POS untuk mendapat diskon.</p>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pelanggan klaim reward di aplikasi member mereka</div>
+              <div class="gd-step-desc">Pelanggan buka aplikasi RBN Member → pilih reward yang diinginkan → tap "Klaim". Mereka mendapat <strong>kode klaim 8 karakter</strong> (contoh: <code>ABCD1234</code>).</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Di keranjang, tap <span class="gd-btn gd-btn-r">🎁 Gunakan Reward</span></div>
+              <div class="gd-step-desc">Tombol ini muncul setelah member berhasil ditambahkan ke keranjang.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Masukkan kode klaim (8 huruf/angka)</div>
+              <div class="gd-step-desc">Ketik kode yang diberikan pelanggan (semua huruf besar), lalu tap <span class="gd-btn gd-btn-o">Validasi</span>.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">4</div>
+              <div class="gd-step-body"><div class="gd-step-title">Diskon reward langsung diterapkan</div>
+              <div class="gd-step-desc">Setelah validasi sukses, diskon otomatis dikurangkan dari total. Kode klaim tidak bisa digunakan dua kali.</div></div>
+            </div>
+          </div>
+          <div class="gd-tip">✅ <strong>Ingat:</strong> Poin baru aktif setelah 1 hari (T+1). Poin dari belanja hari ini baru bisa digunakan besok.</div>
+          <div class="gd-info">ℹ️ Jika pelanggan belum punya akun member, mereka bisa daftar di aplikasi <strong>RBN Member</strong> yang bisa diakses lewat HP.</div>
+        </section>
+
+        <!-- ═══ STOK ═══ -->
+        <section class="gd-sec" id="gd-sec-stok">
+          <h1 class="gd-h1">Stok &amp; Inventori</h1>
+          <p class="gd-sub">Tab Stok digunakan untuk memantau stok bahan baku, mencatat pemakaian, dan mengirim/menerima bahan antar outlet.</p>
+
+          <!-- Stock mockup -->
+          <div class="gd-mockup" style="max-width:400px;">
+            <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 11px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:5px;">
+              <div style="font-size:12px;font-weight:800;color:#111;">📦 Stok Bahan Baku</div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                <div style="font-size:9px;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-weight:700;">📤 Kirim Stok</div>
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:4px 7px;color:#6b7280;position:relative;">📥 Terima Stok<span style="position:absolute;top:-5px;right:-5px;background:#dc2626;color:#fff;border-radius:50%;width:14px;height:14px;font-size:8px;display:flex;align-items:center;justify-content:center;font-weight:800;">2</span></div>
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:4px 7px;color:#6b7280;">📉 Stok Keluar</div>
+              </div>
+            </div>
+            <div style="padding:8px;background:#f8f8f8;">
+              <div class="gm-sgrid">
+                <div class="gm-si">
+                  <div class="gm-si-n">🍞 Roti Tawar</div>
+                  <div style="display:flex;align-items:baseline;gap:3px;"><span class="gm-si-v">15</span><span class="gm-si-u">bungkus</span></div>
+                  <div class="gm-si-bar"><div class="gm-si-fill" style="width:75%"></div></div>
+                </div>
+                <div class="gm-si">
+                  <div class="gm-si-n">🍫 Coklat Meises</div>
+                  <div style="display:flex;align-items:baseline;gap:3px;"><span class="gm-si-v" style="color:#dc2626;">3</span><span class="gm-si-u">kg</span></div>
+                  <div class="gm-si-bar"><div class="gm-si-fill lo" style="width:15%"></div></div>
+                </div>
+                <div class="gm-si">
+                  <div class="gm-si-n">🧈 Margarin</div>
+                  <div style="display:flex;align-items:baseline;gap:3px;"><span class="gm-si-v">8</span><span class="gm-si-u">kg</span></div>
+                  <div class="gm-si-bar"><div class="gm-si-fill" style="width:40%"></div></div>
+                </div>
+                <div class="gm-si">
+                  <div class="gm-si-n">🧀 Keju</div>
+                  <div style="display:flex;align-items:baseline;gap:3px;"><span class="gm-si-v">6</span><span class="gm-si-u">blok</span></div>
+                  <div class="gm-si-bar"><div class="gm-si-fill" style="width:30%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="gd-info">ℹ️ Angka stok yang <strong style="color:#dc2626;">merah</strong> artinya bahan hampir habis — segera minta kiriman dari pusat atau outlet lain!</div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Catat Stok Keluar (Bahan Dipakai / Rusak)</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tap tombol <span class="gd-btn gd-btn-o">📉 Stok Keluar</span></div>
+              <div class="gd-step-desc">Ada di pojok kanan atas tab Stok.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pilih bahan &amp; masukkan jumlah yang dikeluarkan</div>
+              <div class="gd-step-desc">Pilih nama bahan dari daftar, masukkan jumlah, dan pilih alasan (Rusak / Hilang / Sampel / Lainnya).</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tap <span class="gd-btn gd-btn-g">Simpan</span></div>
+              <div class="gd-step-desc">Stok berkurang dan perubahan tercatat di log inventori yang bisa dilihat admin.</div></div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Kirim Stok ke Outlet Lain</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tap <span class="gd-btn gd-btn-r">📤 Kirim Stok</span></div>
+              <div class="gd-step-desc">Di tab Stok, klik tombol Kirim Stok.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pilih outlet tujuan, bahan, &amp; jumlah</div>
+              <div class="gd-step-desc">Pilih outlet yang akan menerima, lalu pilih jenis bahan dan berapa jumlah yang dikirim.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tap <span class="gd-btn gd-btn-r">Kirim</span></div>
+              <div class="gd-step-desc">Outlet tujuan akan mendapat notifikasi. Stok Anda baru berkurang setelah mereka konfirmasi penerimaan.</div></div>
+            </div>
+          </div>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Terima Stok dari Outlet Lain</h2>
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Lihat angka merah di tombol <span class="gd-btn gd-btn-o">📥 Terima Stok</span></div>
+              <div class="gd-step-desc">Angka merah menandakan ada kiriman stok yang menunggu konfirmasi dari Anda.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Periksa detail kiriman &amp; pastikan barang sudah tiba</div>
+              <div class="gd-step-desc">Tap tombol tersebut, cek jenis bahan dan jumlahnya. Cocokkan dengan barang fisik yang datang.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tap <span class="gd-btn gd-btn-g">✓ Konfirmasi Terima</span></div>
+              <div class="gd-step-desc">Stok Anda otomatis bertambah sejumlah yang dikonfirmasi.</div></div>
+            </div>
+          </div>
+          <div class="gd-warn">⚠️ <strong>Jangan konfirmasi</strong> sebelum barang fisik benar-benar sudah ada di tangan. Hubungi pengirim jika ada selisih jumlah.</div>
+        </section>
+
+        <!-- ═══ KAS & SETORAN ═══ -->
+        <section class="gd-sec" id="gd-sec-kas">
+          <h1 class="gd-h1">Kas &amp; Setoran</h1>
+          <p class="gd-sub">Tab Kas menampilkan saldo kas terkini di outlet Anda. Tab Setoran digunakan untuk menyetor uang tunai hasil penjualan.</p>
+
+          <!-- Cash balance mockup -->
+          <div class="gm-cash-card">
+            <div class="gm-cash-l">SALDO KAS OUTLET</div>
+            <div class="gm-cash-v">Rp 1.250.000</div>
+            <div class="gm-cash-s">Outlet Utama · Per hari ini</div>
+          </div>
+
+          <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">Angka ini adalah saldo kas yang seharusnya ada di laci berdasarkan perhitungan sistem (kas awal + penjualan tunai − pengeluaran).</p>
+
+          <hr class="gd-divider">
+          <h2 class="gd-h2">Cara Melakukan Setoran</h2>
+          <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Setoran adalah menyetor uang tunai hasil penjualan ke rekening bank perusahaan atau menitipkan ke outlet lain.</p>
+
+          <div class="gd-deposit-methods">
+            <div class="gd-dep-card">
+              <div class="gd-dep-icon">🏦</div>
+              <div class="gd-dep-name">Transfer Bank</div>
+              <div class="gd-dep-sub">Setor ke rek. perusahaan</div>
+            </div>
+            <div class="gd-dep-card">
+              <div class="gd-dep-icon">📱</div>
+              <div class="gd-dep-name">QRIS</div>
+              <div class="gd-dep-sub">Transfer via QRIS</div>
+            </div>
+            <div class="gd-dep-card">
+              <div class="gd-dep-icon">🏪</div>
+              <div class="gd-dep-name">Ke Outlet Lain</div>
+              <div class="gd-dep-sub">Titip ke outlet pusat</div>
+            </div>
+          </div>
+
+          <div class="gd-steps">
+            <div class="gd-step"><div class="gd-step-n">1</div>
+              <div class="gd-step-body"><div class="gd-step-title">Buka tab <span class="gd-btn gd-btn-o">💳 Setoran</span></div>
+              <div class="gd-step-desc">Tap tab Setoran di bar atas. Atau sistem otomatis mengarahkan ke sini setelah shift ditutup.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">2</div>
+              <div class="gd-step-body"><div class="gd-step-title">Pilih metode setoran</div>
+              <div class="gd-step-desc">Pilih salah satu dari tiga cara: Transfer Bank, QRIS, atau ke Outlet Lain.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Masukkan jumlah yang akan disetor</div>
+              <div class="gd-step-desc">Ketik nominal atau tap tombol cepat. Jumlah tidak boleh melebihi saldo kas aktual.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">4</div>
+              <div class="gd-step-body"><div class="gd-step-title">Foto &amp; upload bukti setoran</div>
+              <div class="gd-step-desc">Ambil foto struk transfer atau screenshot notifikasi QRIS. Tap area upload atau seret foto ke kotak yang tersedia.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">5</div>
+              <div class="gd-step-body"><div class="gd-step-title">Tap <span class="gd-btn gd-btn-r">Kirim Setoran</span></div>
+              <div class="gd-step-desc">Admin akan memverifikasi setoran berdasarkan bukti yang dikirim. Status setoran bisa dipantau di riwayat setoran.</div></div>
+            </div>
+          </div>
+          <div class="gd-tip">✅ Lakukan setoran <strong>setelah shift ditutup</strong>. Sistem otomatis mengarahkan ke halaman setoran setelah tutup shift.</div>
+          <div class="gd-info">ℹ️ Jika muncul pesan "Mode Setoran" dan tab lain terkunci, itu artinya Anda perlu menyelesaikan setoran atau membuka shift baru terlebih dahulu.</div>
+        </section>
+
+        <!-- ═══ RINGKASAN ═══ -->
+        <section class="gd-sec" id="gd-sec-laporan">
+          <h1 class="gd-h1">Ringkasan Penjualan</h1>
+          <p class="gd-sub">Tab Ringkasan menampilkan rekap penjualan outlet Anda — total pendapatan, jumlah transaksi, dan rincian per metode bayar.</p>
+
+          <!-- Summary mockup -->
+          <div class="gd-mockup gd-full">
+            <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 11px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+              <div style="font-size:12px;font-weight:800;color:#111;">📊 Ringkasan Penjualan</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:3px 7px;color:#6b7280;">📅 2026-06-12</div>
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:3px 7px;color:#6b7280;">Semua Metode ▾</div>
+                <div style="font-size:9px;border:1px solid #e5e7eb;border-radius:5px;padding:3px 7px;color:#6b7280;">🔄</div>
+              </div>
+            </div>
+            <div style="padding:10px;background:#f8f8f8;">
+              <div class="gm-stat-grid">
+                <div class="gm-stat">
+                  <div class="gm-stat-l">TOTAL PENJUALAN</div>
+                  <div class="gm-stat-v">Rp 1.250.000</div>
+                </div>
+                <div class="gm-stat">
+                  <div class="gm-stat-l">JUMLAH TRANSAKSI</div>
+                  <div class="gm-stat-v">47</div>
+                </div>
+                <div class="gm-stat">
+                  <div class="gm-stat-l">TUNAI</div>
+                  <div class="gm-stat-v" style="color:#16a34a;">Rp 780.000</div>
+                </div>
+                <div class="gm-stat">
+                  <div class="gm-stat-l">QRIS / TRANSFER</div>
+                  <div class="gm-stat-v" style="color:#2563eb;">Rp 470.000</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <h2 class="gd-h2">Cara Membaca Ringkasan</h2>
+          <div class="gd-steps">
+            <div class="gd-step">
+              <div class="gd-step-n gd-icon">📅</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Ganti tanggal untuk lihat hari lain</div>
+                <div class="gd-step-desc">Secara default menampilkan data hari ini. Tap kolom tanggal untuk memilih tanggal lain.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n gd-icon">💳</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Filter metode pembayaran</div>
+                <div class="gd-step-desc">Tap dropdown "Semua Metode" untuk melihat hanya Tunai, QRIS, atau Transfer saja.</div>
+              </div>
+            </div>
+            <div class="gd-step">
+              <div class="gd-step-n gd-icon">🔄</div>
+              <div class="gd-step-body">
+                <div class="gd-step-title">Tap tombol refresh untuk update data</div>
+                <div class="gd-step-desc">Data diperbarui setiap kali Anda membuka tab ini, atau tap 🔄 untuk memuat ulang secara manual.</div>
+              </div>
+            </div>
+          </div>
+          <div class="gd-info">ℹ️ <strong>Laporan lebih lengkap</strong> (per produk, per staff, export Excel) tersedia di halaman Admin → Laporan. Hubungi admin Anda untuk akses.</div>
+        </section>
+
+      </main><!-- /.gd-content -->
+    </div><!-- /.gd-body -->
+
+    <!-- Mobile bottom tabs -->
+    <div class="gd-mob-nav">
+      <div class="gd-mob-tabs">
+        <button class="gd-mob-tab gd-active" data-gdsec="beranda">🏠 Beranda</button>
+        <button class="gd-mob-tab" data-gdsec="login">🔑 Login &amp; Shift</button>
+        <button class="gd-mob-tab" data-gdsec="kasir">🛒 Jual Produk</button>
+        <button class="gd-mob-tab" data-gdsec="bayar">💳 Pembayaran</button>
+        <button class="gd-mob-tab" data-gdsec="member">👤 Member</button>
+        <button class="gd-mob-tab" data-gdsec="stok">📦 Stok</button>
+        <button class="gd-mob-tab" data-gdsec="kas">💰 Kas &amp; Setoran</button>
+        <button class="gd-mob-tab" data-gdsec="laporan">📊 Ringkasan</button>
+      </div>
+    </div>
+  </div><!-- /#guide-overlay -->
+
+  <script>
+  (function(){
+    var overlay  = document.getElementById('guide-overlay');
+    var openBtn  = document.getElementById('guide-open-btn');
+    var closeBtn = document.getElementById('guide-close-btn');
+    var content  = document.getElementById('gd-content');
+
+    function gdOpen(){
+      overlay.classList.add('guide-active');
+      if(window.lucide) lucide.createIcons({ nodes: overlay.querySelectorAll('[data-lucide]') });
+    }
+    function gdClose(){
+      overlay.classList.remove('guide-active');
+    }
+    openBtn.addEventListener('click', gdOpen);
+    closeBtn.addEventListener('click', gdClose);
+    overlay.addEventListener('keydown', function(e){ if(e.key==='Escape') gdClose(); });
+    if(location.search.indexOf('panduan=1')!==-1) gdOpen();
+
+    function gdGoTo(sec){
+      var sections = overlay.querySelectorAll('.gd-sec');
+      var navBtns  = overlay.querySelectorAll('[data-gdsec]');
+      sections.forEach(function(s){ s.classList.remove('gd-active'); });
+      navBtns.forEach(function(b){ b.classList.remove('gd-active'); });
+      var target = document.getElementById('gd-sec-'+sec);
+      if(target) target.classList.add('gd-active');
+      navBtns.forEach(function(b){ if(b.dataset.gdsec===sec) b.classList.add('gd-active'); });
+      if(content) content.scrollTop = 0;
+    }
+    window.gdGoTo = gdGoTo;
+
+    overlay.addEventListener('click', function(e){
+      var btn = e.target.closest('[data-gdsec]');
+      if(btn) gdGoTo(btn.dataset.gdsec);
+    });
+  })();
+  </script>
 </body>
 </html>
