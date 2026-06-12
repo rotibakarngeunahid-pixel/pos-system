@@ -5,7 +5,7 @@
 const inventoryService = {
 
   // ── Core: adjust stock + write log (ATOMIC) ──────────────────
-  async adjustStock({ branchId, ingredientId, qty, type, referenceType, referenceId, notes, createdBy }) {
+  async adjustStock({ branchId, ingredientId, qty, type, referenceType, referenceId, notes, createdBy, reason, evidencePhotoUrl, chronology }) {
     const { data, error } = await db.rpc('adjust_stock_atomic', {
       p_branch_id: branchId,
       p_ingredient_id: ingredientId,
@@ -14,7 +14,10 @@ const inventoryService = {
       p_reference_type: referenceType || null,
       p_reference_id: referenceId || null,
       p_notes: notes || null,
-      p_user_id: createdBy || null
+      p_user_id: createdBy || null,
+      p_reason: reason || null,
+      p_evidence_photo_url: evidencePhotoUrl || null,
+      p_chronology: chronology || null
     });
     if (error) throw new Error(error.message || 'Penyesuaian stok gagal di server');
     return { stockBefore: data.stock_before, stockAfter: data.stock_after };

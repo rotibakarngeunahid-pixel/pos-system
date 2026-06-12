@@ -1333,10 +1333,44 @@
             min="0.01" step="0.01" inputmode="decimal" />
         </div>
         <div class="form-group" style="margin:0;">
-          <label class="form-label">Alasan / Keterangan *</label>
-          <input type="text" class="form-control" id="stock-adj-notes"
-            placeholder="Contoh: Rusak, expire, terpakai operasional..." />
-          <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Wajib diisi.</div>
+          <label class="form-label">Alasan Stok Keluar *</label>
+          <select class="form-control" id="stock-adj-reason" data-action-change="stock-adj-reason-change">
+            <option value="">— Pilih Alasan —</option>
+            <option value="roti_berjamur">Roti Berjamur (rusak / tidak layak jual)</option>
+            <option value="roti_hilang">Roti Hilang (tidak ditemukan / selisih stok)</option>
+          </select>
+          <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Hanya 2 alasan ini yang diizinkan.</div>
+        </div>
+
+        <!-- Roti Berjamur: foto bukti wajib dari kamera (bukan galeri) -->
+        <div class="form-group" id="stock-adj-photo-section" style="margin:0;display:none;">
+          <label class="form-label">Foto Bukti (Kamera Langsung) *</label>
+          <div style="position:relative;border-radius:var(--r-sm);overflow:hidden;background:#000;">
+            <video id="stock-adj-camera-video" autoplay playsinline muted
+              style="display:block;width:100%;max-height:240px;object-fit:cover;"></video>
+            <img id="stock-adj-photo-preview" alt="Preview foto bukti"
+              style="display:none;width:100%;max-height:240px;object-fit:contain;background:#000;" />
+          </div>
+          <div id="stock-adj-camera-error" style="display:none;margin-top:6px;font-size:11px;color:var(--danger);"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button type="button" class="btn btn-outline btn-sm" id="btn-capture-stock-photo" data-action="capture-stock-photo" style="flex:1;">
+              <i data-lucide="camera" class="icon-sm"></i> Ambil Foto
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-retake-stock-photo" data-action="retake-stock-photo" style="flex:1;display:none;">
+              <i data-lucide="refresh-ccw" class="icon-sm"></i> Ulangi Foto
+            </button>
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">
+            Foto wajib diambil langsung dari kamera saat ini juga. Tidak bisa memilih dari galeri.
+          </div>
+        </div>
+
+        <!-- Roti Hilang: kronologi kejadian wajib -->
+        <div class="form-group" id="stock-adj-chronology-section" style="margin:0;display:none;">
+          <label class="form-label">Kronologi Kejadian *</label>
+          <textarea class="form-control" id="stock-adj-chronology" rows="4"
+            placeholder="Jelaskan kronologi kejadian secara lengkap: kapan terakhir stok terlihat, siapa yang bertugas, apa yang terjadi..."></textarea>
+          <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Wajib diisi minimal 10 karakter.</div>
         </div>
       </div>
       <div class="modal-footer">
@@ -2450,11 +2484,15 @@
             </div>
             <div class="gd-step"><div class="gd-step-n">2</div>
               <div class="gd-step-body"><div class="gd-step-title">Pilih bahan &amp; masukkan jumlah yang dikeluarkan</div>
-              <div class="gd-step-desc">Pilih nama bahan dari daftar, masukkan jumlah, dan pilih alasan (Rusak / Hilang / Sampel / Lainnya).</div></div>
+              <div class="gd-step-desc">Pilih nama bahan dari daftar, masukkan jumlah, lalu pilih alasan: <strong>Roti Berjamur</strong> atau <strong>Roti Hilang</strong>. Hanya 2 alasan ini yang diizinkan.</div></div>
             </div>
             <div class="gd-step"><div class="gd-step-n">3</div>
+              <div class="gd-step-body"><div class="gd-step-title">Lengkapi bukti sesuai alasan</div>
+              <div class="gd-step-desc"><strong>Roti Berjamur:</strong> wajib ambil foto langsung dari kamera (tidak bisa dari galeri). <strong>Roti Hilang:</strong> wajib tulis kronologi kejadian secara lengkap.</div></div>
+            </div>
+            <div class="gd-step"><div class="gd-step-n">4</div>
               <div class="gd-step-body"><div class="gd-step-title">Tap <span class="gd-btn gd-btn-g">Simpan</span></div>
-              <div class="gd-step-desc">Stok berkurang dan perubahan tercatat di log inventori yang bisa dilihat admin.</div></div>
+              <div class="gd-step-desc">Stok berkurang dan perubahan beserta foto/kronologi tercatat di log inventori yang bisa dilihat admin.</div></div>
             </div>
           </div>
 

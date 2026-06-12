@@ -2267,7 +2267,7 @@ const ADMIN = {
     const branchId = document.getElementById('inv-log-branch-filter').value;
     const type     = document.getElementById('inv-log-type-filter')?.value || '';
     const tbody    = document.getElementById('inv-log-body');
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-td">Memuat...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Memuat...</td></tr>';
 
     let q = db.from('inventory_logs')
       .select('*, ingredients(name, unit), branches(name), users!created_by(name)')
@@ -2278,11 +2278,31 @@ const ADMIN = {
     const { data } = await q;
     const typeLabel = { in:'Masuk', out:'Keluar', opname:'Opname', transfer_in:'Transfer Masuk', transfer_out:'Transfer Keluar' };
     const typeBadge = { in:'badge-green', out:'badge-red', opname:'badge-orange', transfer_in:'badge-green', transfer_out:'badge-orange' };
+    const reasonLabel = { roti_berjamur:'Roti Berjamur', roti_hilang:'Roti Hilang' };
 
     tbody.innerHTML = data?.length ? data.map(log => {
       const qty = parseFloat(log.quantity ?? 0);
       const qtyStr = qty > 0 ? '+' + qty : String(qty);
       const noteStr = log.note || log.reference_type || '—';
+
+      // Bukti stok keluar staff: foto (roti berjamur) atau kronologi (roti hilang)
+      let evidenceHtml = '—';
+      const isSafePhotoUrl = typeof log.evidence_photo_url === 'string' && /^https?:\/\//i.test(log.evidence_photo_url);
+      if (log.reason === 'roti_berjamur' && isSafePhotoUrl) {
+        evidenceHtml = `
+          <div class="text-xs"><span class="badge badge-red" style="font-size:10px;">${reasonLabel[log.reason]}</span></div>
+          <a href="${escHtml(log.evidence_photo_url)}" target="_blank" rel="noopener" title="Klik untuk lihat foto ukuran penuh">
+            <img src="${escHtml(log.evidence_photo_url)}" alt="Foto bukti roti berjamur" loading="lazy"
+              style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border);margin-top:4px;display:block;" />
+          </a>`;
+      } else if (log.reason === 'roti_hilang' && log.chronology) {
+        evidenceHtml = `
+          <div class="text-xs"><span class="badge badge-orange" style="font-size:10px;">${reasonLabel[log.reason]}</span></div>
+          <div class="text-xs" style="max-width:220px;white-space:pre-wrap;word-break:break-word;margin-top:4px;" title="Kronologi kejadian">${escHtml(log.chronology)}</div>`;
+      } else if (reasonLabel[log.reason]) {
+        evidenceHtml = `<span class="badge badge-orange" style="font-size:10px;">${reasonLabel[log.reason]}</span>`;
+      }
+
       return `<tr>
         <td class="nowrap text-xs">${fDate(log.created_at)}</td>
         <td>${escHtml(log.branches?.name||'—')}</td>
@@ -2292,8 +2312,9 @@ const ADMIN = {
         <td>${parseFloat(log.stock_before??0)} → ${parseFloat(log.stock_after??0)}</td>
         <td>${escHtml(log.users?.name||'Sistem')}</td>
         <td class="text-xs text-muted">${escHtml(noteStr)}</td>
+        <td>${evidenceHtml}</td>
       </tr>`;}).join('')
-    : `<tr><td colspan="8" class="empty-td">Belum ada log inventori</td></tr>`;
+    : `<tr><td colspan="9" class="empty-td">Belum ada log inventori</td></tr>`;
   },
 
   // ── Staff ─────────────────────────────────────────────────────

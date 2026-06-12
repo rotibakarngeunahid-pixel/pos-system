@@ -149,6 +149,8 @@ const POS = {
         case 'print-receipt': window.print(); break;
         case 'open-stock-adjust-modal': POS.openStockAdjustModal(); break;
         case 'submit-stock-adjust': POS.submitStockAdjust(); break;
+        case 'capture-stock-photo': POS.captureStockPhoto(); break;
+        case 'retake-stock-photo': POS.retakeStockPhoto(); break;
         case 'open-send-transfer-modal': POS.openSendTransferModal(); break;
         case 'submit-send-transfer': POS.submitSendTransfer(); break;
         case 'add-transfer-item': POS.addTransferItem(); break;
@@ -182,6 +184,7 @@ const POS = {
       else if (action === 'save-printer-settings') POS.savePrinterSettings();
       else if (action === 'toggle-discount-input') POS.toggleDiscountInput();
       else if (action === 'ingredient-log-filter-change') POS.loadIngredientLogData(false);
+      else if (action === 'stock-adj-reason-change') POS.onStockReasonChange();
     });
     document.addEventListener('input', e => {
       const inputNode = e.target.closest('[data-action-input]');
@@ -216,6 +219,11 @@ const POS = {
         POS.loadBranchCashPosition();
         // loadOpenShiftDeposit dihapus — setoran kini via Startup Choice → tab Setoran
       }
+    });
+
+    // Matikan kamera stok keluar saat modal ditutup (✕ / Batal / sukses)
+    window.addEventListener('rbn:modal:closed', e => {
+      if (e.detail?.id === 'modal-stock-adjust') POS._stopStockCamera();
     });
     // shift-open-dep-account / shift-open-dep-proof listeners dihapus (section deposit di modal-shift sudah dinonaktifkan)
 
@@ -2224,7 +2232,9 @@ const POS = {
     container.insertAdjacentHTML('beforeend', rows.join(''));
   },
 
-  // ── Stok Keluar Staff (hanya out, catatan wajib) ─────────────
+  // ── Stok Keluar Staff (hanya out, alasan dibatasi 2 opsi) ────
+  // 'roti_berjamur' → wajib foto realtime dari kamera perangkat
+  // 'roti_hilang'   → wajib kronologi kejadian tertulis
   async openStockAdjustModal() {
     if (!this.branch) return;
     const invRes = await db.from('branch_inventory')
@@ -2248,40 +2258,204 @@ const POS = {
       .map(i => `<option value="${i.id}">${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`)
       .join('');
 
-    document.getElementById('stock-adj-qty').value   = '';
-    document.getElementById('stock-adj-notes').value = '';
+    document.getElementById('stock-adj-qty').value = '';
+    const reasonSel = document.getElementById('stock-adj-reason');
+    if (reasonSel) reasonSel.value = '';
+    const chronEl = document.getElementById('stock-adj-chronology');
+    if (chronEl) chronEl.value = '';
+    this._resetStockEvidence();
+    this.onStockReasonChange();
     openModal('modal-stock-adjust');
+  },
+
+  onStockReasonChange() {
+    const reason     = document.getElementById('stock-adj-reason')?.value || '';
+    const photoSec   = document.getElementById('stock-adj-photo-section');
+    const chronSec   = document.getElementById('stock-adj-chronology-section');
+    if (photoSec) photoSec.style.display = reason === 'roti_berjamur' ? '' : 'none';
+    if (chronSec) chronSec.style.display = reason === 'roti_hilang'   ? '' : 'none';
+
+    if (reason === 'roti_berjamur') {
+      if (!this._stockPhotoBlob) this._startStockCamera();
+    } else {
+      this._stopStockCamera();
+      if (reason === '') this._resetStockEvidence();
+    }
+    if (window.lucide) lucide.createIcons();
+  },
+
+  _resetStockEvidence() {
+    this._stockPhotoBlob = null;
+    const preview = document.getElementById('stock-adj-photo-preview');
+    const video   = document.getElementById('stock-adj-camera-video');
+    const btnCap  = document.getElementById('btn-capture-stock-photo');
+    const btnRe   = document.getElementById('btn-retake-stock-photo');
+    if (preview) {
+      if (preview.src?.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+      preview.style.display = 'none';
+      preview.removeAttribute('src');
+    }
+    if (video)   video.style.display = '';
+    if (btnCap)  btnCap.style.display = '';
+    if (btnRe)   btnRe.style.display = 'none';
+  },
+
+  async _startStockCamera() {
+    const video = document.getElementById('stock-adj-camera-video');
+    const errEl = document.getElementById('stock-adj-camera-error');
+    if (!video) return;
+    if (errEl) errEl.style.display = 'none';
+
+    if (this._stockCameraStream) return; // sudah aktif
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      if (errEl) {
+        errEl.textContent = 'Perangkat / browser ini tidak mendukung akses kamera. Foto bukti wajib — gunakan perangkat dengan kamera.';
+        errEl.style.display = '';
+      }
+      return;
+    }
+
+    try {
+      this._stockCameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+      video.srcObject = this._stockCameraStream;
+      await video.play().catch(() => {});
+    } catch (e) {
+      this._stockCameraStream = null;
+      if (errEl) {
+        errEl.textContent = 'Akses kamera ditolak / gagal. Izinkan akses kamera lalu pilih ulang alasan "Roti Berjamur".';
+        errEl.style.display = '';
+      }
+      console.warn('[POS] Stock camera failed:', e.message);
+    }
+  },
+
+  _stopStockCamera() {
+    if (this._stockCameraStream) {
+      this._stockCameraStream.getTracks().forEach(t => t.stop());
+      this._stockCameraStream = null;
+    }
+    const video = document.getElementById('stock-adj-camera-video');
+    if (video) video.srcObject = null;
+  },
+
+  captureStockPhoto() {
+    const video = document.getElementById('stock-adj-camera-video');
+    if (!video || !this._stockCameraStream || !video.videoWidth) {
+      showToast('Kamera belum siap. Izinkan akses kamera terlebih dahulu.', 'error');
+      this._startStockCamera();
+      return;
+    }
+
+    // Resize ke maks 1280px agar ukuran file aman (< 5MB)
+    const maxDim = 1280;
+    const scale  = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.round(video.videoWidth  * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(blob => {
+      if (!blob) { showToast('Gagal mengambil foto. Coba lagi.', 'error'); return; }
+      this._stockPhotoBlob = blob;
+
+      const preview = document.getElementById('stock-adj-photo-preview');
+      const btnCap  = document.getElementById('btn-capture-stock-photo');
+      const btnRe   = document.getElementById('btn-retake-stock-photo');
+      if (preview) { preview.src = URL.createObjectURL(blob); preview.style.display = ''; }
+      video.style.display = 'none';
+      if (btnCap) btnCap.style.display = 'none';
+      if (btnRe)  { btnRe.style.display = ''; if (window.lucide) lucide.createIcons(); }
+
+      this._stopStockCamera();
+    }, 'image/jpeg', 0.85);
+  },
+
+  retakeStockPhoto() {
+    this._resetStockEvidence();
+    this._startStockCamera();
+    if (window.lucide) lucide.createIcons();
+  },
+
+  async _uploadStockPhoto(blob) {
+    const fd = new FormData();
+    fd.append('file', new File([blob], 'stok_keluar.jpg', { type: 'image/jpeg' }));
+    fd.append('folder', 'stok_keluar');
+
+    const uploadUrl    = API_BASE.replace('/api.php', '/upload.php');
+    const sessionToken = typeof getRbnSessionToken === 'function' ? getRbnSessionToken() : '';
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'X-API-Key': API_KEY,
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+      },
+      body: fd
+    });
+
+    let result;
+    try { result = await res.json(); }
+    catch { throw new Error('Upload foto gagal: respons server tidak valid (HTTP ' + res.status + ')'); }
+
+    if (!res.ok || result.error || !result.url) {
+      throw new Error('Upload foto gagal: ' + (result.error || 'HTTP ' + res.status));
+    }
+    return result.url;
   },
 
   async submitStockAdjust() {
     const ingredientId = parseInt(document.getElementById('stock-adj-ingredient').value);
     const qty          = safeNum(document.getElementById('stock-adj-qty').value, 'Jumlah');
-    const notes        = (document.getElementById('stock-adj-notes').value || '').trim();
+    const reason       = document.getElementById('stock-adj-reason')?.value || '';
+    const chronology   = (document.getElementById('stock-adj-chronology')?.value || '').trim();
 
     if (!ingredientId || !qty || qty <= 0) {
       showToast('Pilih bahan baku dan isi jumlah dengan benar', 'error');
       return;
     }
-    if (!notes || notes.length < 3) {
-      showToast('Alasan / keterangan wajib diisi (minimal 3 karakter)', 'error');
+    if (reason !== 'roti_berjamur' && reason !== 'roti_hilang') {
+      showToast('Pilih alasan stok keluar: Roti Berjamur atau Roti Hilang', 'error');
+      return;
+    }
+    if (reason === 'roti_berjamur' && !this._stockPhotoBlob) {
+      showToast('Foto bukti wajib diambil langsung dari kamera untuk roti berjamur', 'error');
+      return;
+    }
+    if (reason === 'roti_hilang' && chronology.length < 10) {
+      showToast('Kronologi kejadian wajib diisi (minimal 10 karakter)', 'error');
       return;
     }
 
+    const reasonLabel = reason === 'roti_berjamur' ? 'Roti berjamur' : 'Roti hilang';
     const btn = document.getElementById('btn-submit-stock-adj');
     if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
 
     try {
+      let evidencePhotoUrl = null;
+      if (reason === 'roti_berjamur') {
+        if (btn) btn.textContent = 'Mengupload foto...';
+        evidencePhotoUrl = await this._uploadStockPhoto(this._stockPhotoBlob);
+        if (btn) btn.textContent = 'Menyimpan...';
+      }
+
       await inventoryService.adjustStock({
         branchId:      this.branch.id,
         ingredientId,
         qty,
         type:          'out',
         referenceType: 'stok_keluar_staff',
-        notes,
+        notes:         reasonLabel,
+        reason,
+        evidencePhotoUrl,
+        chronology:    reason === 'roti_hilang' ? chronology : null,
         createdBy:     this.user.id
       });
       showToast('Stok keluar berhasil dicatat', 'success');
       closeModal('modal-stock-adjust');
+      this._resetStockEvidence();
       this.loadInventorySummary();
       this.refreshStockCache();
     } catch(e) {

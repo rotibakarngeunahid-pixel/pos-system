@@ -3492,6 +3492,9 @@ function rpc_adjust_stock_atomic(array $p): mixed {
     $createdBy    = ($p['p_user_id'] ?? $p['p_created_by'] ?? null) ? (int)($p['p_user_id'] ?? $p['p_created_by']) : null;
     $referenceType = $p['p_reference_type'] ?? null;
     $referenceId   = $p['p_reference_id'] ?? null;
+    $reason           = trim((string)($p['p_reason'] ?? ''));
+    $evidencePhotoUrl = trim((string)($p['p_evidence_photo_url'] ?? ''));
+    $chronology       = trim((string)($p['p_chronology'] ?? ''));
 
     // ── Validasi role ──────────────────────────────────────────────────────────
     $authUser = $p['_auth_user'] ?? null;
@@ -3506,6 +3509,42 @@ function rpc_adjust_stock_atomic(array $p): mixed {
         }
         if (empty(trim((string)($note ?? '')))) {
             denyHttp(400, 'Alasan stok keluar wajib diisi', 'NOTES_REQUIRED');
+        }
+
+        // Jalur koreksi pemakaian bahan saat checkout (BOM deduction) — bukan
+        // input stok keluar manual, jadi dikecualikan dari kewajiban alasan.
+        // Diverifikasi: transaksi harus benar-benar ada di cabang ini & baru dibuat.
+        $isTrxCorrection = false;
+        if ($referenceType === 'transaction' && $referenceId) {
+            $trxChk = $pdo->prepare("SELECT 1 FROM transactions WHERE id=? AND branch_id=? AND created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR) LIMIT 1");
+            $trxChk->execute([(int)$referenceId, $branchId]);
+            $isTrxCorrection = (bool)$trxChk->fetch();
+        }
+
+        if (!$isTrxCorrection) {
+            // Stok keluar manual staff: hanya 2 alasan yang diizinkan,
+            // masing-masing dengan bukti wajib.
+            if (!in_array($reason, ['roti_berjamur', 'roti_hilang'], true)) {
+                denyHttp(400, 'Alasan stok keluar hanya boleh "Roti Berjamur" atau "Roti Hilang"', 'STOCK_OUT_REASON_INVALID');
+            }
+            if ($reason === 'roti_berjamur') {
+                if ($evidencePhotoUrl === ''
+                    || strlen($evidencePhotoUrl) > 500
+                    || !preg_match('#^https?://#i', $evidencePhotoUrl)
+                    || strpos($evidencePhotoUrl, '/uploads/stok_keluar/') === false) {
+                    denyHttp(400, 'Foto bukti wajib diambil langsung dari kamera untuk alasan roti berjamur', 'STOCK_OUT_PHOTO_REQUIRED');
+                }
+                $chronology = '';
+            } else { // roti_hilang
+                if (mb_strlen($chronology) < 10) {
+                    denyHttp(400, 'Kronologi kejadian wajib diisi (minimal 10 karakter) untuk alasan roti hilang', 'STOCK_OUT_CHRONOLOGY_REQUIRED');
+                }
+                if (mb_strlen($chronology) > 2000) $chronology = mb_substr($chronology, 0, 2000);
+                $evidencePhotoUrl = '';
+            }
+        } else {
+            // Koreksi transaksi tidak menyimpan reason/bukti
+            $reason = ''; $evidencePhotoUrl = ''; $chronology = '';
         }
         $referenceType = 'stok_keluar_staff';
     } elseif ($isAdmin) {
@@ -3578,6 +3617,9 @@ function rpc_adjust_stock_atomic(array $p): mixed {
         ];
         if (dbColumnExists($pdo, 'inventory_logs', 'reference_type')) $logRow['reference_type'] = $referenceType;
         if (dbColumnExists($pdo, 'inventory_logs', 'reference_id'))   $logRow['reference_id']   = $referenceId;
+        if (dbColumnExists($pdo, 'inventory_logs', 'reason'))             $logRow['reason']             = $reason !== '' ? $reason : null;
+        if (dbColumnExists($pdo, 'inventory_logs', 'evidence_photo_url')) $logRow['evidence_photo_url'] = $evidencePhotoUrl !== '' ? $evidencePhotoUrl : null;
+        if (dbColumnExists($pdo, 'inventory_logs', 'chronology'))         $logRow['chronology']         = $chronology !== '' ? $chronology : null;
         insertDynamic($pdo, 'inventory_logs', $logRow);
 
         $pdo->commit();
