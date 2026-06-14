@@ -869,6 +869,9 @@
         <div class="section-header">
           <h2 class="section-title">Monitoring Transfer Stok</h2>
           <div class="section-actions">
+            <button class="btn btn-primary btn-sm" data-admin-action="open-admin-create-transfer">
+              <i data-lucide="send" class="icon-sm"></i> Buat Transfer
+            </button>
             <button class="btn btn-outline btn-sm" data-admin-action="refresh-transfer-monitoring">
               <i data-lucide="refresh-cw" class="icon-sm"></i> Refresh
             </button>
@@ -3222,6 +3225,56 @@ atau tidak aktif."
         <button class="btn btn-outline" data-admin-action="close-copy-menu-modal">Batal</button>
         <button class="btn btn-primary" id="copy-menu-confirm-btn" data-admin-action="confirm-copy-menu" disabled>
           <i data-lucide="copy" class="icon-sm"></i> Salin Menu
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Buat Transfer Stok (Admin) -->
+  <div class="modal-overlay" id="modal-admin-create-transfer">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <span class="modal-title"><i data-lucide="send" class="icon-sm"></i> Buat Transfer Stok</span>
+        <button class="modal-close" data-admin-action="close-generic-modal" data-modal-id="modal-admin-create-transfer">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;gap:12px;">
+          <div class="form-group" style="margin:0;flex:1;">
+            <label class="form-label">Dari Outlet *</label>
+            <select class="form-control" id="admin-transfer-from-branch" data-admin-change="admin-from-branch-changed">
+              <option value="">-- Pilih Outlet Asal --</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;flex:1;">
+            <label class="form-label">Ke Outlet *</label>
+            <select class="form-control" id="admin-transfer-to-branch">
+              <option value="">-- Pilih Outlet Tujuan --</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Bahan yang Dikirim *</label>
+          <div id="admin-transfer-items" style="display:flex;flex-direction:column;gap:8px;min-height:40px;">
+            <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Pilih outlet asal terlebih dahulu.</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-admin-action="add-admin-transfer-item"
+            style="margin-top:8px;width:100%;border:1.5px dashed var(--border);">
+            <i data-lucide="plus" class="icon-sm"></i> Tambah Bahan
+          </button>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Catatan <span style="font-weight:400;color:var(--text-muted);">(opsional)</span></label>
+          <input type="text" class="form-control" id="admin-transfer-notes"
+            placeholder="Contoh: Kiriman pagi, restock mingguan..." />
+        </div>
+        <div style="padding:8px 12px;background:#fff7ed;border-radius:var(--r-sm);border-left:3px solid #f59e0b;font-size:12px;color:#92400e;">
+          Stok outlet asal akan langsung berkurang saat dikirim. Outlet tujuan perlu klik <strong>Terima</strong> agar stoknya bertambah.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-admin-action="close-generic-modal" data-modal-id="modal-admin-create-transfer">Batal</button>
+        <button class="btn btn-primary" id="btn-submit-admin-transfer" data-admin-action="submit-admin-create-transfer">
+          <i data-lucide="send" class="icon-sm"></i> Kirim Transfer
         </button>
       </div>
     </div>

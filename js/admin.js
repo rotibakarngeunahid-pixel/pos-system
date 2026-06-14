@@ -20,6 +20,8 @@ const ADMIN = {
   _copyMenuPreview:    null,
   _copyMenuSubmitting: false,
   _reportData:         null,
+  _adminTransferIngredients: [],
+  _adminTransferItemCounter: 0,
 
   // ── Button Loading Helper ─────────────────────────────────────
   _btnLoad(selector, loadingText = 'Menyimpan...') {
@@ -133,6 +135,10 @@ const ADMIN = {
         case 'refresh-transfer-monitoring': this.loadTransferMonitoring(); break;
         case 'admin-confirm-transfer': this.adminConfirmTransfer(Number(btn.dataset.id)); break;
         case 'admin-reject-transfer': this.adminRejectTransfer(Number(btn.dataset.id)); break;
+        case 'open-admin-create-transfer': this.openAdminCreateTransfer(); break;
+        case 'add-admin-transfer-item': this.addAdminTransferItem(); break;
+        case 'remove-admin-transfer-item': this.removeAdminTransferItem(Number(btn.dataset.index)); break;
+        case 'submit-admin-create-transfer': this.submitAdminCreateTransfer(); break;
         // PO sync actions
         case 'po-sync-refresh': this.loadPoSyncSection(); break;
         case 'po-sync-configure-server': this.poSyncConfigureServer(); break;
@@ -193,6 +199,7 @@ const ADMIN = {
         case 'load-topping-mapping': this.loadToppingMapping(node.value); break;
         case 'toggle-report-void': this.runReport(this.currentReportTab || 'sales'); break;
         case 'load-transfer-monitoring': this.loadTransferMonitoring(); break;
+        case 'admin-from-branch-changed': this.onAdminFromBranchChanged(); break;
       }
     });
     document.addEventListener('input', (e) => {
@@ -3547,6 +3554,150 @@ const ADMIN = {
       this.loadTransferMonitoring();
     } catch (e) {
       showToast('Gagal menolak: ' + e.message, 'error');
+    }
+  },
+
+  // ── Admin: Buat Transfer Stok ─────────────────────────────────
+  openAdminCreateTransfer() {
+    const fromSel = document.getElementById('admin-transfer-from-branch');
+    const toSel   = document.getElementById('admin-transfer-to-branch');
+    if (!fromSel || !toSel) return;
+
+    const branchOpts = (this.branches || [])
+      .filter(b => b.is_active !== false)
+      .map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`)
+      .join('');
+
+    fromSel.innerHTML = '<option value="">-- Pilih Outlet Asal --</option>' + branchOpts;
+    toSel.innerHTML   = '<option value="">-- Pilih Outlet Tujuan --</option>' + branchOpts;
+
+    document.getElementById('admin-transfer-notes').value = '';
+    document.getElementById('admin-transfer-items').innerHTML =
+      '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Pilih outlet asal terlebih dahulu.</div>';
+    this._adminTransferIngredients = [];
+    this._adminTransferItemCounter = 0;
+
+    openModal('modal-admin-create-transfer');
+  },
+
+  async onAdminFromBranchChanged() {
+    const fromBranchId = parseInt(document.getElementById('admin-transfer-from-branch').value);
+    const toSel = document.getElementById('admin-transfer-to-branch');
+
+    const branchOpts = (this.branches || [])
+      .filter(b => b.is_active !== false && b.id !== fromBranchId)
+      .map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`)
+      .join('');
+    toSel.innerHTML = '<option value="">-- Pilih Outlet Tujuan --</option>' + branchOpts;
+
+    const itemsContainer = document.getElementById('admin-transfer-items');
+    this._adminTransferIngredients = [];
+    this._adminTransferItemCounter = 0;
+
+    if (!fromBranchId) {
+      itemsContainer.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Pilih outlet asal terlebih dahulu.</div>';
+      return;
+    }
+
+    itemsContainer.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Memuat stok...</div>';
+    const { data, error } = await db.from('branch_inventory')
+      .select('ingredient_id, stock, ingredients(id, name, unit)')
+      .eq('branch_id', fromBranchId);
+
+    if (error) {
+      itemsContainer.innerHTML = `<div style="font-size:12px;color:var(--danger);padding:8px 0;">Gagal memuat stok: ${escHtml(error.message)}</div>`;
+      return;
+    }
+
+    this._adminTransferIngredients = (data || [])
+      .map(r => ({ ...r.ingredients, stock: parseFloat(r.stock || 0) }))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    itemsContainer.innerHTML = '';
+    this.addAdminTransferItem();
+  },
+
+  _renderAdminTransferItemRow(index) {
+    const opts = this._adminTransferIngredients.map(i =>
+      `<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)}) — Stok: ${i.stock.toLocaleString('id-ID')}</option>`
+    ).join('');
+    return `
+      <div class="transfer-item-row" id="admin-transfer-item-row-${index}"
+        style="display:flex;gap:8px;align-items:center;background:var(--bg-alt);border-radius:var(--r-sm);padding:8px 10px;">
+        <div style="flex:1;">
+          <select class="form-control" id="admin-transfer-ing-${index}" style="margin-bottom:4px;">${opts}</select>
+          <input type="number" class="form-control" id="admin-transfer-qty-${index}"
+            placeholder="Jumlah" min="0.01" step="0.01" inputmode="decimal"
+            style="height:34px;font-size:13px;" />
+        </div>
+        <button class="btn btn-ghost btn-sm" data-admin-action="remove-admin-transfer-item" data-index="${index}"
+          title="Hapus baris" style="flex-shrink:0;color:var(--danger);">
+          <i data-lucide="trash-2" class="icon-sm"></i>
+        </button>
+      </div>`;
+  },
+
+  addAdminTransferItem() {
+    if (!this._adminTransferIngredients.length) {
+      showToast('Pilih outlet asal terlebih dahulu', 'warning');
+      return;
+    }
+    const container = document.getElementById('admin-transfer-items');
+    if (!container) return;
+    const index = this._adminTransferItemCounter++;
+    container.insertAdjacentHTML('beforeend', this._renderAdminTransferItemRow(index));
+    if (window.lucide) lucide.createIcons();
+  },
+
+  removeAdminTransferItem(index) {
+    const row = document.getElementById(`admin-transfer-item-row-${index}`);
+    if (row) row.remove();
+  },
+
+  async submitAdminCreateTransfer() {
+    const fromBranchId = parseInt(document.getElementById('admin-transfer-from-branch').value);
+    const toBranchId   = parseInt(document.getElementById('admin-transfer-to-branch').value);
+    const notes        = (document.getElementById('admin-transfer-notes').value || '').trim();
+
+    if (!fromBranchId) { showToast('Pilih outlet asal', 'error'); return; }
+    if (!toBranchId)   { showToast('Pilih outlet tujuan', 'error'); return; }
+    if (fromBranchId === toBranchId) { showToast('Outlet asal dan tujuan tidak boleh sama', 'error'); return; }
+
+    const container = document.getElementById('admin-transfer-items');
+    const rows = container ? container.querySelectorAll('.transfer-item-row') : [];
+    const items = [];
+
+    for (const row of rows) {
+      const idx   = row.id.replace('admin-transfer-item-row-', '');
+      const ingId = parseInt(document.getElementById(`admin-transfer-ing-${idx}`)?.value);
+      const qty   = parseFloat(document.getElementById(`admin-transfer-qty-${idx}`)?.value);
+      if (!ingId || !qty || qty <= 0) continue;
+      if (items.some(it => it.ingredient_id === ingId)) {
+        showToast('Bahan yang sama tidak boleh dipilih lebih dari satu kali', 'error');
+        return;
+      }
+      items.push({ ingredient_id: ingId, qty });
+    }
+
+    if (!items.length) { showToast('Isi minimal satu bahan dengan jumlah yang valid', 'error'); return; }
+
+    const restore = this._btnLoad('#btn-submit-admin-transfer', 'Mengirim...');
+    try {
+      const { transferCode } = await inventoryService.createStockTransfer({
+        fromBranchId,
+        toBranchId,
+        items,
+        notes: notes || null,
+        userId: this.user.id
+      });
+      closeModal('modal-admin-create-transfer');
+      this.loadTransferMonitoring();
+      showToast(`Transfer ${transferCode} berhasil dibuat. Menunggu konfirmasi outlet tujuan.`, 'success');
+    } catch (e) {
+      showToast('Gagal membuat transfer: ' + e.message, 'error');
+    } finally {
+      restore();
     }
   },
 
