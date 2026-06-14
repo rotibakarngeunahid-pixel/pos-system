@@ -355,8 +355,8 @@ const depositUi = {
       if (isCrossShift) {
         return {
           type: 'pending',
-          title: 'Ada setoran shift lain yang belum dikonfirmasi',
-          body: 'Setoran dari shift sebelumnya masih menunggu konfirmasi admin. Tunggu sampai disetujui atau ditolak sebelum membuat setoran baru.',
+          title: 'Ada setoran shift lain yang belum selesai',
+          body: 'Setoran dari shift sebelumnya masih diproses. Tunggu sampai selesai sebelum membuat setoran baru.',
           ctaLabel: null,
           ctaAction: null
         };
@@ -365,7 +365,7 @@ const depositUi = {
         return {
           type: 'pending',
           title: 'Setoran sedang diproses',
-          body: 'Setoran shift ini sudah dikirim dan menunggu konfirmasi admin.',
+          body: 'Setoran shift ini sudah dikirim dan sedang diproses.',
           ctaLabel: null,
           ctaAction: null
         };
@@ -1093,14 +1093,14 @@ const depositUi = {
       this.el.success.innerHTML = `
         <i data-lucide="check-circle-2" class="icon-lg"></i>
         <div>
-          <strong>Setoran berhasil dikirim</strong>
+          <strong>Setoran berhasil dikonfirmasi</strong>
           <span>No. referensi setoran: ${this.esc(ref)}</span>
         </div>`;
       setTimeout(() => {
         if (this.el.success) this.el.success.style.display = 'none';
       }, 7000);
     }
-    if (typeof showToast === 'function') showToast(`Setoran berhasil dikirim. Ref: ${ref}`, 'success');
+    if (typeof showToast === 'function') showToast(`Setoran berhasil dikonfirmasi. Ref: ${ref}`, 'success');
     if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
   },
 

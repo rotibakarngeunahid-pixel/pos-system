@@ -2612,14 +2612,14 @@ function rpc_create_deposit(array $p): mixed {
             if (!$sess || $sess['status'] !== 'closed') throw new Exception('Shift setoran belum tertutup');
         }
 
-        // Blokir jika staff masih punya setoran pending di shift manapun
+        // Blokir jika masih ada setoran pending (data lama sebelum auto-approve)
         $crossStmt = $pdo->prepare("
             SELECT COUNT(*) FROM cash_deposits
             WHERE staff_id=? AND branch_id=? AND status='pending'
         ");
         $crossStmt->execute([$staffId, $branchId]);
         if ((int)$crossStmt->fetchColumn() > 0) {
-            throw new Exception('Masih ada setoran yang belum dikonfirmasi admin. Tunggu konfirmasi terlebih dahulu.');
+            throw new Exception('Masih ada setoran yang belum selesai diproses. Hubungi admin atau tunggu sampai diproses.');
         }
 
         // Validasi nominal tidak boleh melebihi saldo kas aktual cabang (termasuk transfer masuk).
@@ -2642,6 +2642,7 @@ function rpc_create_deposit(array $p): mixed {
             }
         }
 
+        $autoApprove = !empty($proofUrl);
         $id = uuid4();
         $row = [
             'id'         => $id,
@@ -2652,9 +2653,13 @@ function rpc_create_deposit(array $p): mixed {
             'method'     => $method,
             'proof_url'  => $proofUrl,
             'notes'      => $notes,
-            'status'     => 'pending',
+            'status'     => $autoApprove ? 'confirmed' : 'pending',
             'account_id' => $accountId,
         ];
+        if ($autoApprove) {
+            if (dbColumnExists($pdo, 'cash_deposits', 'reviewed_at')) $row['reviewed_at'] = date('Y-m-d H:i:s');
+            if (dbColumnExists($pdo, 'cash_deposits', 'balance_applied_at')) $row['balance_applied_at'] = date('Y-m-d H:i:s');
+        }
         if (dbColumnExists($pdo, 'cash_deposits', 'cash_balance_at_deposit')) $row['cash_balance_at_deposit'] = $cashBalance;
         foreach (['proof_file_name','proof_file_type','proof_file_size','proof_uploaded_at'] as $suffix) {
             $param = 'p_' . $suffix;
@@ -2662,8 +2667,41 @@ function rpc_create_deposit(array $p): mixed {
         }
         insertDynamic($pdo, 'cash_deposits', $row);
 
+        if ($autoApprove) {
+            $balLock = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
+            $balLock->execute([$branchId]);
+            $bal = $balLock->fetch();
+            if ($bal) {
+                $before = (float)$bal['current_balance'];
+                if ($amount > $before) {
+                    throw new Exception(
+                        'Saldo kas outlet tidak mencukupi untuk setoran ini. ' .
+                        'Tersedia: Rp ' . number_format($before, 0, ',', '.') .
+                        ', nominal setoran: Rp ' . number_format($amount, 0, ',', '.')
+                    );
+                }
+                $after = $before - $amount;
+                $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW() WHERE branch_id=?")
+                    ->execute([$after, $branchId]);
+                if ($sessionId) {
+                    $cat = $pdo->query("SELECT id FROM cash_categories WHERE name='Setoran Tunai' AND type='out' LIMIT 1")->fetch();
+                    $pdo->prepare("
+                        INSERT INTO cash_logs (branch_id,session_id,type,category_id,amount,note,created_by,reference_type,reference_id)
+                        VALUES (?,?,'out',?,?,?,?,'deposit',?)
+                    ")->execute([
+                        $branchId, $sessionId, $cat['id'] ?? null,
+                        $amount, "Setoran #{$id}", $staffId, $id
+                    ]);
+                }
+                rpcInsertBranchCashLedger($pdo, $branchId, $staffId, null,
+                    $sessionId, null,
+                    'deposit_approved', 'out', $amount, $before, $after,
+                    'Setoran diapprove otomatis (bukti terlampir)', 'cash_deposits', $id);
+            }
+        }
+
         $pdo->commit();
-        return ['id'=>$id,'status'=>'pending','amount'=>$amount];
+        return ['id' => $id, 'status' => $autoApprove ? 'confirmed' : 'pending', 'amount' => $amount];
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
