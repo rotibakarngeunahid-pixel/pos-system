@@ -3478,11 +3478,11 @@ const ADMIN = {
     const tbody  = document.getElementById('transfer-monitoring-body');
     const status = document.getElementById('transfer-status-filter')?.value || null;
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-td">Memuat...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Memuat...</td></tr>';
     try {
       const transfers = await inventoryService.getAllTransfersAdmin(100, 0, status || null);
       if (!transfers.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-td">Tidak ada data transfer.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Tidak ada data transfer.</td></tr>';
         return;
       }
       const statusCfg = {
@@ -3508,11 +3508,12 @@ const ADMIN = {
           <td><span class="badge ${sc.cls}" style="font-size:11px;">${sc.label}</span></td>
           <td style="font-size:12px;">${escHtml(t.created_by_name || '—')}</td>
           <td style="font-size:12px;">${escHtml(t.confirmed_by_name || t.rejected_by_name || '—')}</td>
+          <td style="font-size:12px;">${actions}</td>
         </tr>`;
       }).join('');
       if (window.lucide) lucide.createIcons();
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-td" style="color:var(--danger);">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-td" style="color:var(--danger);">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
     }
   },
 
