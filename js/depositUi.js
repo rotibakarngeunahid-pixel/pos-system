@@ -675,7 +675,7 @@ const depositUi = {
     return `
       <div class="deposit-method-detail-inner deposit-cash-detail">
         <i data-lucide="hand-coins" class="icon-sm deposit-cash-icon"></i>
-        <span>Serahkan tunai langsung ke manager atau admin. Bukti setoran opsional.</span>
+        <span>Serahkan tunai langsung ke manager atau admin, lalu upload foto bukti serah terima. Setoran otomatis disetujui setelah bukti terlampir.</span>
       </div>`;
   },
 
@@ -802,7 +802,7 @@ const depositUi = {
       } else if (!account) {
         this.el.proofHint.textContent = 'Pilih metode setoran terlebih dahulu.';
       } else if (isCash) {
-        this.el.proofHint.textContent = 'Bukti opsional untuk penyerahan tunai langsung.';
+        this.el.proofHint.textContent = 'Upload foto bukti serah terima tunai. Wajib agar setoran otomatis disetujui.';
       } else if (account.type === 'qris') {
         this.el.proofHint.textContent = 'Setelah pembayaran QRIS selesai, upload bukti pembayaran.';
       } else {
@@ -817,9 +817,10 @@ const depositUi = {
     return this.accounts.find(a => String(a.id) === String(id)) || null;
   },
 
-  isProofRequired(account = this.getSelectedAccount()) {
-    if (!account) return true;
-    return !depositService.isCashDepositMethod(account);
+  isProofRequired() {
+    // Bukti WAJIB untuk semua metode setoran (termasuk serah tunai). Dengan bukti
+    // terlampir, backend otomatis menyetujui setoran tanpa approval manual admin.
+    return true;
   },
 
   getLastAccountKey() {
