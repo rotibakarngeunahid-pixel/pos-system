@@ -2381,7 +2381,16 @@ function rpc_get_admin_branch_cash_positions(array $p): mixed {
               AND cd.status = 'pending'
           )                                     AS pending_deposit_amount,
 
-          -- Kas estimasi saat shift aktif: opening_cash + mutasi cash_logs sesi ini
+          -- Kas estimasi saat shift aktif. Terdiri dari:
+          --   1. opening_cash sesi (beku saat buka shift)
+          --   2. mutasi kas sesi ini (penjualan tunai + kas masuk/keluar manual)
+          --   3. setoran tunai & transfer antar-outlet yang DIKONFIRMASI selama shift berjalan
+          -- Komponen #3 penting: setoran/transfer mengeluarkan/memasukkan kas FISIK outlet
+          -- meskipun dicatat di sesi lain (sesi yang sudah ditutup), sehingga harus ikut
+          -- mengubah estimasi kas berjalan. Tanpa ini, approve setoran saat ada shift aktif
+          -- tidak terlihat mengurangi posisi kas.
+          -- Koreksi manual admin (admin_adjustment) sengaja TIDAK disertakan agar tetap
+          -- berlaku pada shift berikutnya, sesuai desain UI Set Posisi Kas.
           (
             SELECT COALESCE(acs.opening_cash, 0)
                  + COALESCE(
@@ -2390,6 +2399,18 @@ function rpc_get_admin_branch_cash_positions(array $p): mixed {
                              WHEN cl.type='out' AND cl.is_void=0 THEN -cl.amount
                              ELSE 0 END)
                       FROM cash_logs cl WHERE cl.session_id = acs.id),
+                     0
+                   )
+                 + COALESCE(
+                     (SELECT SUM(
+                        CASE WHEN bcl.direction='in'  THEN  bcl.amount
+                             WHEN bcl.direction='out' THEN -bcl.amount
+                             ELSE 0 END)
+                      FROM branch_cash_ledger bcl
+                      WHERE bcl.branch_id = b.id
+                        AND bcl.movement_type IN
+                            ('deposit_approved','cash_branch_transfer_out','cash_branch_transfer_in')
+                        AND bcl.created_at >= acs.opened_at),
                      0
                    )
             FROM cashier_sessions acs
