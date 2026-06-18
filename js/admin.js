@@ -195,6 +195,7 @@ const ADMIN = {
           break;
         case 'preview-image': this.previewImage(node); break;
         case 'toggle-inventory-modal-type': this.toggleInventoryModalType(); break;
+        case 'load-inv-adj-ingredients': this.populateInvAdjIngredients(); break;
         case 'import-menu-file': this.handleImportMenuFile(node); break;
         case 'load-topping-mapping': this.loadToppingMapping(node.value); break;
         case 'toggle-report-void': this.runReport(this.currentReportTab || 'sales'); break;
@@ -1679,6 +1680,26 @@ const ADMIN = {
   },
 
   // ── Inventory ─────────────────────────────────────────────────
+  // Muat & cache mapping cabang→bahan. Return { map, ok }.
+  // map: { [ingredientId]: Set<branchId> }. ok=false jika tabel mapping belum ada
+  // (caller akan fallback menampilkan semua bahan agar data tidak hilang saat belum dideploy).
+  async _loadIngAssignMap() {
+    const map = {};
+    let ok = true;
+    const { data, error } = await db.from('branch_ingredient_assignments').select('ingredient_id, branch_id');
+    if (error) {
+      ok = false;
+    } else {
+      for (const a of (data || [])) {
+        if (!map[a.ingredient_id]) map[a.ingredient_id] = new Set();
+        map[a.ingredient_id].add(Number(a.branch_id));
+      }
+    }
+    this._ingAssignMap     = map;
+    this._ingAssignTableOk = ok;
+    return { map, ok };
+  },
+
   async loadInventory() {
     const branchId = document.getElementById('inv-branch-filter').value;
     const grid     = document.getElementById('inv-grid');
@@ -1691,22 +1712,16 @@ const ADMIN = {
     const invMap = {};
     (inv||[]).forEach(i => { if (i.ingredients) invMap[i.ingredients.id] = i; });
 
-    // Load branch assignments (non-fatal jika tabel belum ada)
-    const assignMap = {};
-    try {
-      const { data: assignRows } = await db.from('branch_ingredient_assignments').select('ingredient_id, branch_id');
-      for (const a of (assignRows || [])) {
-        if (!assignMap[a.ingredient_id]) assignMap[a.ingredient_id] = new Set();
-        assignMap[a.ingredient_id].add(a.branch_id);
-      }
-    } catch { /* tabel belum ada, tampilkan semua */ }
+    // Mapping cabang→bahan (STRICT): bahan hanya tampil jika dipetakan ke cabang ini.
+    const { map: assignMap, ok: assignOk } = await this._loadIngAssignMap();
     const bidNum = parseInt(branchId);
 
     const ingredientsInBranch = this.ingredients.filter(ing => {
-      // Jika ada mapping khusus tapi cabang ini tidak termasuk → skip
+      // Fallback: jika tabel mapping belum ada, tampilkan semua bahan yang berstok.
+      if (!assignOk) return invMap[ing.id] !== undefined;
+      // Strict: tampil hanya jika bahan ini dipetakan ke cabang terpilih.
       const assigned = assignMap[ing.id];
-      if (assigned && !assigned.has(bidNum)) return false;
-      return invMap[ing.id] !== undefined;
+      return assigned ? assigned.has(bidNum) : false;
     });
     grid.innerHTML = ingredientsInBranch.length
       ? ingredientsInBranch.map(ing => {
@@ -1724,19 +1739,41 @@ const ADMIN = {
             </div>
           </div>`;
         }).join('')
-      : '<div class="empty-state"><div class="empty-icon"><i data-lucide="package" class="icon"></i></div><div class="empty-title">Belum ada bahan di cabang ini</div></div>';
+      : '<div class="empty-state"><div class="empty-icon"><i data-lucide="package" class="icon"></i></div><div class="empty-title">Belum ada bahan yang dipetakan ke cabang ini</div><div class="empty-desc">Petakan bahan ke cabang ini lewat menu Bahan Baku → Edit → centang cabang.</div></div>';
   },
 
-  openInventoryModal(type = 'stock_in') {
+  async openInventoryModal(type = 'stock_in') {
     document.getElementById('inv-adj-qty').value   = '';
     document.getElementById('inv-adj-notes').value = '';
     document.getElementById('inv-adj-type').value  = type;
     setSelect('inv-adj-branch-id', this.branches.map(b=>`<option value="${b.id}">${escHtml(b.name)}</option>`).join(''));
-    setSelect('inv-adj-ingredient-id', this.ingredients.map(i=>`<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`).join(''));
     const currentBranch = document.getElementById('inv-branch-filter').value;
     if (currentBranch) document.getElementById('inv-adj-branch-id').value = currentBranch;
+    // Isi dropdown bahan sesuai mapping cabang terpilih (hormati strict mapping).
+    await this._loadIngAssignMap();
+    this.populateInvAdjIngredients();
     this.toggleInventoryModalType();
     openModal('modal-inventory');
+  },
+
+  // Isi/refresh dropdown bahan di modal Kelola Stok sesuai cabang terpilih.
+  populateInvAdjIngredients() {
+    const branchEl = document.getElementById('inv-adj-branch-id');
+    const ingEl    = document.getElementById('inv-adj-ingredient-id');
+    if (!branchEl || !ingEl) return;
+    const bidNum    = parseInt(branchEl.value);
+    const assignMap = this._ingAssignMap || {};
+    const assignOk  = this._ingAssignTableOk !== false;
+    const list = this.ingredients.filter(ing => {
+      if (!assignOk) return true; // tabel mapping belum ada → tampilkan semua
+      const assigned = assignMap[ing.id];
+      return assigned ? assigned.has(bidNum) : false;
+    });
+    const prev = ingEl.value;
+    ingEl.innerHTML = list.length
+      ? list.map(i=>`<option value="${i.id}">${escHtml(i.name)} (${escHtml(i.unit)})</option>`).join('')
+      : `<option value="">— Tidak ada bahan dipetakan ke cabang ini —</option>`;
+    if (prev && list.some(i => String(i.id) === prev)) ingEl.value = prev;
   },
 
   toggleInventoryModalType() {
@@ -2802,7 +2839,7 @@ const ADMIN = {
           const bids      = assignMap[ing.id] || [];
           const branchBadges = bids.length
             ? bids.map(bid => `<span class="badge badge-blue">${escHtml(branchNameMap[bid] || bid)}</span>`).join(' ')
-            : `<span class="badge badge-orange">Semua Cabang</span>`;
+            : `<span class="badge badge-orange">⚠ Belum dipetakan — tidak tampil di outlet manapun</span>`;
           return `
           <div class="admin-list-card">
             <div class="list-card-icon green"><i data-lucide="leaf" class="icon"></i></div>

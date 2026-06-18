@@ -1870,6 +1870,15 @@ const POS = {
     if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
   },
 
+  // Set<ingredient_id> yang dipetakan ke cabang ini (STRICT mapping).
+  // Return null jika tabel mapping belum ada → caller tidak memfilter (fallback legacy).
+  async _getBranchIngredientIds(branchId) {
+    const { data, error } = await db.from('branch_ingredient_assignments')
+      .select('ingredient_id').eq('branch_id', branchId);
+    if (error) return null;
+    return new Set((data || []).map(a => Number(a.ingredient_id)));
+  },
+
   async loadInventorySummary() {
     if (!this.branch) return;
     const grid = document.getElementById('stock-grid');
@@ -1882,7 +1891,7 @@ const POS = {
     const filterDate   = dateEl?.value || businessDate;
     const { from, to } = fmt.getBusinessDateRange(filterDate);
 
-    const [stockRes, logsRes, manualLogsRes] = await Promise.all([
+    const [stockRes, logsRes, manualLogsRes, allowedIds] = await Promise.all([
       db.from('branch_inventory').select('stock, ingredient_id, ingredients(name, unit)').eq('branch_id', this.branch.id),
       db.from('inventory_logs')
         .select('ingredient_id, quantity, type, reference_type')
@@ -1898,10 +1907,13 @@ const POS = {
         .gte('created_at', from)
         .lte('created_at', to)
         .order('created_at', { ascending: false })
-        .limit(30)
+        .limit(30),
+      this._getBranchIngredientIds(this.branch.id)
     ]);
 
-    const stockData   = stockRes.data || [];
+    let stockData     = stockRes.data || [];
+    // Strict mapping: hanya tampilkan bahan yang dipetakan ke cabang ini.
+    if (allowedIds) stockData = stockData.filter(r => allowedIds.has(Number(r.ingredient_id)));
     const logs        = logsRes.data || [];
     const manualLogs  = manualLogsRes.data || [];
 
@@ -2237,17 +2249,20 @@ const POS = {
   // 'roti_hilang'   → wajib kronologi kejadian tertulis
   async openStockAdjustModal() {
     if (!this.branch) return;
-    const invRes = await db.from('branch_inventory')
-      .select('ingredient_id, ingredients(id, name, unit)')
-      .eq('branch_id', this.branch.id);
+    const [invRes, allowedIds] = await Promise.all([
+      db.from('branch_inventory').select('ingredient_id, ingredients(id, name, unit)').eq('branch_id', this.branch.id),
+      this._getBranchIngredientIds(this.branch.id)
+    ]);
 
     const sel = document.getElementById('stock-adj-ingredient');
     if (!sel) return;
 
-    const ingredients = (invRes.data || [])
+    let ingredients = (invRes.data || [])
       .map(r => r.ingredients)
-      .filter(Boolean)
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .filter(Boolean);
+    // Strict mapping: hanya bahan yang dipetakan ke outlet ini.
+    if (allowedIds) ingredients = ingredients.filter(i => allowedIds.has(Number(i.id)));
+    ingredients.sort((a, b) => a.name.localeCompare(b.name));
 
     if (invRes.error || !ingredients.length) {
       showToast('Belum ada bahan baku yang dipetakan ke outlet ini.', 'warning');
@@ -2492,9 +2507,10 @@ const POS = {
   // ══════════════════════════════════════════════════════════
   async openSendTransferModal() {
     if (!this.branch) return;
-    const [invRes, branchRes] = await Promise.all([
+    const [invRes, branchRes, allowedIds] = await Promise.all([
       db.from('branch_inventory').select('ingredient_id, stock, ingredients(id, name, unit)').eq('branch_id', this.branch.id),
-      db.from('branches').select('id, name').eq('is_active', true).order('name')
+      db.from('branches').select('id, name').eq('is_active', true).order('name'),
+      this._getBranchIngredientIds(this.branch.id)
     ]);
 
     const otherBranches = (branchRes.data || []).filter(b => b.id !== this.branch.id);
@@ -2503,10 +2519,12 @@ const POS = {
     const branchSel = document.getElementById('send-transfer-branch');
     if (branchSel) branchSel.innerHTML = otherBranches.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
 
-    const ingredients = (invRes.data || [])
+    let ingredients = (invRes.data || [])
       .map(r => ({ ...r.ingredients, stock: parseFloat(r.stock || 0) }))
-      .filter(Boolean)
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .filter(Boolean);
+    // Strict mapping: hanya bahan yang dipetakan ke outlet ini.
+    if (allowedIds) ingredients = ingredients.filter(i => allowedIds.has(Number(i.id)));
+    ingredients.sort((a, b) => a.name.localeCompare(b.name));
 
     this._sendTransferIngredients = ingredients;
     document.getElementById('send-transfer-notes').value = '';
