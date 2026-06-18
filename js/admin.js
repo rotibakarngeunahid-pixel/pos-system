@@ -1569,8 +1569,8 @@ const ADMIN = {
   },
 
   async openEditIngredientModal(id) {
-    const ing = this.ingredients.find(i => i.id === id);
-    if (!ing) return;
+    const ing = this.ingredients.find(i => Number(i.id) === Number(id));
+    if (!ing) { showToast('Bahan tidak ditemukan, muat ulang halaman', 'error'); return; }
     document.getElementById('ing-id').value         = ing.id;
     document.getElementById('ing-name').value       = ing.name;
     document.getElementById('ing-unit').value       = ing.unit;
@@ -2839,7 +2839,7 @@ const ADMIN = {
           const bids      = assignMap[ing.id] || [];
           const branchBadges = bids.length
             ? bids.map(bid => `<span class="badge badge-blue">${escHtml(branchNameMap[bid] || bid)}</span>`).join(' ')
-            : `<span class="badge badge-orange">⚠ Belum dipetakan — tidak tampil di outlet manapun</span>`;
+            : `<span class="badge badge-orange" title="Bahan ini belum dipetakan ke outlet manapun, jadi tidak tampil di POS/Inventori. Klik Edit untuk memetakan.">⚠ Belum dipetakan</span>`;
           return `
           <div class="admin-list-card">
             <div class="list-card-icon green"><i data-lucide="leaf" class="icon"></i></div>
