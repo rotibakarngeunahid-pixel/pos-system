@@ -185,6 +185,7 @@ const POS = {
       else if (action === 'toggle-discount-input') POS.toggleDiscountInput();
       else if (action === 'ingredient-log-filter-change') POS.loadIngredientLogData(false);
       else if (action === 'stock-adj-reason-change') POS.onStockReasonChange();
+      else if (action === 'send-transfer-branch-changed') POS.onSendTransferBranchChanged();
     });
     document.addEventListener('input', e => {
       const inputNode = e.target.closest('[data-action-input]');
@@ -2526,14 +2527,44 @@ const POS = {
     if (allowedIds) ingredients = ingredients.filter(i => allowedIds.has(Number(i.id)));
     ingredients.sort((a, b) => a.name.localeCompare(b.name));
 
-    this._sendTransferIngredients = ingredients;
+    this._sendTransferSourceIngredients = ingredients;
     document.getElementById('send-transfer-notes').value = '';
 
-    const container = document.getElementById('send-transfer-items');
-    container.innerHTML = '';
-    this.addTransferItem();
+    // Tampilkan hanya bahan yang juga dipetakan ke outlet tujuan terpilih.
+    await this._applySendTransferDestFilter();
 
     openModal('modal-send-transfer');
+  },
+
+  // Re-filter daftar bahan saat outlet tujuan berubah.
+  onSendTransferBranchChanged() {
+    this._applySendTransferDestFilter();
+  },
+
+  // Saring bahan → hanya yang juga dipetakan ke outlet tujuan, lalu render ulang baris.
+  async _applySendTransferDestFilter() {
+    const container = document.getElementById('send-transfer-items');
+    if (!container) return;
+    const toBranchId = parseInt(document.getElementById('send-transfer-branch').value);
+    const source = this._sendTransferSourceIngredients || [];
+
+    let list = source;
+    if (toBranchId) {
+      const allowedDest = await this._getBranchIngredientIds(toBranchId);
+      if (allowedDest) list = source.filter(i => allowedDest.has(Number(i.id)));
+    }
+    this._sendTransferIngredients = list;
+    container.innerHTML = '';
+
+    if (!source.length) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Tidak ada bahan yang bisa dikirim dari outlet ini.</div>';
+      return;
+    }
+    if (!list.length) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Tidak ada bahan yang juga dipetakan ke outlet tujuan.</div>';
+      return;
+    }
+    this.addTransferItem();
   },
 
   _renderTransferItemRow(index) {
@@ -2560,6 +2591,13 @@ const POS = {
   addTransferItem() {
     const container = document.getElementById('send-transfer-items');
     if (!container) return;
+    if (!this._sendTransferIngredients || !this._sendTransferIngredients.length) {
+      const toBranchId = parseInt(document.getElementById('send-transfer-branch')?.value);
+      if (!this._sendTransferSourceIngredients?.length) showToast('Tidak ada bahan yang bisa dikirim dari outlet ini', 'warning');
+      else if (!toBranchId) showToast('Pilih outlet tujuan terlebih dahulu', 'warning');
+      else showToast('Tidak ada bahan yang juga dipetakan ke outlet tujuan', 'warning');
+      return;
+    }
     const index = container.children.length;
     container.insertAdjacentHTML('beforeend', this._renderTransferItemRow(index));
     if (window.lucide) lucide.createIcons();

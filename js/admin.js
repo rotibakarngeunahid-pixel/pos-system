@@ -20,7 +20,8 @@ const ADMIN = {
   _copyMenuPreview:    null,
   _copyMenuSubmitting: false,
   _reportData:         null,
-  _adminTransferIngredients: [],
+  _adminTransferIngredients: [],        // daftar bahan yang BISA dikirim (sudah difilter outlet tujuan)
+  _adminTransferSourceIngredients: [],  // stok mentah di outlet asal (sebelum filter tujuan)
   _adminTransferItemCounter: 0,
 
   // ── Button Loading Helper ─────────────────────────────────────
@@ -201,6 +202,7 @@ const ADMIN = {
         case 'toggle-report-void': this.runReport(this.currentReportTab || 'sales'); break;
         case 'load-transfer-monitoring': this.loadTransferMonitoring(); break;
         case 'admin-from-branch-changed': this.onAdminFromBranchChanged(); break;
+        case 'admin-to-branch-changed': this.onAdminToBranchChanged(); break;
       }
     });
     document.addEventListener('input', (e) => {
@@ -3612,6 +3614,7 @@ const ADMIN = {
     document.getElementById('admin-transfer-items').innerHTML =
       '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Pilih outlet asal terlebih dahulu.</div>';
     this._adminTransferIngredients = [];
+    this._adminTransferSourceIngredients = [];
     this._adminTransferItemCounter = 0;
 
     openModal('modal-admin-create-transfer');
@@ -3629,6 +3632,7 @@ const ADMIN = {
 
     const itemsContainer = document.getElementById('admin-transfer-items');
     this._adminTransferIngredients = [];
+    this._adminTransferSourceIngredients = [];
     this._adminTransferItemCounter = 0;
 
     if (!fromBranchId) {
@@ -3637,21 +3641,62 @@ const ADMIN = {
     }
 
     itemsContainer.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Memuat stok...</div>';
-    const { data, error } = await db.from('branch_inventory')
-      .select('ingredient_id, stock, ingredients(id, name, unit)')
-      .eq('branch_id', fromBranchId);
+    const [{ data, error }] = await Promise.all([
+      db.from('branch_inventory')
+        .select('ingredient_id, stock, ingredients(id, name, unit)')
+        .eq('branch_id', fromBranchId),
+      this._loadIngAssignMap()   // mapping cabang→bahan untuk filter outlet tujuan
+    ]);
 
     if (error) {
       itemsContainer.innerHTML = `<div style="font-size:12px;color:var(--danger);padding:8px 0;">Gagal memuat stok: ${escHtml(error.message)}</div>`;
       return;
     }
 
-    this._adminTransferIngredients = (data || [])
+    this._adminTransferSourceIngredients = (data || [])
       .map(r => ({ ...r.ingredients, stock: parseFloat(r.stock || 0) }))
       .filter(Boolean)
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    // Tampilkan hanya bahan yang juga dipetakan ke outlet tujuan (lihat _applyAdminTransferDestFilter).
+    this._applyAdminTransferDestFilter();
+  },
+
+  // Re-filter daftar bahan saat outlet tujuan berubah.
+  onAdminToBranchChanged() {
+    this._applyAdminTransferDestFilter();
+  },
+
+  // Saring bahan outlet asal → hanya yang dipetakan ke outlet tujuan, lalu render ulang baris.
+  _applyAdminTransferDestFilter() {
+    const itemsContainer = document.getElementById('admin-transfer-items');
+    if (!itemsContainer) return;
+    const toBranchId = parseInt(document.getElementById('admin-transfer-to-branch').value);
+    const assignOk   = this._ingAssignTableOk !== false;
+    const assignMap  = this._ingAssignMap || {};
+    const source     = this._adminTransferSourceIngredients || [];
+
+    let list = source;
+    if (toBranchId && assignOk) {
+      // Outlet tujuan tidak punya/tidak dipetakan bahan ini → jangan tampilkan.
+      list = source.filter(i => assignMap[i.id] && assignMap[i.id].has(toBranchId));
+    }
+    this._adminTransferIngredients = list;
+    this._adminTransferItemCounter = 0;
     itemsContainer.innerHTML = '';
+
+    if (!source.length) {
+      itemsContainer.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Tidak ada stok di outlet asal.</div>';
+      return;
+    }
+    if (!toBranchId) {
+      itemsContainer.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Pilih outlet tujuan untuk melihat bahan yang bisa dikirim.</div>';
+      return;
+    }
+    if (!list.length) {
+      itemsContainer.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Tidak ada bahan di outlet asal yang juga dipetakan ke outlet tujuan.</div>';
+      return;
+    }
     this.addAdminTransferItem();
   },
 
@@ -3677,7 +3722,9 @@ const ADMIN = {
 
   addAdminTransferItem() {
     if (!this._adminTransferIngredients.length) {
-      showToast('Pilih outlet asal terlebih dahulu', 'warning');
+      if (!this._adminTransferSourceIngredients?.length) showToast('Pilih outlet asal terlebih dahulu', 'warning');
+      else if (!parseInt(document.getElementById('admin-transfer-to-branch')?.value)) showToast('Pilih outlet tujuan terlebih dahulu', 'warning');
+      else showToast('Tidak ada bahan di outlet asal yang juga dipetakan ke outlet tujuan', 'warning');
       return;
     }
     const container = document.getElementById('admin-transfer-items');
