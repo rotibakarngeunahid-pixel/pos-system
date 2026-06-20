@@ -174,11 +174,17 @@ const cashService = {
     // Opening cash comes from session record, not logs — fetch separately
     let openingCash = openingIn;
     let totalSales  = salesIn; // fallback: cash-only when no session
+    let sessionStatus   = null;
+    let sessionOpenedAt = null;
+    let sessionClosedAt = null;
     if (sessionId) {
       const { data: sess } = await db.from('cashier_sessions')
-        .select('opening_cash, total_sales').eq('id', sessionId).maybeSingle();
-      openingCash = parseFloat(sess?.opening_cash || 0);
-      totalSales  = parseFloat(sess?.total_sales  || 0);
+        .select('opening_cash, total_sales, status, opened_at, closed_at').eq('id', sessionId).maybeSingle();
+      openingCash     = parseFloat(sess?.opening_cash || 0);
+      totalSales      = parseFloat(sess?.total_sales  || 0);
+      sessionStatus   = sess?.status    || null;
+      sessionOpenedAt = sess?.opened_at || null;
+      sessionClosedAt = sess?.closed_at || null;
     } else {
       // Date-range report: use opening_cash of the first session in the range
       try {
@@ -246,8 +252,43 @@ const cashService = {
       }
     }
 
-    // Formula-based expected cash (operational view — excludes transfers between branches)
-    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut;
+    // ── Setoran & transfer kas yang menggeser kas FISIK outlet selama sesi ──
+    // Setoran tunai terkonfirmasi (deposit_approved) dan transfer antar-outlet
+    // mengeluarkan/memasukkan kas fisik laci meski dicatat di luar cash_logs sesi
+    // ini. WAJIB diperhitungkan agar "Ekspektasi Kas" staff SAMA dengan
+    // "Estimasi Kas Berjalan" admin (estimated_running_cash di
+    // rpc_get_admin_branch_cash_positions). Lihat memory
+    // project-bugfix-2026-06-18-deposit-running-cash.
+    let depositRunOut  = 0; // setoran tunai terkonfirmasi (kas keluar)
+    let transferRunIn  = 0; // transfer kas masuk
+    let transferRunOut = 0; // transfer kas keluar
+    if (sessionId && sessionOpenedAt) {
+      try {
+        let ledQ = db.from('branch_cash_ledger')
+          .select('movement_type, amount')
+          .eq('branch_id', branchId)
+          .in('movement_type', ['deposit_approved', 'cash_branch_transfer_in', 'cash_branch_transfer_out'])
+          .gte('created_at', sessionOpenedAt);
+        // Sesi sudah ditutup → batasi sampai waktu tutup agar tak menarik mutasi sesi berikutnya
+        if (sessionStatus !== 'open' && sessionClosedAt) ledQ = ledQ.lte('created_at', sessionClosedAt);
+        const { data: ledRows, error: ledErr } = await ledQ;
+        if (!ledErr) {
+          for (const r of (ledRows || [])) {
+            const amt = parseFloat(r.amount || 0);
+            if      (r.movement_type === 'deposit_approved')          depositRunOut  += amt;
+            else if (r.movement_type === 'cash_branch_transfer_in')   transferRunIn  += amt;
+            else if (r.movement_type === 'cash_branch_transfer_out')  transferRunOut += amt;
+          }
+        }
+      } catch (e) {
+        console.warn('cashService.getSummary: failed to fetch branch ledger adjustments', e);
+      }
+    }
+    const runningLedgerAdj = transferRunIn - transferRunOut - depositRunOut;
+
+    // Expected cash — disamakan dengan estimasi kas berjalan admin: termasuk
+    // setoran tunai & transfer antar-outlet yang terjadi selama sesi berlangsung.
+    const expectedCash = openingCash + salesIn + manualIn - manualOut - refundOut - voidOut + runningLedgerAdj;
 
     return {
       openingCash,
@@ -259,10 +300,14 @@ const cashService = {
       refundOut,
       voidOut,
       depositOut,
+      depositRunOut,
+      transferRunIn,
+      transferRunOut,
+      runningLedgerAdj,
       expectedCash,
       branchBalance,
-      totalIn:  openingCash + salesIn + manualIn,
-      totalOut: manualOut + refundOut + voidOut
+      totalIn:  openingCash + salesIn + manualIn + transferRunIn,
+      totalOut: manualOut + refundOut + voidOut + depositRunOut + transferRunOut
     };
   },
 

@@ -800,7 +800,9 @@ const POS = {
     const manualIn     = summary ? summary.manualIn     : 0;
     const manualOut    = summary ? summary.manualOut    : 0;
     const refundOut    = summary ? summary.refundOut    : 0;
-    const depositOut   = summary ? summary.depositOut   : 0;
+    const depositRunOut = summary ? (summary.depositRunOut  || 0) : 0;
+    const transferRunIn = summary ? (summary.transferRunIn  || 0) : 0;
+    const transferRunOut= summary ? (summary.transferRunOut || 0) : 0;
     const expectedCash = summary ? summary.expectedCash : openingCash + salesIn;
     const totalTrx     = this.session.total_transactions || 0;
 
@@ -838,9 +840,17 @@ const POS = {
             <span><i data-lucide="refresh-ccw" class="icon-sm text-danger" style="margin-right:6px"></i>Refund</span>
             <span class="text-danger">−${formatRupiah(refundOut)}</span>
           </div>
-          ${depositOut > 0 ? `<div class="shift-detail-row">
-            <span><i data-lucide="landmark" class="icon-sm text-danger" style="margin-right:6px"></i>Setoran Terkonfirmasi (di luar shift)</span>
-            <span class="text-danger">−${formatRupiah(depositOut)}</span>
+          ${depositRunOut > 0 ? `<div class="shift-detail-row">
+            <span><i data-lucide="landmark" class="icon-sm text-danger" style="margin-right:6px"></i>Setoran Tunai Terkonfirmasi</span>
+            <span class="text-danger">−${formatRupiah(depositRunOut)}</span>
+          </div>` : ''}
+          ${transferRunIn > 0 ? `<div class="shift-detail-row">
+            <span><i data-lucide="arrow-left-right" class="icon-sm text-success" style="margin-right:6px"></i>Transfer Kas Masuk</span>
+            <span class="text-success fw-700">+${formatRupiah(transferRunIn)}</span>
+          </div>` : ''}
+          ${transferRunOut > 0 ? `<div class="shift-detail-row">
+            <span><i data-lucide="arrow-left-right" class="icon-sm text-danger" style="margin-right:6px"></i>Transfer Kas Keluar</span>
+            <span class="text-danger">−${formatRupiah(transferRunOut)}</span>
           </div>` : ''}
         </div>
 
@@ -2876,9 +2886,13 @@ const POS = {
     const manualOut    = summary?.manualOut    ?? 0;
     const refundOut    = summary?.refundOut    ?? 0;
     const voidOut      = summary?.voidOut      ?? 0;
-    const depositOut   = summary?.depositOut   ?? 0;
+    const depositOut    = summary?.depositOut    ?? 0;
+    const depositRunOut = summary?.depositRunOut  ?? 0;
+    const transferRunIn = summary?.transferRunIn  ?? 0;
+    const transferRunOut= summary?.transferRunOut ?? 0;
     const totalCashOut = manualOut + refundOut + voidOut;
-    const expectedCash = summary?.expectedCash ?? (openingCash + salesIn + manualIn - totalCashOut);
+    const expectedCash = summary?.expectedCash
+      ?? (openingCash + salesIn + manualIn - totalCashOut - depositRunOut + transferRunIn - transferRunOut);
 
     if (!this._cashCategories?.length) {
       try { this._cashCategories = await cashService.getCategories(); } catch(e) { this._cashCategories = []; }
@@ -2931,6 +2945,21 @@ const POS = {
             <div class="cash-stat-label" style="color:var(--danger)">Kas Keluar</div>
             <div class="cash-stat-value text-danger">−${formatRupiah(totalCashOut)}</div>
           </div>
+          ${depositRunOut > 0 ? `
+          <div class="cash-stat-card">
+            <div class="cash-stat-label" style="color:var(--danger)">Setoran Tunai</div>
+            <div class="cash-stat-value text-danger">−${formatRupiah(depositRunOut)}</div>
+          </div>` : ''}
+          ${transferRunIn > 0 ? `
+          <div class="cash-stat-card">
+            <div class="cash-stat-label" style="color:var(--success)">Transfer Masuk</div>
+            <div class="cash-stat-value text-success">+${formatRupiah(transferRunIn)}</div>
+          </div>` : ''}
+          ${transferRunOut > 0 ? `
+          <div class="cash-stat-card">
+            <div class="cash-stat-label" style="color:var(--danger)">Transfer Keluar</div>
+            <div class="cash-stat-value text-danger">−${formatRupiah(transferRunOut)}</div>
+          </div>` : ''}
           <div class="cash-stat-card cash-stat-expected">
             <div class="cash-stat-label">Ekspektasi Kas</div>
             <div class="cash-stat-value">${formatRupiah(expectedCash)}</div>

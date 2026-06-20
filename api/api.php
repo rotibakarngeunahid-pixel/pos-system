@@ -288,7 +288,7 @@ function staffReadableTables(): array {
         'cashier_sessions','transactions','transaction_items',
         'cash_categories','cash_logs','ingredients','recipes','recipe_items',
         'branch_inventory','inventory_logs',
-        'deposit_accounts','cash_deposits','branch_cash_balances',
+        'deposit_accounts','cash_deposits','branch_cash_balances','branch_cash_ledger',
         'toppings','product_toppings',
         'branch_ingredient_assignments','users',
     ];
@@ -337,7 +337,7 @@ function scopeReadParamsForUser(array $user, string $table, array $params): arra
     $branchScoped = [
         'branch_products','branch_variant_prices','cashier_sessions','transactions',
         'cash_logs','branch_inventory','inventory_logs','cash_deposits',
-        'branch_cash_balances',
+        'branch_cash_balances','branch_cash_ledger',
     ];
     if (!empty($user['branch_id']) && in_array($table, $branchScoped, true) && dbColumnExists(getDB(), $table, 'branch_id')) {
         $params = forceEqParam($params, 'branch_id', (int)$user['branch_id']);
@@ -2211,7 +2211,26 @@ function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
             FROM cash_logs WHERE session_id=?
         ");
         $exp->execute([$sessionId]);
-        $expectedCash = $openingCash + (float)$exp->fetchColumn();
+
+        // Setoran tunai & transfer antar-outlet yang terjadi selama sesi berjalan
+        // menggeser kas FISIK laci meski dicatat di luar cash_logs sesi ini.
+        // Disamakan dengan estimated_running_cash (rpc_get_admin_branch_cash_positions)
+        // dan getSummary frontend, agar Ekspektasi Kas konsisten antara staff, admin,
+        // dan nilai expected_cash yang disimpan saat tutup shift.
+        $ledAdj = $pdo->prepare("
+            SELECT COALESCE(SUM(CASE
+                     WHEN movement_type = 'cash_branch_transfer_in'  THEN  amount
+                     WHEN movement_type = 'cash_branch_transfer_out' THEN -amount
+                     WHEN movement_type = 'deposit_approved'         THEN -amount
+                     ELSE 0 END), 0)
+            FROM branch_cash_ledger
+            WHERE branch_id = ?
+              AND movement_type IN ('deposit_approved','cash_branch_transfer_in','cash_branch_transfer_out')
+              AND created_at >= ?
+        ");
+        $ledAdj->execute([$branchId, $session['opened_at']]);
+
+        $expectedCash = $openingCash + (float)$exp->fetchColumn() + (float)$ledAdj->fetchColumn();
 
         $pdo->prepare("UPDATE cashier_sessions SET status='closed',closing_cash=?,expected_cash=?,current_cash_amount=?,closed_at=NOW(),balance_applied_at=NOW() WHERE id=?")
             ->execute([$closingCash,$expectedCash,$closingCash,$sessionId]);
