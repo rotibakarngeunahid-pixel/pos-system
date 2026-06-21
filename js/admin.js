@@ -78,6 +78,7 @@ const ADMIN = {
         case 'delete-ingredient': this.deleteIngredient(Number(btn.dataset.id), btn.dataset.name || ''); break;
         case 'open-ingredient-products': this.openIngredientProductsModal(Number(btn.dataset.id)); break;
         case 'view-transaction': this.viewTransaction(Number(btn.dataset.id)); break;
+        case 'open-manual-trx-modal': if (window.adminManualTransactionUi) adminManualTransactionUi.open(); break;
         case 'void-cash-log': this.voidCashLog(Number(btn.dataset.id)); break;
         case 'open-variant-modal': this.openVariantModal(Number(btn.dataset.id)); break;
         case 'delete-variant': this.deleteVariant(Number(btn.dataset.id), btn.dataset.name || ''); break;
@@ -1862,26 +1863,45 @@ const ADMIN = {
   async loadTransactions() {
     const branchId = document.getElementById('trx-branch-filter').value;
     const date     = document.getElementById('trx-date-filter').value;
+    const source   = document.getElementById('trx-source-filter')?.value || '';
     const tbody    = document.getElementById('trx-body');
 
-    let q = db.from('transactions')
-      .select('id, created_at, total, payment_method, status, branches(name), users!staff_id(name)')
-      .order('created_at', { ascending:false }).limit(200);
-    if (branchId) q = q.eq('branch_id', branchId);
-    if (date) {
-      // BUG-H4 FIX: gunakan fmt.getBusinessDateRange agar timezone WIB (UTC+8) ditangani
-      const { from, to } = fmt.getBusinessDateRange(date);
-      q = q.gte('created_at', from).lte('created_at', to);
+    const baseCols = 'id, created_at, total, payment_method, status, branches(name), users!staff_id(name)';
+    const buildQuery = (withSource) => {
+      let q = db.from('transactions')
+        .select(withSource ? baseCols + ', source' : baseCols)
+        .order('created_at', { ascending:false }).limit(200);
+      if (branchId) q = q.eq('branch_id', branchId);
+      if (date) {
+        // BUG-H4 FIX: gunakan fmt.getBusinessDateRange agar timezone WIB (UTC+8) ditangani
+        const { from, to } = fmt.getBusinessDateRange(date);
+        q = q.gte('created_at', from).lte('created_at', to);
+      }
+      if (withSource && source) q = q.eq('source', source);
+      return q;
+    };
+
+    // Kolom `source` ditambahkan migrasi 066. Bila DB belum dimigrasi, fallback
+    // ke query tanpa source agar daftar transaksi tetap tampil.
+    let withSource = this._txHasSource !== false;
+    let { data, error } = await buildQuery(withSource);
+    if (error && withSource && /source/i.test(error.message || '')) {
+      this._txHasSource = false; withSource = false;
+      ({ data, error } = await buildQuery(false));
+    } else if (!error && withSource) {
+      this._txHasSource = true;
     }
 
-    const { data, error } = await q;
-    if (error) { tbody.innerHTML = `<tr><td colspan="8" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}</td></tr>`; return; }
+    if (error) { tbody.innerHTML = `<tr><td colspan="9" class="empty-td text-danger">Gagal memuat: ${escHtml(error.message)}</td></tr>`; return; }
     const badgeClass = s => {
       if (s === 'void' || s === 'voided') return 'badge-danger';
       if (s === 'refunded') return 'badge-red';
       if (s === 'completed') return 'badge-green';
       return 'badge-orange';
     };
+    const sourceBadge = src => (src === 'manual')
+      ? '<span class="badge badge-orange" title="Diinput manual oleh admin">Manual</span>'
+      : '<span class="text-muted text-xs">POS</span>';
     tbody.innerHTML = data?.length ? data.map((t, i) => `
       <tr>
         <td class="text-muted text-xs">#${t.id}</td>
@@ -1889,11 +1909,12 @@ const ADMIN = {
         <td>${escHtml(t.branches?.name||'—')}</td>
         <td>${escHtml(t.users?.name||'—')}</td>
         <td><span class="badge badge-orange">${t.payment_method||'cash'}</span></td>
+        <td>${sourceBadge(t.source)}</td>
         <td><span class="badge ${badgeClass(t.status)}">${t.status||'completed'}</span></td>
         <td class="fw-700">${fRp(t.total)}</td>
         <td><button class="btn btn-outline btn-sm" data-admin-action="view-transaction" data-id="${t.id}">Detail</button></td>
       </tr>`).join('')
-    : `<tr><td colspan="8" class="empty-td">Tidak ada transaksi</td></tr>`;
+    : `<tr><td colspan="9" class="empty-td">Tidak ada transaksi</td></tr>`;
   },
 
   async viewTransaction(id) {
@@ -1903,13 +1924,32 @@ const ADMIN = {
     if (tErr || !t) { body.innerHTML = `<div class="text-danger p-4">Transaksi tidak ditemukan.</div>`; openModal('modal-trx-detail'); return; }
     const { data: items } = await db.from('transaction_items').select('*, products(name), product_variants(name)').eq('transaction_id', id);
     const { data: refunds } = await db.from('refund_transactions').select('*').eq('transaction_id', id).order('created_at', { ascending:false });
+
+    // Info transaksi manual (kolom dari migrasi 066): siapa admin yang input & kapan
+    let manualInfoHtml = '';
+    if (t.source === 'manual') {
+      let adminName = '—';
+      if (t.created_by) {
+        try {
+          const { data: adm } = await db.from('users').select('id, name').eq('id', t.created_by).maybeSingle();
+          adminName = adm?.name || `#${t.created_by}`;
+        } catch (_) {}
+      }
+      manualInfoHtml = `<div class="alert-warning" style="font-size:12px;margin-bottom:14px;">
+        <strong>Transaksi Manual</strong> — diinput oleh admin <strong>${escHtml(adminName)}</strong>${t.entered_at ? ` pada ${fDate(t.entered_at)}` : ''}.
+        Tanggal transaksi di atas adalah waktu bisnis yang diisi admin (bukan waktu input).
+      </div>`;
+    }
+
     body.innerHTML = `
+      ${manualInfoHtml}
       <div class="grid-2-col-s2 mb-4">
         <div><div class="form-label">ID Transaksi</div><div class="fw-700">#${t.id}</div></div>
         <div><div class="form-label">Status</div><div><span class="badge ${t.status==='void'||t.status==='voided'?'badge-danger':t.status==='refunded'?'badge-red':'badge-green'}">${t.status||'completed'}</span></div></div>
         <div><div class="form-label">Tanggal</div><div>${fDate(t.created_at)}</div></div>
         <div><div class="form-label">Cabang</div><div>${escHtml(t.branches?.name||'—')}</div></div>
         <div><div class="form-label">Kasir</div><div>${escHtml(t.users?.name||'—')}</div></div>
+        <div><div class="form-label">Sumber</div><div>${t.source==='manual' ? '<span class="badge badge-orange">Manual</span>' : '<span class="badge badge-green">POS</span>'}</div></div>
         <div><div class="form-label">Metode</div><div><span class="badge badge-orange">${t.payment_method||'cash'}</span></div></div>
         <div><div class="form-label">Subtotal</div><div>${fRp(t.subtotal||t.total)}</div></div>
         <div><div class="form-label">Diskon</div><div class="text-danger">${t.discount_amount > 0 ? '−'+fRp(t.discount_amount) : '—'}</div></div>

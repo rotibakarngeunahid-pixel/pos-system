@@ -1293,6 +1293,7 @@ function adminRpcNames(): array {
         'get_admin_branch_cash_positions',
         'get_admin_cash_sessions',
         'admin_create_manual_deposit',
+        'admin_create_manual_transaction',
         'confirm_deposit',
         'get_admin_cash_branch_transfers',
         'admin_save_investor_access',
@@ -1382,6 +1383,7 @@ function authorizeRpcRequest(string $name, array $params): array {
 
     $rateRules = [
         'process_transaction' => [20, 60],
+        'admin_create_manual_transaction' => [30, 60],
         'close_cash_session_apply_branch_balance' => [10, 60],
         'open_cash_session_from_branch_balance' => [10, 60],
         'create_deposit' => [15, 60],
@@ -1911,6 +1913,227 @@ function rpc_process_transaction(array $p): mixed {
                 'reward_name' => $redeemClaim['_reward']['name'] ?? null,
                 'discount'    => (float)($redeemClaim['_reward_discount'] ?? 0),
             ] : null,
+        ];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+// ── admin_create_manual_transaction ───────────────────────────────────────────
+// Transaksi susulan/koreksi/offline yang diinput admin. Berbeda dari
+// rpc_process_transaction: TIDAK butuh shift kas aktif, boleh backdate created_at,
+// dan harga per item boleh di-override admin. Ditandai source='manual'.
+// Sesuai keputusan: HANYA masuk rekap penjualan (tabel transactions), TIDAK
+// menyentuh saldo kas outlet / cash_logs.
+function manualTransactionResolveCreatedAt(string $raw): string {
+    $raw = trim($raw);
+    if ($raw === '') return date('Y-m-d H:i:s');
+    $raw = str_replace('T', ' ', $raw);
+    $ts = strtotime($raw);
+    if ($ts === false) throw new Exception('Tanggal/waktu transaksi tidak valid');
+    if ($ts > time() + 300) throw new Exception('Tanggal/waktu transaksi tidak boleh di masa depan');
+    if ($ts < strtotime('-3 years')) throw new Exception('Tanggal/waktu transaksi terlalu lama (maks. 3 tahun ke belakang)');
+    return date('Y-m-d H:i:s', $ts);
+}
+
+// Validasi item transaksi manual terhadap DB (produk milik cabang & aktif, varian,
+// qty) lalu hitung harga: pakai harga cabang dari DB, ATAU override admin bila ada.
+function resolveManualTransactionCart(PDO $pdo, int $branchId, array $items): array {
+    $normalized = [];
+    $subtotal   = 0.0;
+
+    foreach ($items as $item) {
+        if (!is_array($item)) throw new Exception('Item transaksi tidak valid');
+        $productId = (int)($item['product_id'] ?? $item['productId'] ?? 0);
+        $variantId = !empty($item['variant_id'] ?? $item['variantId'] ?? null) ? (int)($item['variant_id'] ?? $item['variantId']) : null;
+        $qty       = (int)($item['quantity'] ?? 0);
+        if ($productId <= 0) throw new Exception('Produk transaksi tidak valid');
+        if ($qty <= 0 || $qty > 999) throw new Exception('Qty item transaksi tidak valid (1-999)');
+
+        $prodStmt = $pdo->prepare("
+            SELECT p.id,p.name,p.price,p.default_price,p.has_variants,p.is_active,
+                   bp.id AS branch_product_id, bp.is_active AS branch_is_active
+            FROM products p
+            LEFT JOIN branch_products bp ON bp.product_id = p.id AND bp.branch_id = ?
+            WHERE p.id = ?
+            LIMIT 1
+        ");
+        $prodStmt->execute([$branchId, $productId]);
+        $product = $prodStmt->fetch();
+        if (!$product || (int)($product['is_active'] ?? 1) !== 1) throw new Exception('Produk tidak aktif atau tidak ditemukan');
+        if (empty($product['branch_product_id']) || (int)($product['branch_is_active'] ?? 0) !== 1) {
+            throw new Exception('Produk "' . $product['name'] . '" tidak aktif untuk cabang ini');
+        }
+
+        $productName = $product['name'];
+        $variantName = null;
+        $basePrice   = $product['default_price'] !== null ? (float)$product['default_price'] : (float)$product['price'];
+
+        if ($variantId) {
+            $varStmt = $pdo->prepare("
+                SELECT v.id,v.name,v.price,v.is_active,COALESCE(bvp.price, v.price) AS effective_price
+                FROM product_variants v
+                LEFT JOIN branch_variant_prices bvp ON bvp.variant_id = v.id AND bvp.branch_id = ?
+                WHERE v.id = ? AND v.product_id = ?
+                LIMIT 1
+            ");
+            $varStmt->execute([$branchId, $variantId, $productId]);
+            $variant = $varStmt->fetch();
+            if (!$variant || (int)($variant['is_active'] ?? 1) !== 1) throw new Exception('Varian tidak aktif atau tidak ditemukan');
+            $variantName = $variant['name'];
+            $basePrice   = (float)$variant['effective_price'];
+        } elseif ((int)($product['has_variants'] ?? 0) === 1) {
+            throw new Exception('Varian wajib dipilih untuk produk "' . $productName . '"');
+        }
+
+        // Override harga oleh admin (opsional). Admin dipercaya menentukan harga
+        // transaksi susulan; tetap divalidasi tidak negatif & tidak absurd.
+        $price = $basePrice;
+        if (array_key_exists('price', $item) && $item['price'] !== '' && $item['price'] !== null) {
+            $override = (float)$item['price'];
+            if ($override < 0)         throw new Exception('Harga item tidak boleh negatif');
+            if ($override > 100000000) throw new Exception('Harga item tidak wajar');
+            $price = $override;
+        }
+
+        $normalized[] = [
+            'product_id'   => $productId,
+            'variant_id'   => $variantId,
+            'product_name' => $productName,
+            'variant_name' => $variantName,
+            'quantity'     => $qty,
+            'price'        => $price,
+        ];
+        $subtotal += $price * $qty;
+    }
+
+    if (!$normalized) throw new Exception('Minimal satu item transaksi wajib diisi');
+    return [$normalized, $subtotal];
+}
+
+function rpc_admin_create_manual_transaction(array $p): mixed {
+    $pdo = getDB();
+    $pdo->beginTransaction();
+    try {
+        $authUser = $p['_auth_user'] ?? null;
+        if (!$authUser || !isAdminUser($authUser)) {
+            throw new Exception('Hanya admin/owner yang dapat membuat transaksi manual');
+        }
+        $adminId   = (int)($authUser['id'] ?? 0);
+        $branchId  = (int)($p['p_branch_id'] ?? 0);
+        // Kasir yang diatasnamakan (opsional) — default: admin yang menginput.
+        $staffId   = !empty($p['p_staff_id']) ? (int)$p['p_staff_id'] : $adminId;
+        $items     = $p['p_items'] ?? [];
+        $paymentMethod  = $p['p_payment_method'] ?? 'cash';
+        $discountAmount = (float)($p['p_discount_amount'] ?? 0);
+        $taxAmount      = (float)($p['p_tax_amount']      ?? 0);
+        $feeAmount      = (float)($p['p_fee_amount']      ?? 0);
+        $notes          = trim((string)($p['p_notes'] ?? ''));
+        $clientTxId     = normalizeClientTxId($p['p_client_tx_id'] ?? null);
+        $createdAt      = manualTransactionResolveCreatedAt((string)($p['p_created_at'] ?? ''));
+
+        if (!is_array($items) || !$items) throw new Exception('Item transaksi wajib diisi');
+        if (!$branchId) throw new Exception('Cabang wajib dipilih');
+        if ($discountAmount < 0 || $taxAmount < 0 || $feeAmount < 0) {
+            throw new Exception('Nominal transaksi tidak boleh negatif');
+        }
+
+        // Cabang aktif
+        $bStmt = $pdo->prepare("SELECT id FROM branches WHERE id=? AND COALESCE(is_active,1)=1 LIMIT 1");
+        $bStmt->execute([$branchId]);
+        if (!$bStmt->fetch()) throw new Exception('Cabang tidak aktif atau tidak ditemukan');
+
+        // Kasir yang diatasnamakan harus user aktif
+        $uStmt = $pdo->prepare("SELECT id FROM users WHERE id=? AND COALESCE(is_active,1)=1 LIMIT 1");
+        $uStmt->execute([$staffId]);
+        if (!$uStmt->fetch()) throw new Exception('Kasir/staff yang dipilih tidak valid');
+
+        $paymentMethod = normalizePaymentMethod($pdo, (string)$paymentMethod);
+
+        // Idempotency (cegah double submit dari klik ganda)
+        if ($clientTxId) {
+            $chk = $pdo->prepare("SELECT id,subtotal,total,payment_amount,change_amount,discount_amount,tax_amount,fee_amount,status,client_tx_id FROM transactions WHERE client_tx_id = ? LIMIT 1");
+            $chk->execute([$clientTxId]);
+            $existing = $chk->fetch();
+            if ($existing) { $pdo->rollBack(); return $existing; }
+        }
+
+        [$cart, $subtotal] = resolveManualTransactionCart($pdo, $branchId, $items);
+        if ($discountAmount > $subtotal) throw new Exception('Diskon tidak boleh melebihi subtotal');
+        $total = $subtotal - $discountAmount + $taxAmount + $feeAmount;
+        if ($total < 0) throw new Exception('Total transaksi tidak boleh negatif');
+
+        // Pembayaran: default = total (transaksi susulan, uang pas). Boleh diisi
+        // lebih besar untuk mencatat kembalian, tapi tidak boleh kurang.
+        $paymentAmount = (isset($p['p_payment_amount']) && $p['p_payment_amount'] !== '' && $p['p_payment_amount'] !== null)
+            ? (float)$p['p_payment_amount'] : $total;
+        if ($paymentAmount < 0)      throw new Exception('Pembayaran tidak boleh negatif');
+        if ($paymentAmount < $total) $paymentAmount = $total;
+        $changeAmount = $paymentAmount - $total;
+
+        // Insert transaksi. Kolom source/created_by/entered_at hanya ditulis bila
+        // migrasi 066 sudah dijalankan (toleran terhadap DB lama).
+        $cols = ['branch_id','staff_id','session_id','payment_method','payment_amount',
+                 'subtotal','discount_amount','tax_amount','fee_amount','total','change_amount',
+                 'notes','status','client_tx_id','created_at'];
+        $vals = [$branchId,$staffId,null,$paymentMethod,$paymentAmount,
+                 $subtotal,$discountAmount,$taxAmount,$feeAmount,$total,$changeAmount,
+                 ($notes !== '' ? $notes : null),'completed',$clientTxId,$createdAt];
+        if (dbColumnExists($pdo, 'transactions', 'source'))     { $cols[] = 'source';     $vals[] = 'manual'; }
+        if (dbColumnExists($pdo, 'transactions', 'created_by'))  { $cols[] = 'created_by'; $vals[] = $adminId; }
+        if (dbColumnExists($pdo, 'transactions', 'entered_at'))  { $cols[] = 'entered_at'; $vals[] = date('Y-m-d H:i:s'); }
+
+        $colSql       = implode(',', array_map(fn($c) => "`$c`", $cols));
+        $placeholders = implode(',', array_fill(0, count($cols), '?'));
+        $stmt = $pdo->prepare("INSERT INTO transactions ($colSql) VALUES ($placeholders)");
+        try {
+            $stmt->execute($vals);
+        } catch (PDOException $e) {
+            if ($clientTxId && ($e->getCode() === '23000' || str_contains(strtolower($e->getMessage()), 'duplicate'))) {
+                $chk = $pdo->prepare("SELECT id,subtotal,total,payment_amount,change_amount,discount_amount,tax_amount,fee_amount,status,client_tx_id FROM transactions WHERE client_tx_id = ? LIMIT 1");
+                $chk->execute([$clientTxId]);
+                $existing = $chk->fetch();
+                if ($existing) { $pdo->rollBack(); return $existing; }
+            }
+            throw $e;
+        }
+        $txId = (int)$pdo->lastInsertId();
+
+        $itemStmt = $pdo->prepare("
+            INSERT INTO transaction_items
+              (transaction_id,product_id,variant_id,product_name,variant_name,quantity,price,subtotal)
+            VALUES (?,?,?,?,?,?,?,?)
+        ");
+        foreach ($cart as $item) {
+            $itemStmt->execute([
+                $txId,$item['product_id'],$item['variant_id'],
+                $item['product_name'],$item['variant_name'],
+                $item['quantity'],$item['price'],$item['price'] * $item['quantity']
+            ]);
+        }
+
+        // Catatan desain: TIDAK menulis cash_logs / branch_cash_balances. Transaksi
+        // manual murni koreksi data penjualan (backdate), tidak boleh mendistorsi
+        // posisi kas outlet yang sedang berjalan.
+
+        $pdo->commit();
+        auditLog($authUser, 'manual_transaction_create', 'transactions', null,
+            ['id' => $txId, 'total' => $total, 'payment_method' => $paymentMethod,
+             'created_at' => $createdAt, 'staff_id' => $staffId, 'source' => 'manual'], $branchId);
+
+        return [
+            'id'              => $txId,
+            'subtotal'        => $subtotal,
+            'discount_amount' => $discountAmount,
+            'tax_amount'      => $taxAmount,
+            'fee_amount'      => $feeAmount,
+            'total'           => $total,
+            'payment_amount'  => $paymentAmount,
+            'change_amount'   => $changeAmount,
+            'status'          => 'completed',
+            'source'          => 'manual',
+            'created_at'      => $createdAt,
         ];
     } catch (Throwable $e) {
         $pdo->rollBack();

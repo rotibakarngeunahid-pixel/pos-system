@@ -913,8 +913,11 @@
 
       <!-- ══════════ TRANSACTIONS ══════════ -->
       <section class="admin-section" id="section-transactions">
-        <div class="section-header">
+        <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
           <h2 class="section-title">Riwayat Transaksi</h2>
+          <button class="btn btn-primary" data-admin-action="open-manual-trx-modal">
+            <i data-lucide="plus" class="icon-sm"></i> Transaksi Manual
+          </button>
         </div>
         <div class="filters-bar">
           <div>
@@ -936,10 +939,18 @@
               <option value="">Semua Cabang</option>
             </select>
           </div>
+          <div class="form-group flex-none">
+            <label class="form-label">Sumber</label>
+            <select class="form-control w-auto" id="trx-source-filter" data-admin-change="load-transactions">
+              <option value="">Semua Sumber</option>
+              <option value="pos">POS (Kasir)</option>
+              <option value="manual">Manual (Admin)</option>
+            </select>
+          </div>
         </div>
         <div class="card"><div class="table-wrap"><table>
-          <thead><tr><th>#</th><th>Waktu</th><th>Cabang</th><th>Kasir</th><th>Metode</th><th>Status</th><th>Total</th><th>Aksi</th></tr></thead>
-          <tbody id="trx-body"><tr><td colspan="8" class="empty-td">Memuat...</td></tr></tbody>
+          <thead><tr><th>#</th><th>Waktu</th><th>Cabang</th><th>Kasir</th><th>Metode</th><th>Sumber</th><th>Status</th><th>Total</th><th>Aksi</th></tr></thead>
+          <tbody id="trx-body"><tr><td colspan="9" class="empty-td">Memuat...</td></tr></tbody>
         </table></div></div>
       </section>
 
@@ -2920,6 +2931,77 @@ atau tidak aktif."
     </div>
   </div>
 
+  <!-- Manual Transaction Modal -->
+  <div class="modal-overlay" id="modal-manual-trx">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <span class="modal-title">Input Transaksi Manual</span>
+        <button class="modal-close" data-admin-action="close-modal" data-modal-id="modal-manual-trx">✕</button>
+      </div>
+      <div class="modal-body flex flex-col gap-3">
+        <div class="alert-warning" style="font-size:12px;">
+          Untuk transaksi <strong>susulan / offline / koreksi</strong>. Transaksi ini masuk
+          <strong>laporan penjualan</strong> dan ditandai <strong>Manual</strong>, tetapi
+          <strong>tidak</strong> mengubah posisi kas outlet maupun stok.
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label class="form-label">Cabang *</label>
+            <select class="form-control" id="manual-trx-branch"><option value="">— Pilih Cabang —</option></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Atas Nama Kasir</label>
+            <select class="form-control" id="manual-trx-staff"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tanggal &amp; Waktu Transaksi *</label>
+            <input type="datetime-local" class="form-control" id="manual-trx-datetime" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Metode Pembayaran *</label>
+            <select class="form-control" id="manual-trx-payment"></select>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="card-title">Item Produk</div>
+          <button class="btn btn-outline btn-sm" data-manual-trx-action="add-item">+ Tambah Item</button>
+        </div>
+        <div id="manual-trx-items" class="flex flex-col gap-2"></div>
+        <div id="manual-trx-items-empty" class="empty-td" style="padding:8px 0;">Pilih cabang lalu tambahkan item produk.</div>
+
+        <div class="divider"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label class="form-label">Diskon (Rp)</label>
+            <input type="number" class="form-control" id="manual-trx-discount" min="0" step="any" placeholder="0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Pembayaran Diterima (Rp)</label>
+            <input type="number" class="form-control" id="manual-trx-payment-amount" min="0" step="any" placeholder="Kosongkan = uang pas (= total)" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Catatan / Keterangan</label>
+          <input type="text" class="form-control" id="manual-trx-notes" placeholder="cth: input manual oleh admin — alasan: transaksi offline lupa dicatat" />
+        </div>
+
+        <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;justify-content:space-between;"><span>Subtotal</span><strong id="manual-trx-subtotal">Rp 0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>Diskon</span><span id="manual-trx-discount-view" class="text-danger">Rp 0</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:15px;"><strong>Total</strong><strong id="manual-trx-total" class="text-danger">Rp 0</strong></div>
+          <div style="display:flex;justify-content:space-between;" id="manual-trx-change-row"><span>Kembalian</span><span id="manual-trx-change">Rp 0</span></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-admin-action="close-modal" data-modal-id="modal-manual-trx">Batal</button>
+        <button class="btn btn-primary" id="btn-save-manual-trx" data-manual-trx-action="save">Simpan Transaksi</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Cash Category Modal -->
   <div class="modal-overlay" id="modal-cash-category">
     <div class="modal modal-sm">
@@ -3294,9 +3376,10 @@ atau tidak aktif."
   <script src="js/adminCashBranchTransferUi.js?v=20260528-admin-cbt-approve-1"></script>
   <script src="js/adminFinanceIntegrationUi.js?v=20260526-api-key-hardening-1"></script>
   <script src="js/adminMemberUi.js"></script>
+  <script src="js/adminManualTransactionUi.js?v=20260621-manual-trx-1"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="js/admin.js?v=20260601-security-hardening-1"></script>
+  <script src="js/admin.js?v=20260621-manual-trx-1"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>
