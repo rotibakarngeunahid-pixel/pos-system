@@ -1280,6 +1280,7 @@ function publicRpcNames(): array {
         'rbn_health',
         'get_transactions_api',
         'get_sales_integration',
+        'get_sales_detail_integration',
         'get_kas_keluar_integration',
         'get_integration_summary',
         'get_buduk_calculator_integration',
@@ -4275,6 +4276,66 @@ function rpc_get_sales_integration(array $p): mixed {
             'total_count'    => $totalCount,
             'has_more'       => ($offset + count($data)) < $totalCount,
         ],
+    ];
+}
+
+// ── get_sales_detail_integration ──────────────────────────────────────────────
+// Detail item satu transaksi (read-only) untuk portal investor. Diambil langsung
+// dari tabel transaction_items — tanpa duplikasi data. p_branch_id wajib agar
+// transaksi cabang lain tidak bisa diintip.
+function rpc_get_sales_detail_integration(array $p): mixed {
+    $pdo      = getDB();
+    $apiKey   = $p['p_api_key']  ?? '';
+    $branchId = !empty($p['p_branch_id'])      ? (int)$p['p_branch_id']      : null;
+    $txId     = !empty($p['p_transaction_id']) ? (int)$p['p_transaction_id'] : null;
+
+    $k = $pdo->prepare("SELECT id FROM api_keys WHERE key_value=? AND is_active=1 LIMIT 1");
+    $k->execute([$apiKey]);
+    if (!$k->fetch()) throw new Exception('Invalid or inactive API key');
+    if (!$txId) throw new Exception('p_transaction_id wajib diisi');
+
+    // Validasi transaksi ada, sudah selesai, dan (jika diberikan) milik cabang tsb.
+    $conds  = ["t.id=?", "t.status='completed'"];
+    $values = [$txId];
+    if ($branchId) { $conds[] = 't.branch_id=?'; $values[] = $branchId; }
+    $tStmt = $pdo->prepare("
+        SELECT t.id, t.created_at, t.total, t.payment_method
+        FROM transactions t
+        WHERE " . implode(' AND ', $conds) . "
+        LIMIT 1
+    ");
+    $tStmt->execute($values);
+    $tx = $tStmt->fetch();
+    if (!$tx) throw new Exception('Transaksi tidak ditemukan');
+
+    $iStmt = $pdo->prepare("
+        SELECT product_name, variant_name, quantity, price
+        FROM transaction_items
+        WHERE transaction_id=?
+        ORDER BY id ASC
+    ");
+    $iStmt->execute([$txId]);
+    $items = array_map(function($r) {
+        $qty   = (float)$r['quantity'];
+        $price = (float)$r['price'];
+        return [
+            'product_name' => $r['product_name'] ?? '',
+            'variant_name' => $r['variant_name'] ?? '',
+            'quantity'     => $qty,
+            'price'        => $price,
+            'subtotal'     => $qty * $price,
+        ];
+    }, $iStmt->fetchAll());
+
+    $dt = new DateTime($tx['created_at']);
+    $dt->setTimezone(new DateTimeZone('Asia/Makassar'));
+    return [
+        'success'        => true,
+        'transaction_id' => (string)$tx['id'],
+        'created_at'     => $dt->format('Y-m-d H:i:s'),
+        'payment_method' => $tx['payment_method'] ?? '',
+        'amount'         => (float)$tx['total'],
+        'items'          => $items,
     ];
 }
 
