@@ -899,11 +899,15 @@ const ADMIN = {
     if (hintEl) hintEl.textContent = branch ? `Cabang: ${branch.name}` : '';
 
     try {
-      // Fetch all variants with their product names
-      const { data: variants, error: vErr } = await db
-        .from('product_variants')
-        .select('id, name, price, product_id, products(id, name)')
-        .order('id');
+      // Fetch only products ASSIGNED to this branch (via branch_products,
+      // is_active=true) — mirror how the POS builds its menu so the price
+      // list shows ONLY products that actually belong to the selected branch,
+      // not the global catalog.
+      const { data: branchProducts, error: vErr } = await db
+        .from('branch_products')
+        .select('product_id, products(id, name, product_variants(id, name, price, product_id))')
+        .eq('branch_id', branchId)
+        .eq('is_active', true);
       if (vErr) throw vErr;
 
       // Fetch existing overrides for this branch
@@ -921,21 +925,32 @@ const ADMIN = {
       const overrideMap = {};
       (overrides || []).forEach(o => { overrideMap[o.variant_id] = parseFloat(o.price); });
 
-      if (!variants?.length) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Belum ada varian produk</td></tr>';
+      if (!branchProducts?.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Belum ada produk yang ditugaskan ke cabang ini</td></tr>';
         return;
       }
 
-      // Group variants by product
+      // Group variants by product (only products assigned to this branch).
+      // Dedup by product id in case branch_products has multiple rows.
       const productsMap = {};
-      variants.forEach(v => {
-        const pId = v.product_id;
-        if (!productsMap[pId]) {
-          productsMap[pId] = { id: pId, name: v.products?.name || 'Unknown', variants: [], overrideCount: 0 };
+      branchProducts.forEach(row => {
+        const p = row.products;
+        if (!p) return;
+        const variantList = p.product_variants || [];
+        if (!variantList.length) return;
+        if (!productsMap[p.id]) {
+          productsMap[p.id] = { id: p.id, name: p.name || 'Unknown', variants: [], overrideCount: 0 };
         }
-        productsMap[pId].variants.push(v);
-        if (overrideMap[v.id] !== undefined) productsMap[pId].overrideCount++;
+        variantList.forEach(v => {
+          productsMap[p.id].variants.push(v);
+          if (overrideMap[v.id] !== undefined) productsMap[p.id].overrideCount++;
+        });
       });
+
+      if (!Object.keys(productsMap).length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-td">Belum ada varian produk di cabang ini</td></tr>';
+        return;
+      }
 
       const productRows = Object.values(productsMap).map(p => {
         return `
