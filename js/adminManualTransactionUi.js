@@ -209,14 +209,16 @@ const adminManualTransactionUi = {
         const variants = (p.product_variants || [])
           .filter(v => v.is_active === undefined || Number(v.is_active) === 1)
           .map(v => ({
-            id: v.id,
+            // API tabel cPanel mengembalikan id relasi embed sebagai STRING.
+            // Normalkan ke Number agar perbandingan `=== Number(...)` cocok.
+            id: Number(v.id),
             name: v.name,
             price: overrideMap[v.id] !== undefined ? overrideMap[v.id] : parseFloat(v.price || 0),
           }));
         const basePrice = (p.default_price !== null && p.default_price !== undefined)
           ? parseFloat(p.default_price) : parseFloat(p.price || 0);
         this.catalog.push({
-          id: p.id,
+          id: Number(p.id),
           name: p.name || 'Produk',
           hasVariants: Number(p.has_variants) === 1 && variants.length > 0,
           basePrice,
