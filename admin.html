@@ -2932,6 +2932,14 @@ atau tidak aktif."
   </div>
 
   <!-- Manual Transaction Modal -->
+  <style>
+    .manual-trx-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    #modal-manual-trx .mtx-item { padding:12px; display:flex; flex-direction:column; gap:8px; }
+    #modal-manual-trx .mtx-item-fields { display:flex; gap:8px; flex-wrap:wrap; }
+    #modal-manual-trx .mtx-item-fields > .form-group { margin:0; }
+    #modal-manual-trx .form-control { max-width:100%; }
+    @media (max-width:560px) { .manual-trx-grid { grid-template-columns:1fr; } }
+  </style>
   <div class="modal-overlay" id="modal-manual-trx">
     <div class="modal modal-lg">
       <div class="modal-header">
@@ -2945,7 +2953,7 @@ atau tidak aktif."
           <strong>tidak</strong> mengubah posisi kas outlet maupun stok.
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="manual-trx-grid">
           <div class="form-group">
             <label class="form-label">Cabang *</label>
             <select class="form-control" id="manual-trx-branch"><option value="">— Pilih Cabang —</option></select>
@@ -2965,7 +2973,7 @@ atau tidak aktif."
         </div>
 
         <div class="divider"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <div class="card-title">Item Produk</div>
           <button class="btn btn-outline btn-sm" data-manual-trx-action="add-item">+ Tambah Item</button>
         </div>
@@ -2973,14 +2981,14 @@ atau tidak aktif."
         <div id="manual-trx-items-empty" class="empty-td" style="padding:8px 0;">Pilih cabang lalu tambahkan item produk.</div>
 
         <div class="divider"></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="manual-trx-grid">
           <div class="form-group">
             <label class="form-label">Diskon (Rp)</label>
-            <input type="number" class="form-control" id="manual-trx-discount" min="0" step="any" placeholder="0" />
+            <input type="number" class="form-control" id="manual-trx-discount" inputmode="numeric" min="0" step="any" placeholder="0" />
           </div>
           <div class="form-group">
             <label class="form-label">Pembayaran Diterima (Rp)</label>
-            <input type="number" class="form-control" id="manual-trx-payment-amount" min="0" step="any" placeholder="Kosongkan = uang pas (= total)" />
+            <input type="number" class="form-control" id="manual-trx-payment-amount" inputmode="numeric" min="0" step="any" placeholder="Kosongkan = uang pas (= total)" />
           </div>
         </div>
         <div class="form-group">
@@ -3376,10 +3384,10 @@ atau tidak aktif."
   <script src="js/adminCashBranchTransferUi.js?v=20260528-admin-cbt-approve-1"></script>
   <script src="js/adminFinanceIntegrationUi.js?v=20260526-api-key-hardening-1"></script>
   <script src="js/adminMemberUi.js"></script>
-  <script src="js/adminManualTransactionUi.js?v=20260621-manual-trx-1"></script>
+  <script src="js/adminManualTransactionUi.js?v=20260621-manual-trx-2"></script>
   <!-- SheetJS for XLSX import/export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="js/admin.js?v=20260621-manual-trx-1"></script>
+  <script src="js/admin.js?v=20260621-manual-trx-2"></script>
   <script>document.addEventListener('DOMContentLoaded', function(){ if(window.lucide) lucide.createIcons(); });</script>
 </body>
 </html>

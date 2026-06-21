@@ -91,6 +91,7 @@ const adminManualTransactionUi = {
       if (!row) return;
       if (kind === 'qty')   row.qty = field.value;
       if (kind === 'price') row.price = field.value;
+      this._updateLineSubtotal(idx);
       this.recomputeTotals();
     });
   },
@@ -251,12 +252,18 @@ const adminManualTransactionUi = {
     row.productId = value;
     row.variantId = '';
     const prod = this.catalog.find(c => c.id === Number(value));
-    if (prod && !prod.hasVariants) {
-      row.price = String(prod.basePrice);
-    } else {
-      row.price = ''; // tunggu varian dipilih
+    row.price = (prod && !prod.hasVariants) ? String(prod.basePrice) : '';
+    // Update HANYA varian-cell + harga baris ini — jangan rebuild semua baris,
+    // agar <select> produk yang baru saja dipilih tidak ikut dihancurkan (penting
+    // di mobile: re-render saat event change bisa membatalkan pilihan).
+    const rowEl = this.el.items?.querySelector(`[data-row="${idx}"]`);
+    if (rowEl) {
+      const vCell = rowEl.querySelector('[data-variant-cell]');
+      if (vCell) vCell.innerHTML = this._variantCellHtml(row, prod);
+      const priceInput = rowEl.querySelector('[data-manual-row-field="price"]');
+      if (priceInput) priceInput.value = row.price;
     }
-    this.renderRows();
+    this._updateLineSubtotal(idx);
     this.recomputeTotals();
   },
 
@@ -267,8 +274,34 @@ const adminManualTransactionUi = {
     const prod = this.catalog.find(c => c.id === Number(row.productId));
     const variant = prod?.variants.find(v => v.id === Number(value));
     if (variant) row.price = String(variant.price);
-    this.renderRows();
+    const rowEl = this.el.items?.querySelector(`[data-row="${idx}"]`);
+    const priceInput = rowEl?.querySelector('[data-manual-row-field="price"]');
+    if (priceInput) priceInput.value = row.price;
+    this._updateLineSubtotal(idx);
     this.recomputeTotals();
+  },
+
+  _variantCellHtml(row, prod) {
+    if (prod && prod.hasVariants) {
+      const vOpts = `<option value="">— Pilih Varian —</option>` +
+        prod.variants.map(v => `<option value="${v.id}" ${Number(row.variantId) === v.id ? 'selected' : ''}>${escHtml(v.name)} — ${fRp(v.price)}</option>`).join('');
+      return `<label class="form-label" style="font-size:11px;">Varian *</label>
+        <select class="form-control" data-manual-row-field="variant" data-row-index="${row.idx}">${vOpts}</select>`;
+    }
+    return `<label class="form-label" style="font-size:11px;">Varian</label>
+      <input class="form-control" value="${prod ? '(tanpa varian)' : '—'}" disabled style="background:#f1f5f9;color:#94a3b8;" />`;
+  },
+
+  _lineSubtotal(row) {
+    if (!row.productId) return 0;
+    const qty = parseInt(row.qty) || 0;
+    return this.rowEffectivePrice(row) * Math.max(0, qty);
+  },
+
+  _updateLineSubtotal(idx) {
+    const row = this.rows.find(r => r.idx === idx);
+    const el = this.el.items?.querySelector(`[data-line-subtotal="${idx}"]`);
+    if (row && el) el.textContent = fRp(this._lineSubtotal(row));
   },
 
   renderRows() {
@@ -280,38 +313,35 @@ const adminManualTransactionUi = {
     }
     if (this.el.itemsEmpty) this.el.itemsEmpty.style.display = 'none';
 
-    const productOpts = (selectedId) => `<option value="">— Pilih Produk —</option>` +
-      this.catalog.map(c => `<option value="${c.id}" ${Number(selectedId) === c.id ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
-
-    this.el.items.innerHTML = this.rows.map(row => {
+    this.el.items.innerHTML = this.rows.map((row, i) => {
       const prod = this.catalog.find(c => c.id === Number(row.productId));
-      let variantCell;
-      if (prod && prod.hasVariants) {
-        const vOpts = `<option value="">— Pilih Varian —</option>` +
-          prod.variants.map(v => `<option value="${v.id}" ${Number(row.variantId) === v.id ? 'selected' : ''}>${escHtml(v.name)}</option>`).join('');
-        variantCell = `<select class="form-control" data-manual-row-field="variant" data-row-index="${row.idx}">${vOpts}</select>`;
-      } else {
-        variantCell = `<input class="form-control" value="${prod ? '(tanpa varian)' : ''}" disabled style="background:#f8fafc;color:#94a3b8;" />`;
-      }
+      const productOpts = `<option value="">— Pilih Produk —</option>` +
+        this.catalog.map(c => `<option value="${c.id}" ${Number(row.productId) === c.id ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
       return `
-        <div class="card" style="padding:10px;display:grid;grid-template-columns:1.8fr 1.4fr 0.7fr 1fr auto;gap:8px;align-items:end;">
-          <div class="form-group" style="margin:0;">
-            <label class="form-label" style="font-size:11px;">Produk</label>
-            <select class="form-control" data-manual-row-field="product" data-row-index="${row.idx}">${productOpts(row.productId)}</select>
+        <div class="card mtx-item" data-row="${row.idx}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <strong style="font-size:12px;color:var(--text-muted,#64748b);">Item ${i + 1}</strong>
+            <button class="btn btn-danger-soft btn-sm" data-manual-trx-action="remove-item" data-row-index="${row.idx}">Hapus</button>
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label" style="font-size:11px;">Varian</label>
-            ${variantCell}
+            <label class="form-label" style="font-size:11px;">Produk *</label>
+            <select class="form-control" data-manual-row-field="product" data-row-index="${row.idx}">${productOpts}</select>
           </div>
-          <div class="form-group" style="margin:0;">
-            <label class="form-label" style="font-size:11px;">Qty</label>
-            <input type="number" class="form-control" min="1" step="1" value="${escHtml(row.qty)}" data-manual-row-field="qty" data-row-index="${row.idx}" />
+          <div class="form-group" style="margin:0;" data-variant-cell>${this._variantCellHtml(row, prod)}</div>
+          <div class="mtx-item-fields">
+            <div class="form-group" style="flex:1;min-width:80px;">
+              <label class="form-label" style="font-size:11px;">Qty *</label>
+              <input type="number" class="form-control" inputmode="numeric" min="1" step="1" value="${escHtml(row.qty)}" data-manual-row-field="qty" data-row-index="${row.idx}" />
+            </div>
+            <div class="form-group" style="flex:2;min-width:130px;">
+              <label class="form-label" style="font-size:11px;">Harga Satuan (Rp)</label>
+              <input type="number" class="form-control" inputmode="numeric" min="0" step="any" value="${escHtml(row.price)}" placeholder="0" data-manual-row-field="price" data-row-index="${row.idx}" />
+            </div>
+            <div class="form-group" style="flex:1;min-width:110px;text-align:right;">
+              <label class="form-label" style="font-size:11px;">Subtotal</label>
+              <div class="fw-700" style="padding-top:8px;" data-line-subtotal="${row.idx}">${fRp(this._lineSubtotal(row))}</div>
+            </div>
           </div>
-          <div class="form-group" style="margin:0;">
-            <label class="form-label" style="font-size:11px;">Harga (Rp)</label>
-            <input type="number" class="form-control" min="0" step="any" value="${escHtml(row.price)}" placeholder="0" data-manual-row-field="price" data-row-index="${row.idx}" />
-          </div>
-          <button class="btn btn-danger-soft btn-sm" data-manual-trx-action="remove-item" data-row-index="${row.idx}" title="Hapus item" style="margin-bottom:2px;">×</button>
         </div>`;
     }).join('');
   },
