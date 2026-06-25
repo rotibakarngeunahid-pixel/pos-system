@@ -2404,14 +2404,14 @@ function rpc_open_cash_session_from_branch_balance(array $p): mixed {
 // ── close_cash_session_apply_branch_balance ───────────────────────────────────
 function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
     $pdo        = getDB();
-    $sessionId  = (int)($p['p_session_id']  ?? 0);
-    $closingCash= (float)($p['p_closing_cash'] ?? 0);
-    $staffId    = (int)($p['p_staff_id']    ?? 0);
-    $closingNote= trim($p['p_closing_note'] ?? '');
-    $authUser   = $p['_auth_user'] ?? null;
+    $sessionId       = (int)($p['p_session_id']       ?? 0);
+    $staffId         = (int)($p['p_staff_id']         ?? 0);
+    $closingNote     = trim($p['p_closing_note']       ?? '');
+    $cashCheckStatus = trim($p['p_cash_check_status']  ?? ''); // 'match' | 'mismatch'
+    $cashCheckNote   = trim($p['p_cash_check_note']    ?? '');
+    $authUser        = $p['_auth_user'] ?? null;
     if (!$sessionId) throw new Exception('session_id wajib diisi');
-    if (!$staffId) throw new Exception('staff_id wajib diisi');
-    if ($closingCash < 0) throw new Exception('Kas akhir tidak boleh negatif');
+    if (!$staffId)   throw new Exception('staff_id wajib diisi');
 
     $pdo->beginTransaction();
     try {
@@ -2456,8 +2456,27 @@ function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
 
         $expectedCash = $openingCash + (float)$exp->fetchColumn() + (float)$ledAdj->fetchColumn();
 
+        // Staff close: closing_cash SELALU menggunakan angka sistem (expected_cash).
+        // Staff tidak bisa mengubah nominal — hanya memilih status verifikasi fisik kas.
+        // Admin force close (p_allow_shortage=true): gunakan p_closing_cash dari admin.
+        $allowShortage = !empty($p['p_allow_shortage']);
+        $closingCash   = $allowShortage ? (float)($p['p_closing_cash'] ?? 0) : $expectedCash;
+        if ($closingCash < 0) throw new Exception('Kas akhir tidak boleh negatif');
+
         $pdo->prepare("UPDATE cashier_sessions SET status='closed',closing_cash=?,expected_cash=?,current_cash_amount=?,closed_at=NOW(),balance_applied_at=NOW() WHERE id=?")
             ->execute([$closingCash,$expectedCash,$closingCash,$sessionId]);
+
+        // Simpan hasil verifikasi fisik kas (migration 067) — abaikan jika kolom belum ada
+        if ($cashCheckStatus) {
+            try {
+                $checkAt = date('Y-m-d H:i:s');
+                $pdo->prepare("UPDATE cashier_sessions SET cash_check_status=?,cash_check_note=?,cash_checked_at=? WHERE id=?")
+                    ->execute([$cashCheckStatus, $cashCheckNote ?: null, $checkAt, $sessionId]);
+            } catch (Throwable $ckErr) {
+                // Kolom belum ada (migration 067 belum dijalankan) — tutup shift tetap berhasil
+                error_log('rpc_close_cash_session: cash_check columns not available — jalankan migration 067');
+            }
+        }
 
         // Update branch_cash_balances
         $balStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
@@ -2474,22 +2493,40 @@ function rpc_close_cash_session_apply_branch_balance(array $p): mixed {
                 ->execute([$closingCash,$sessionId,$staffId,$staffId,$branchId]);
         }
 
-        $ledgerNote = $closingNote ? 'Tutup kas — ' . $closingNote : 'Tutup kas — saldo cabang diperbarui';
+        // Selisih kas = kas fisik yang dihitung (closingCash) − ekspektasi sistem
+        // (expectedCash). Dicatat di ledger agar "Selisih" pada Riwayat Kas Outlet
+        // transparan dan bisa dijelaskan (bukan disembunyikan).
+        $variance = $closingCash - $expectedCash;
+        if ($cashCheckStatus === 'match') {
+            $noteContext = 'Fisik sesuai sistem';
+        } elseif ($cashCheckStatus === 'mismatch') {
+            $noteContext = 'Fisik TIDAK sesuai' . ($cashCheckNote ? ': ' . mb_substr($cashCheckNote, 0, 80) : '');
+        } elseif ($closingNote) {
+            $noteContext = $closingNote;
+        } else {
+            $noteContext = 'saldo cabang diperbarui';
+        }
+        $ledgerNote = 'Tutup kas — ' . $noteContext;
         rpcInsertBranchCashLedger($pdo,$branchId,$staffId,null,$sessionId,null,
             'session_close', $closingCash >= $balanceBefore ? 'in' : 'out',
             abs($closingCash - $balanceBefore),$balanceBefore,$closingCash,
-            $ledgerNote,'cashier_sessions',(string)$sessionId);
+            $ledgerNote,'cashier_sessions',(string)$sessionId, $variance);
 
         $pdo->commit();
-        auditLog($authUser, 'cash_session_close', 'cashier_sessions', $session, ['closing_cash'=>$closingCash,'expected_cash'=>$expectedCash], $branchId);
+        auditLog($authUser, 'cash_session_close', 'cashier_sessions', $session, [
+            'closing_cash'      => $closingCash,
+            'expected_cash'     => $expectedCash,
+            'cash_check_status' => $cashCheckStatus ?: null,
+        ], $branchId);
         return [
-            'id'             => $sessionId,
-            'status'         => 'closed',
-            'closing_cash'   => $closingCash,
-            'expected_cash'  => $expectedCash,
-            'balance_before' => $balanceBefore,
-            'balance_after'  => $closingCash,
-            'already_closed' => false,
+            'id'               => $sessionId,
+            'status'           => 'closed',
+            'closing_cash'     => $closingCash,
+            'expected_cash'    => $expectedCash,
+            'balance_before'   => $balanceBefore,
+            'balance_after'    => $closingCash,
+            'already_closed'   => false,
+            'cash_check_status'=> $cashCheckStatus ?: null,
         ];
     } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
 }
@@ -2525,11 +2562,13 @@ function rpc_admin_force_close_branch_cash_session(array $p): mixed {
     $sd = $sessData->fetch();
     $note = 'Ditutup paksa oleh admin (ID:' . $adminId . ') — ' . $reason;
     return rpc_close_cash_session_apply_branch_balance([
-        'p_session_id'   => $s['id'],
-        'p_closing_cash' => $closingCash,
-        'p_staff_id'     => $sd['staff_id'],
-        'p_closing_note' => $note,
-        '_auth_user'     => $p['_auth_user'] ?? null,
+        'p_session_id'    => $s['id'],
+        'p_closing_cash'  => $closingCash,
+        'p_staff_id'      => $sd['staff_id'],
+        'p_closing_note'  => $note,
+        // Paksa Tutup adalah jalan darurat admin: boleh menutup walau kas kurang.
+        'p_allow_shortage' => true,
+        '_auth_user'      => $p['_auth_user'] ?? null,
     ]);
 }
 
@@ -2614,8 +2653,21 @@ function rpc_get_admin_branch_cash_positions(array $p): mixed {
           u_lc_open.name                        AS last_opened_by_name,
           u_lc_close.name                       AS last_closed_by_name,
 
-          0                                     AS has_variance,
-          NULL                                  AS last_variance_amount,
+          -- Selisih kas tutup shift terakhir = kas fisik (closing_cash) minus
+          -- ekspektasi sistem (expected_cash). DULU di-hardcode 0/NULL sehingga
+          -- selisih nyata (mis. 172rb fisik vs 167rb estimasi) tidak pernah tampil
+          -- di kolom Selisih Terakhir. Sekarang dihitung dari sesi terakhir yang
+          -- ditutup agar transparan.
+          CASE
+            WHEN lc.expected_cash IS NOT NULL
+                 AND ABS(COALESCE(lc.closing_cash, 0) - lc.expected_cash) >= 0.5
+            THEN 1 ELSE 0
+          END                                   AS has_variance,
+          CASE
+            WHEN lc.expected_cash IS NOT NULL
+            THEN COALESCE(lc.closing_cash, 0) - lc.expected_cash
+            ELSE NULL
+          END                                   AS last_variance_amount,
 
           (
             SELECT COALESCE(SUM(cd.amount), 0)
@@ -6084,19 +6136,20 @@ function rpcInsertBranchCashLedger(
     ?int $sessionId, ?string $transferId,
     string $movementType, string $direction, float $amount,
     float $before, float $after,
-    ?string $reason, ?string $srcTable, ?string $srcId
+    ?string $reason, ?string $srcTable, ?string $srcId,
+    ?float $variance = null
 ): void {
     try {
         $pdo->prepare("
             INSERT IGNORE INTO branch_cash_ledger
               (branch_id,staff_id,admin_id,cash_session_id,transfer_id,
                movement_type,direction,amount,balance_before,balance_after,
-               reason,source_table,source_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               variance_amount,reason,source_table,source_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ")->execute([
             $branchId,$staffId,$adminId,$sessionId,$transferId,
             $movementType,$direction,$amount,$before,$after,
-            $reason,$srcTable,$srcId
+            $variance,$reason,$srcTable,$srcId
         ]);
     } catch (Throwable) { /* ignore duplicate */ }
 }

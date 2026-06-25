@@ -166,15 +166,17 @@ const transactionService = {
   },
 
   // ── Tutup shift dan update posisi kas outlet (branch-based) ──
-  async closeShiftApplyBalance({ sessionId, closingCash, staffId, closingNote = null }) {
+  async closeShiftApplyBalance({ sessionId, closingCash, staffId, closingNote = null, cashCheckStatus = null, cashCheckNote = null }) {
     if (!sessionId) throw new Error('sessionId wajib diisi');
     if (!staffId)   throw new Error('staffId wajib diisi');
 
     const { data, error } = await db.rpc('close_cash_session_apply_branch_balance', {
-      p_session_id:   sessionId,
-      p_closing_cash: closingCash,
-      p_staff_id:     staffId,
-      p_closing_note: closingNote || null
+      p_session_id:        sessionId,
+      p_closing_cash:      closingCash,       // backend baru mengabaikan ini untuk staff; tetap dikirim untuk kompatibilitas admin force-close
+      p_staff_id:          staffId,
+      p_closing_note:      closingNote       || null,
+      p_cash_check_status: cashCheckStatus   || null,
+      p_cash_check_note:   cashCheckNote     || null
     });
 
     if (error) {
@@ -203,7 +205,7 @@ const transactionService = {
   },
 
   // ── Close cashier shift ───────────────────────────────────────
-  async closeShift({ sessionId, closingCash, staffId = null }) {
+  async closeShift({ sessionId, closingCash, staffId = null, cashCheckStatus = null, cashCheckNote = null }) {
     const { data: sess } = await db.from('cashier_sessions')
       .select('id, staff_id, status').eq('id', sessionId).single();
     if (!sess) throw new Error('Sesi tidak ditemukan');
@@ -215,7 +217,9 @@ const transactionService = {
     return this.closeShiftApplyBalance({
       sessionId,
       closingCash,
-      staffId: effectiveStaffId
+      staffId: effectiveStaffId,
+      cashCheckStatus,
+      cashCheckNote
     });
   },
 

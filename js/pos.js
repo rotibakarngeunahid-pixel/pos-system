@@ -186,6 +186,7 @@ const POS = {
       else if (action === 'ingredient-log-filter-change') POS.loadIngredientLogData(false);
       else if (action === 'stock-adj-reason-change') POS.onStockReasonChange();
       else if (action === 'send-transfer-branch-changed') POS.onSendTransferBranchChanged();
+      else if (action === 'toggle-cash-check-note') POS.toggleCashCheckNote(changeNode.value);
     });
     document.addEventListener('input', e => {
       const inputNode = e.target.closest('[data-action-input]');
@@ -855,61 +856,108 @@ const POS = {
         </div>
 
         <div class="shift-expected-box">
-          <div class="shift-expected-label">Ekspektasi Kas Akhir (Sistem)</div>
+          <div class="shift-expected-label">Saldo Kas Akhir Menurut Sistem</div>
           <div class="shift-expected-val">${formatRupiah(expectedCash)}</div>
         </div>
 
-        <div class="shift-actual-input">
-          <label class="form-label text-md fw-700" style="color:var(--text); margin-bottom:8px">Kas Aktual (Hitung Fisik Laci) *</label>
-          <div class="input-prefix-wrap" style="box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: var(--r-lg);">
-            <span class="input-prefix" style="font-weight:800; font-size:16px;">Rp</span>
-            <input type="number" class="form-control input-hero" id="shift-closing-cash"
-              placeholder="0" min="0" style="font-size:22px; font-weight:900; height:54px"
-              data-action-input="update-shift-diff" />
+        <div class="shift-verify-section" style="margin-top:16px">
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--r-lg);background:rgba(59,130,246,0.07);margin-bottom:14px">
+            <i data-lucide="info" class="icon-sm" style="color:var(--primary);margin-top:2px;flex-shrink:0"></i>
+            <p style="margin:0;font-size:13px;line-height:1.5;color:var(--text)">
+              <strong>Silakan hitung uang fisik di laci Anda.</strong><br>
+              Apakah jumlah uang fisik sama dengan <strong>Saldo Kas Akhir Menurut Sistem</strong> di atas?
+            </p>
           </div>
-        </div>
-
-        <div id="shift-selisih-box" class="shift-selisih-box" style="display:none">
-          <div class="shift-selisih-icon" id="shift-selisih-icon"></div>
-          <div class="shift-selisih-info">
-            <span class="shift-selisih-label">Selisih Kas</span>
-            <span class="shift-selisih-val" id="shift-selisih-val">—</span>
+          <div style="display:flex;gap:10px">
+            <label class="shift-verify-opt" id="shift-opt-match" style="flex:1;display:flex;align-items:center;gap:10px;padding:14px 16px;border:2px solid var(--border);border-radius:var(--r-lg);cursor:pointer;transition:border-color 0.15s,background 0.15s">
+              <input type="radio" name="cash-check" value="match" id="radio-cash-match"
+                data-action-change="toggle-cash-check-note"
+                style="accent-color:var(--success);width:18px;height:18px;flex-shrink:0">
+              <span>
+                <span style="display:block;font-weight:700;color:var(--success)">✓ Sesuai</span>
+                <span style="font-size:12px;color:var(--text-muted)">Uang fisik sama dengan saldo sistem</span>
+              </span>
+            </label>
+            <label class="shift-verify-opt" id="shift-opt-mismatch" style="flex:1;display:flex;align-items:center;gap:10px;padding:14px 16px;border:2px solid var(--border);border-radius:var(--r-lg);cursor:pointer;transition:border-color 0.15s,background 0.15s">
+              <input type="radio" name="cash-check" value="mismatch" id="radio-cash-mismatch"
+                data-action-change="toggle-cash-check-note"
+                style="accent-color:var(--danger);width:18px;height:18px;flex-shrink:0">
+              <span>
+                <span style="display:block;font-weight:700;color:var(--danger)">✗ Tidak Sesuai</span>
+                <span style="font-size:12px;color:var(--text-muted)">Ada selisih, perlu dicek admin/owner</span>
+              </span>
+            </label>
+          </div>
+          <div id="shift-mismatch-note" style="display:none;margin-top:12px">
+            <label class="form-label fw-700" for="shift-check-note" style="margin-bottom:6px">Catatan / Alasan Selisih *</label>
+            <textarea id="shift-check-note" class="form-control" rows="3" maxlength="500"
+              placeholder="Contoh: Uang fisik kurang Rp 5.000, mungkin ada kembalian yang salah. Perlu dicek owner/admin."></textarea>
+            <div style="margin-top:8px;padding:8px 12px;border-radius:var(--r-md);background:rgba(220,38,38,0.07);color:var(--danger);font-size:12px;font-weight:600;line-height:1.4">
+              Shift tetap akan ditutup dengan saldo sistem. Catatan ini akan diteruskan ke admin/owner untuk ditindaklanjuti.
+            </div>
           </div>
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
 
-    document.getElementById('shift-closing-cash').value = '';
+    // Reset radio & note setiap modal dibuka
+    const radios = document.querySelectorAll('input[name="cash-check"]');
+    radios.forEach(r => { r.checked = false; });
+    const mismatchNote = document.getElementById('shift-mismatch-note');
+    if (mismatchNote) mismatchNote.style.display = 'none';
+    const checkNote = document.getElementById('shift-check-note');
+    if (checkNote) checkNote.value = '';
+    document.querySelectorAll('.shift-verify-opt').forEach(lbl => {
+      lbl.style.borderColor = '';
+      lbl.style.background  = '';
+    });
+    const closeBtn = document.getElementById('btn-close-shift');
+    if (closeBtn) closeBtn.disabled = false;
     openModal('modal-close-shift');
   },
 
-  updateShiftDiff(val) {
-    const actual   = parseFloat(val) || 0;
-    const expected = this._closeShiftExpected || 0;
-    const diff     = actual - expected;
-    const box      = document.getElementById('shift-selisih-box');
-    const valEl    = document.getElementById('shift-selisih-val');
-    const iconEl   = document.getElementById('shift-selisih-icon');
-    if (!box || !valEl) return;
-    box.style.display = 'flex';
-    box.className = 'shift-selisih-box ' + (diff === 0 ? 'selisih-ok' : diff > 0 ? 'selisih-lebih' : 'selisih-kurang');
-    valEl.textContent = (diff >= 0 ? '+' : '−') + formatRupiah(Math.abs(diff));
-    if (iconEl) {
-       iconEl.innerHTML = diff === 0 ? '<i data-lucide="check-circle"></i>' : (diff > 0 ? '<i data-lucide="trending-up"></i>' : '<i data-lucide="alert-circle"></i>');
-       if (window.lucide) lucide.createIcons();
-    }
+  toggleCashCheckNote(value) {
+    const wrap = document.getElementById('shift-mismatch-note');
+    if (wrap) wrap.style.display = value === 'mismatch' ? '' : 'none';
+    // Highlight label yang dipilih
+    document.querySelectorAll('.shift-verify-opt').forEach(lbl => {
+      const radio = lbl.querySelector('input[type="radio"]');
+      if (!radio) return;
+      const isSelected = radio.checked;
+      lbl.style.borderColor = isSelected
+        ? (radio.value === 'match' ? 'var(--success)' : 'var(--danger)')
+        : 'var(--border)';
+      lbl.style.background = isSelected
+        ? (radio.value === 'match' ? 'rgba(34,197,94,0.07)' : 'rgba(220,38,38,0.07)')
+        : '';
+    });
   },
 
   async confirmCloseShift() {
-    const cash = parseFloat(document.getElementById('shift-closing-cash').value);
-    if (isNaN(cash) || cash < 0) { showToast('Masukkan jumlah kas akhir', 'error'); return; }
+    const selected = document.querySelector('input[name="cash-check"]:checked');
+    if (!selected) {
+      showToast('Pilih status pengecekan kas: Sesuai atau Tidak Sesuai', 'warning');
+      return;
+    }
+    const cashCheckStatus = selected.value; // 'match' | 'mismatch'
+    let cashCheckNote = '';
+    if (cashCheckStatus === 'mismatch') {
+      cashCheckNote = (document.getElementById('shift-check-note')?.value || '').trim();
+      if (!cashCheckNote) {
+        showToast('Isi catatan/alasan selisih kas terlebih dahulu', 'warning');
+        document.getElementById('shift-check-note')?.focus();
+        return;
+      }
+    }
     const btn = document.getElementById('btn-close-shift');
     btn.disabled = true;
     try {
       const result = await transactionService.closeShiftApplyBalance({
-        sessionId:  this.session.id,
-        closingCash: cash,
-        staffId:    this.user.id
+        sessionId:      this.session.id,
+        closingCash:    this._closeShiftExpected || 0, // backward compat: backend baru mengabaikan ini
+        staffId:        this.user.id,
+        cashCheckStatus,
+        cashCheckNote:  cashCheckNote || null
       });
       this.lastClosedSession = result;
       closeModal('modal-close-shift');
@@ -920,13 +968,13 @@ const POS = {
       this.renderCart();
       this.updateHeldBadge();
       this.updateShiftUI();
-      const diff         = cash - (result.expected_cash || 0);
-      const balanceAfter = result.balance_after ?? cash;
-      const toastType    = diff >= 0 ? 'success' : 'warning';
+      const balanceAfter = result.balance_after ?? result.expected_cash ?? (this._closeShiftExpected || 0);
+      const mismatchSuffix = cashCheckStatus === 'mismatch'
+        ? ` Catatan selisih dicatat untuk admin.`
+        : '';
       showToast(
-        `Shift ditutup. Posisi kas outlet diperbarui menjadi ${formatRupiah(balanceAfter)}.` +
-        (diff !== 0 ? ` Selisih: ${diff >= 0 ? '+' : '−'}${formatRupiah(Math.abs(diff))}` : ''),
-        toastType
+        `Shift ditutup. Posisi kas outlet diperbarui menjadi ${formatRupiah(balanceAfter)}.${mismatchSuffix}`,
+        'success'
       );
       // Update cached balance state
       this._branchCashPosition.currentBalance = balanceAfter;
