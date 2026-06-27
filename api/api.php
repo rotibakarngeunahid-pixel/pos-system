@@ -1312,6 +1312,8 @@ function adminRpcNames(): array {
         'po_sync_get_pending_mappings',
         'po_sync_get_runs',
         'po_sync_get_suggestions',
+        // Inventori sync queue (monitoring POS → Inventori)
+        'get_inventory_sync_queue',
     ];
 }
 
@@ -1325,6 +1327,9 @@ function systemRpcNames(): array {
         'inventory_get_branch_stock',
         'sync_purchase_order_to_inventory',
         'sync_inventory_stock_count',
+        'sync_inventory_stock_transfer',
+        'sync_inventory_stock_transfer_status',
+        'process_inventory_sync_queue',
     ];
 }
 
@@ -4132,9 +4137,31 @@ function rpc_adjust_stock_atomic(array $p): mixed {
         if (dbColumnExists($pdo, 'inventory_logs', 'evidence_photo_url')) $logRow['evidence_photo_url'] = $evidencePhotoUrl !== '' ? $evidencePhotoUrl : null;
         if (dbColumnExists($pdo, 'inventory_logs', 'chronology'))         $logRow['chronology']         = $chronology !== '' ? $chronology : null;
         insertDynamic($pdo, 'inventory_logs', $logRow);
+        $logId = (int)$pdo->lastInsertId();
 
         $pdo->commit();
-        return ['stock_before'=>$before,'stock_after'=>$after,'ingredient_id'=>$ingredientId,'delta'=>$delta];
+
+        // Sinkronisasi stok keluar staff → Inventori (setelah commit; tidak memblok).
+        if ($isStaff && $type === 'out' && $referenceType === 'stok_keluar_staff') {
+            try {
+                queueInventorySync('stock_out', 'inventory_logs', (string)$logId, '/integration/pos/stock-out', [
+                    'pos_inventory_log_id'    => (string)$logId,
+                    'pos_branch_id'           => $branchId,
+                    'pos_ingredient_id'       => $ingredientId,
+                    'quantity'                => abs($delta),
+                    'stock_before'            => $before,
+                    'stock_after'             => $after,
+                    'reason'                  => $reason !== '' ? $reason : null,
+                    'evidence_photo_url'      => $evidencePhotoUrl !== '' ? $evidencePhotoUrl : null,
+                    'chronology'              => $chronology !== '' ? $chronology : null,
+                    'created_by_pos_user_id'  => $createdBy,
+                    'created_by_name'         => lookupUserName($pdo, $createdBy),
+                    'created_at'              => date('c'),
+                ]);
+            } catch (Throwable $e) { error_log('sync stok keluar→inventori: ' . $e->getMessage()); }
+        }
+
+        return ['stock_before'=>$before,'stock_after'=>$after,'ingredient_id'=>$ingredientId,'delta'=>$delta,'inventory_log_id'=>$logId];
     } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
 }
 
@@ -5038,6 +5065,245 @@ function updateStockTransferStatus(PDO $pdo, int $transferId, string $status, in
     $pdo->prepare("UPDATE stock_transfers SET " . implode(',', $sets) . " WHERE id=?")->execute($values);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// INTEGRASI POS → INVENTORI (event sync: transfer & stok keluar)
+//   Dipanggil SETELAH commit POS. Tidak pernah melempar ke pemanggil:
+//   transaksi POS sudah sukses; bila Inventori gagal, event tetap di-queue
+//   untuk diretry (rpc process_inventory_sync_queue / cron).
+// ══════════════════════════════════════════════════════════════════════════════
+
+function inventorySyncConfigured(): bool {
+    return INVENTORY_API_URL !== '' && INVENTORY_API_KEY !== '';
+}
+
+/**
+ * POST JSON ke API Inventori. Tidak melempar.
+ * @return array{ok:bool,http:int,body:mixed,error:?string}
+ */
+function inventoryApiPost(string $path, array $payload): array {
+    if (!inventorySyncConfigured()) {
+        return ['ok' => false, 'http' => 0, 'body' => null, 'error' => 'inventory_not_configured'];
+    }
+    $url = INVENTORY_API_URL . '/' . ltrim($path, '/');
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER     => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'X-API-Key: ' . INVENTORY_API_KEY,
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 8,
+        CURLOPT_CONNECTTIMEOUT => 4,
+    ]);
+    $raw     = curl_exec($ch);
+    $http    = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+
+    if ($raw === false) {
+        return ['ok' => false, 'http' => $http, 'body' => null, 'error' => $curlErr ?: 'curl_failed'];
+    }
+    $json = json_decode((string)$raw, true);
+    $ok   = $http >= 200 && $http < 300 && (!is_array($json) || ($json['success'] ?? true) !== false);
+    $err  = $ok ? null : (is_array($json) && isset($json['error']['message']) ? $json['error']['message'] : ('HTTP ' . $http));
+    return ['ok' => $ok, 'http' => $http, 'body' => $json ?? $raw, 'error' => $err];
+}
+
+function lookupUserName(PDO $pdo, ?int $userId): ?string {
+    if (!$userId) return null;
+    try {
+        $s = $pdo->prepare("SELECT name FROM users WHERE id=? LIMIT 1");
+        $s->execute([$userId]);
+        $n = $s->fetchColumn();
+        return $n !== false ? (string)$n : null;
+    } catch (Throwable) { return null; }
+}
+
+/** Catat event ke antrian + langsung coba kirim. Tidak pernah melempar. */
+function queueInventorySync(string $eventType, string $sourceTable, string $sourceId, string $endpoint, array $payload): void {
+    try {
+        $pdo = getDB();
+        $stmt = $pdo->prepare("
+            INSERT INTO inventory_sync_queue (event_type, source_table, source_id, endpoint, payload, status, attempts)
+            VALUES (?,?,?,?,?, 'pending', 0)
+            ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint), payload=VALUES(payload),
+                status='pending', next_retry_at=NULL, updated_at=CURRENT_TIMESTAMP
+        ");
+        $stmt->execute([$eventType, $sourceTable, $sourceId, $endpoint, json_encode($payload, JSON_UNESCAPED_UNICODE)]);
+        // Ambil id secara deterministik (lastInsertId tidak andal setelah
+        // ON DUPLICATE KEY UPDATE — bisa mengembalikan id INSERT sebelumnya).
+        $sel = $pdo->prepare("SELECT id FROM inventory_sync_queue WHERE event_type=? AND source_table=? AND source_id=? LIMIT 1");
+        $sel->execute([$eventType, $sourceTable, $sourceId]);
+        $queueId = (int)($sel->fetchColumn() ?: 0);
+        dispatchInventorySyncRow($queueId, $endpoint, $payload);
+    } catch (Throwable $e) {
+        error_log('queueInventorySync gagal: ' . $e->getMessage());
+    }
+}
+
+/** Kirim satu baris antrian & update statusnya. Tidak melempar. */
+function dispatchInventorySyncRow(int $queueId, string $endpoint, array $payload): void {
+    if ($queueId <= 0) return;
+    try {
+        $pdo = getDB();
+        $pdo->prepare("UPDATE inventory_sync_queue SET status='processing', attempts=attempts+1, updated_at=NOW() WHERE id=?")->execute([$queueId]);
+        $res = inventoryApiPost($endpoint, $payload);
+        if ($res['ok']) {
+            $pdo->prepare("UPDATE inventory_sync_queue SET status='applied', last_error=NULL, next_retry_at=NULL, updated_at=NOW() WHERE id=?")->execute([$queueId]);
+        } else {
+            $err = substr((string)($res['error'] ?? 'unknown'), 0, 1000);
+            $pdo->prepare("UPDATE inventory_sync_queue SET status='failed', last_error=?, next_retry_at=DATE_ADD(NOW(), INTERVAL 5 MINUTE), updated_at=NOW() WHERE id=?")->execute([$err, $queueId]);
+        }
+    } catch (Throwable $e) {
+        error_log('dispatchInventorySyncRow gagal: ' . $e->getMessage());
+    }
+}
+
+/** Kirim perubahan status transfer POS → Inventori. */
+function syncTransferStatusToInventori(int $transferId, ?string $code, string $status): void {
+    queueInventorySync('stock_transfer_status', 'stock_transfers', $transferId . ':' . $status, '/integration/pos/stock-transfer-status', [
+        'pos_transfer_id' => (string)$transferId,
+        'transfer_code'   => $code,
+        'status'          => $status,
+        'created_at'      => date('c'),
+    ]);
+}
+
+// ── sync_inventory_stock_transfer (Inventori → POS, system RPC, idempoten) ─────
+// Inventori mendorong transfer antar cabang ke POS. Membuat stock_transfers
+// pending + mengurangi stok cabang asal (mode strict). Idempoten berdasarkan
+// (source_system='inventory', source_event_id).
+function rpc_sync_inventory_stock_transfer(array $p): mixed {
+    $pdo           = getDB();
+    $sourceEventId = trim((string)($p['p_source_event_id'] ?? ''));
+    if ($sourceEventId === '') throw new Exception('p_source_event_id wajib diisi');
+    $fromBranch = (int)($p['p_from_branch_id'] ?? 0);
+    $toBranch   = (int)($p['p_to_branch_id'] ?? 0);
+    $rawItems   = $p['p_items'] ?? [];
+    if (is_string($rawItems)) { $decoded = json_decode($rawItems, true); $rawItems = is_array($decoded) ? $decoded : []; }
+    $items     = normalizeStockTransferItems(is_array($rawItems) ? $rawItems : []);
+    $notes     = $p['p_notes'] ?? null;
+    $staffName = trim((string)($p['p_staff_name'] ?? ''));
+
+    if ($fromBranch <= 0 || $toBranch <= 0 || $fromBranch === $toBranch) throw new Exception('Outlet asal dan tujuan tidak valid');
+    if (!$items) throw new Exception('Tidak ada bahan untuk ditransfer');
+
+    $find = $pdo->prepare("SELECT id, transfer_code, status FROM stock_transfers WHERE source_system='inventory' AND source_event_id=? LIMIT 1");
+    $find->execute([$sourceEventId]);
+    if ($row = $find->fetch()) {
+        return ['success' => true, 'transfer_id' => (int)$row['id'], 'transfer_code' => $row['transfer_code'], 'status' => $row['status'], 'idempotent' => true];
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $code        = stockTransferCode($pdo);
+        $creatorCol  = stockTransferCreatorCol($pdo);
+        insertDynamic($pdo, 'stock_transfers', [
+            'transfer_code'   => $code,
+            'from_branch_id'  => $fromBranch,
+            'to_branch_id'    => $toBranch,
+            'status'          => 'pending',
+            'notes'           => $notes,
+            $creatorCol       => 0,
+            'source_system'   => 'inventory',
+            'source_event_id' => $sourceEventId,
+        ]);
+        $transferId = (int)$pdo->lastInsertId();
+
+        $toNameStmt = $pdo->prepare("SELECT name FROM branches WHERE id=? LIMIT 1");
+        $toNameStmt->execute([$toBranch]);
+        $toName    = $toNameStmt->fetchColumn() ?: 'outlet tujuan';
+        $qtyCol    = stockTransferQtyCol($pdo);
+        $staffNote = $staffName !== '' ? " oleh $staffName" : '';
+
+        foreach ($items as $item) {
+            insertDynamic($pdo, 'stock_transfer_items', [
+                'transfer_id'   => $transferId,
+                'ingredient_id' => $item['ingredient_id'],
+                $qtyCol         => $item['qty'],
+            ]);
+            // Mode strict: kurangi stok asal. Diizinkan negatif — perpindahan fisik
+            // sudah terjadi di Inventori; jangan blokir karena lag stok POS.
+            [$before, $after] = adjustBranchInventory($pdo, $fromBranch, $item['ingredient_id'], -$item['qty']);
+            insertInventoryMovement($pdo, $fromBranch, $item['ingredient_id'], -$item['qty'], 'transfer_out', $before, $after, "Transfer dari Inventori ke $toName [$code]$staffNote - menunggu konfirmasi", null, 'transfer', (string)$transferId);
+        }
+
+        $pdo->commit();
+        return ['success' => true, 'transfer_id' => $transferId, 'transfer_code' => $code, 'status' => 'pending', 'idempotent' => false];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        // Race condition pada unique key → kembalikan transfer existing.
+        $find->execute([$sourceEventId]);
+        if ($row = $find->fetch()) {
+            return ['success' => true, 'transfer_id' => (int)$row['id'], 'transfer_code' => $row['transfer_code'], 'status' => $row['status'], 'idempotent' => true];
+        }
+        throw $e;
+    }
+}
+
+// ── sync_inventory_stock_transfer_status (Inventori → POS, system RPC) ─────────
+// Inventori mengubah status transfer yang sebelumnya didorong ke POS.
+function rpc_sync_inventory_stock_transfer_status(array $p): mixed {
+    $pdo           = getDB();
+    $sourceEventId = trim((string)($p['p_source_event_id'] ?? ''));
+    $transferId    = (int)($p['p_transfer_id'] ?? 0);
+    if ($transferId <= 0 && $sourceEventId !== '') {
+        $s = $pdo->prepare("SELECT id FROM stock_transfers WHERE source_system='inventory' AND source_event_id=? LIMIT 1");
+        $s->execute([$sourceEventId]);
+        $transferId = (int)($s->fetchColumn() ?: 0);
+    }
+    if ($transferId <= 0) throw new Exception('Transfer tidak ditemukan');
+    $status = strtolower(trim((string)($p['p_status'] ?? '')));
+    $reason = $p['p_reason'] ?? null;
+    switch ($status) {
+        case 'confirmed': return rpc_confirm_stock_transfer(['p_transfer_id' => $transferId, 'p_user_id' => 0]);
+        case 'rejected':  return rpc_reject_stock_transfer(['p_transfer_id' => $transferId, 'p_user_id' => 0, 'p_reason' => $reason]);
+        case 'cancelled':
+        case 'canceled':  return rpc_cancel_stock_transfer(['p_transfer_id' => $transferId, 'p_user_id' => 0, 'p_reason' => $reason]);
+        default: throw new Exception('Status tidak valid: ' . $status);
+    }
+}
+
+// ── process_inventory_sync_queue (retry antrian; cron/admin via API key) ───────
+function rpc_process_inventory_sync_queue(array $p): mixed {
+    $pdo   = getDB();
+    $limit = min(100, max(1, (int)($p['p_limit'] ?? 25)));
+    $stmt  = $pdo->prepare("
+        SELECT id, endpoint, payload FROM inventory_sync_queue
+        WHERE status IN ('pending','failed') AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+        ORDER BY id ASC LIMIT $limit
+    ");
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+    $applied = 0; $failed = 0;
+    foreach ($rows as $r) {
+        $payload = json_decode((string)$r['payload'], true) ?: [];
+        dispatchInventorySyncRow((int)$r['id'], (string)$r['endpoint'], $payload);
+        $c = $pdo->prepare("SELECT status FROM inventory_sync_queue WHERE id=?");
+        $c->execute([(int)$r['id']]);
+        if ($c->fetchColumn() === 'applied') $applied++; else $failed++;
+    }
+    return ['processed' => count($rows), 'applied' => $applied, 'failed' => $failed];
+}
+
+// ── get_inventory_sync_queue (admin: lihat status antrian) ─────────────────────
+function rpc_get_inventory_sync_queue(array $p): mixed {
+    $pdo    = getDB();
+    $status = trim((string)($p['p_status'] ?? ''));
+    $limit  = min(200, max(1, (int)($p['p_limit'] ?? 50)));
+    $where  = ''; $params = [];
+    if ($status !== '') { $where = 'WHERE status = ?'; $params[] = $status; }
+    $stmt = $pdo->prepare("
+        SELECT id, event_type, source_table, source_id, status, attempts, last_error, next_retry_at, created_at, updated_at
+        FROM inventory_sync_queue $where ORDER BY updated_at DESC LIMIT $limit
+    ");
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
 function rpc_create_stock_transfer(array $p): mixed {
     $pdo = getDB();
     $fromBranch = (int)($p['p_from_branch_id'] ?? 0);
@@ -5092,6 +5358,30 @@ function rpc_create_stock_transfer(array $p): mixed {
         }
 
         $pdo->commit();
+
+        // Sinkronisasi transfer → Inventori (setelah commit; tidak memblok bila gagal).
+        try {
+            $detailItems  = fetchStockTransferItems($pdo, [$transferId])[(string)$transferId] ?? [];
+            $payloadItems = array_map(fn($it) => [
+                'pos_ingredient_id' => (int)$it['ingredient_id'],
+                'ingredient_name'   => $it['ingredient_name'] ?? null,
+                'quantity'          => (float)$it['qty'],
+                'unit'              => $it['unit'] ?? null,
+            ], $detailItems);
+            queueInventorySync('stock_transfer', 'stock_transfers', (string)$transferId, '/integration/pos/stock-transfer', [
+                'pos_transfer_id'          => (string)$transferId,
+                'transfer_code'            => $code,
+                'from_pos_branch_id'       => $fromBranch,
+                'to_pos_branch_id'         => $toBranch,
+                'status'                   => 'pending',
+                'created_at'               => date('c'),
+                'requested_by_pos_user_id' => $userId ?: null,
+                'requested_by_name'        => lookupUserName($pdo, $userId ?: null),
+                'notes'                    => $notes,
+                'items'                    => $payloadItems,
+            ]);
+        } catch (Throwable $e) { error_log('sync transfer→inventori: ' . $e->getMessage()); }
+
         return ['success'=>true,'transfer_id'=>$transferId,'transfer_code'=>$code];
     } catch (Throwable $e) {
         $pdo->rollBack();
@@ -5125,6 +5415,7 @@ function rpc_confirm_stock_transfer(array $p): mixed {
         updateStockTransferStatus($pdo, $transferId, 'confirmed', $userId);
 
         $pdo->commit();
+        syncTransferStatusToInventori($transferId, $transfer['transfer_code'] ?? null, 'confirmed');
         return ['success'=>true,'transfer_code'=>$transfer['transfer_code']];
     } catch (Throwable $e) {
         $pdo->rollBack();
@@ -5156,6 +5447,7 @@ function rpc_reject_stock_transfer(array $p): mixed {
         updateStockTransferStatus($pdo, $transferId, 'rejected', $userId, $reason);
 
         $pdo->commit();
+        syncTransferStatusToInventori($transferId, $transfer['transfer_code'] ?? null, 'rejected');
         return ['success'=>true,'transfer_code'=>$transfer['transfer_code']];
     } catch (Throwable $e) {
         $pdo->rollBack();
@@ -5186,6 +5478,7 @@ function rpc_cancel_stock_transfer(array $p): mixed {
         updateStockTransferStatus($pdo, $transferId, 'cancelled', $userId, $reason);
 
         $pdo->commit();
+        syncTransferStatusToInventori($transferId, $transfer['transfer_code'] ?? null, 'cancelled');
         return ['success'=>true,'transfer_code'=>$transfer['transfer_code']];
     } catch (Throwable $e) {
         $pdo->rollBack();

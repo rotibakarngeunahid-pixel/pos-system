@@ -34,6 +34,14 @@ define('API_SECRET_KEY', getenv('API_SECRET_KEY') ?: '');
 define('SITE_URL',       getenv('SITE_URL')       ?: 'https://pos.rotibakarngeunah.my.id');
 define('UPLOADS_BASE_URL', rtrim(getenv('UPLOADS_BASE_URL') ?: '', '/'));
 
+// ── Integrasi POS → Inventori (event sync) ───────────────────────────────────
+// URL BASIS API Inventori (Next.js/Vercel), tanpa trailing slash, mis:
+//   https://inventory.rotibakarngeunah.my.id/api
+// INVENTORY_API_KEY = X-API-Key dengan scope 'integration:write' (dibuat di
+// tabel api_keys Inventori). Kosongkan keduanya untuk menonaktifkan sync.
+define('INVENTORY_API_URL', rtrim(getenv('INVENTORY_API_URL') ?: '', '/'));
+define('INVENTORY_API_KEY', getenv('INVENTORY_API_KEY') ?: '');
+
 // Domain frontend yang boleh akses API ini
 define('ALLOWED_ORIGINS', [
     'https://rotibakarngeunah.my.id',
