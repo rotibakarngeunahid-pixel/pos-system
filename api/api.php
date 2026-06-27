@@ -1324,6 +1324,7 @@ function systemRpcNames(): array {
         'inventory_list_ingredients',
         'inventory_get_branch_stock',
         'sync_purchase_order_to_inventory',
+        'sync_inventory_stock_count',
     ];
 }
 
@@ -2332,6 +2333,154 @@ function rpc_inventory_get_branch_stock(array $p): mixed {
     ");
     $stmt->execute(array_merge([$branchId], $ingredientIds));
     return $stmt->fetchAll();
+}
+
+// ── sync_inventory_stock_count ────────────────────────────────────────────────
+// Sinkronisasi sisa stok hasil hitung fisik (opname) dari sistem Inventori ke
+// stok POS. Dipanggil oleh sistem Inventori memakai API key (role 'system')
+// SAAT staff submit laporan inventori. Bersifat absolut (set stok = nilai input,
+// seperti opname) sehingga idempoten: memanggil ulang dengan nilai sama aman.
+//
+// Param:
+//   p_branch_id   (int)    — branch POS tujuan
+//   p_items       (array)  — [{ingredient_id:int, stock:number}, ...] atau JSON string
+//   p_report_date (string) — tanggal laporan inventori (untuk catatan/log)
+//   p_session_id  (string) — id sesi submit inventori (untuk referensi/idempotency)
+//   p_staff_name  (string) — nama staff yang submit (untuk catatan)
+//   p_source_note (string) — catatan sumber tambahan (opsional)
+//
+// Seluruh item diproses dalam SATU transaksi: bila ada error pada item mana pun,
+// seluruh perubahan di-rollback (atomic), lalu error dikembalikan agar sisi
+// Inventori ikut membatalkan submit-nya.
+function rpc_sync_inventory_stock_count(array $p): mixed {
+    $pdo      = getDB();
+    $branchId = (int)($p['p_branch_id'] ?? 0);
+    if (!$branchId) throw new Exception('p_branch_id wajib diisi');
+
+    // Verifikasi branch ada
+    $bchk = $pdo->prepare("SELECT 1 FROM branches WHERE id = ? LIMIT 1");
+    $bchk->execute([$branchId]);
+    if (!$bchk->fetch()) {
+        throw new Exception("Branch POS #$branchId tidak ditemukan");
+    }
+
+    // Normalisasi p_items menjadi array of object
+    $rawItems = $p['p_items'] ?? [];
+    if (is_string($rawItems)) {
+        $decoded  = json_decode($rawItems, true);
+        $rawItems = is_array($decoded) ? $decoded : [];
+    }
+    if (!is_array($rawItems)) $rawItems = [];
+
+    // Bangun map ingredient_id => stock (deduplikasi: nilai terakhir menang)
+    $targets = [];
+    foreach ($rawItems as $it) {
+        if (!is_array($it)) continue;
+        $ingredientId = (int)($it['ingredient_id'] ?? $it['p_ingredient_id'] ?? 0);
+        if ($ingredientId <= 0) continue;
+        if (!array_key_exists('stock', $it) && !array_key_exists('stock_end', $it)) continue;
+        $stock = (float)($it['stock'] ?? $it['stock_end'] ?? 0);
+        if ($stock < 0) $stock = 0; // stok tidak boleh negatif
+        $targets[$ingredientId] = $stock;
+    }
+
+    $reportDate = trim((string)($p['p_report_date'] ?? ''));
+    $sessionId  = trim((string)($p['p_session_id'] ?? ''));
+    $staffName  = trim((string)($p['p_staff_name'] ?? ''));
+    $sourceNote = trim((string)($p['p_source_note'] ?? ''));
+    $noteParts  = ['Sinkronisasi stok dari Inventori (opname)'];
+    if ($reportDate !== '') $noteParts[] = "tgl $reportDate";
+    if ($staffName !== '')  $noteParts[] = "oleh $staffName";
+    if ($sourceNote !== '') $noteParts[] = $sourceNote;
+    $note = implode(' — ', $noteParts);
+
+    $results = [];
+    $applied = 0;
+    $skipped = 0;
+
+    if (!$targets) {
+        return [
+            'branch_id'      => $branchId,
+            'items_total'    => 0,
+            'items_applied'  => 0,
+            'items_skipped'  => 0,
+            'report_date'    => $reportDate !== '' ? $reportDate : null,
+            'results'        => [],
+        ];
+    }
+
+    $noteCol      = dbColumnExists($pdo, 'inventory_logs', 'notes') ? 'notes' : 'note';
+    $hasRefType   = dbColumnExists($pdo, 'inventory_logs', 'reference_type');
+    $hasRefId     = dbColumnExists($pdo, 'inventory_logs', 'reference_id');
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($targets as $ingredientId => $target) {
+            // Hormati assignment bahan→cabang: bila bahan di-assign ke cabang
+            // tertentu dan cabang ini bukan salah satunya → lewati tanpa error.
+            $hasAny = $pdo->prepare("SELECT 1 FROM branch_ingredient_assignments WHERE ingredient_id=? LIMIT 1");
+            $hasAny->execute([$ingredientId]);
+            if ($hasAny->fetch()) {
+                $isOk = $pdo->prepare("SELECT 1 FROM branch_ingredient_assignments WHERE ingredient_id=? AND branch_id=? LIMIT 1");
+                $isOk->execute([$ingredientId, $branchId]);
+                if (!$isOk->fetch()) {
+                    $skipped++;
+                    $results[] = ['ingredient_id'=>$ingredientId, 'skipped'=>true, 'reason'=>'not_assigned_to_branch'];
+                    continue;
+                }
+            }
+
+            $cur = $pdo->prepare("SELECT stock FROM branch_inventory WHERE branch_id=? AND ingredient_id=? FOR UPDATE");
+            $cur->execute([$branchId, $ingredientId]);
+            $row    = $cur->fetch();
+            $before = $row ? (float)$row['stock'] : 0;
+            $after  = $target;            // opname: set absolut
+            $delta  = $after - $before;
+
+            if ($row) {
+                $pdo->prepare("UPDATE branch_inventory SET stock=? WHERE branch_id=? AND ingredient_id=?")
+                    ->execute([$after, $branchId, $ingredientId]);
+            } else {
+                $pdo->prepare("INSERT INTO branch_inventory (branch_id, ingredient_id, stock) VALUES (?,?,?)")
+                    ->execute([$branchId, $ingredientId, $after]);
+            }
+
+            $logRow = [
+                'branch_id'     => $branchId,
+                'ingredient_id' => $ingredientId,
+                'type'          => 'opname',
+                'quantity'      => $delta,
+                'stock_before'  => $before,
+                'stock_after'   => $after,
+                $noteCol        => $note,
+                'created_by'    => null,
+            ];
+            if ($hasRefType) $logRow['reference_type'] = 'inventori_stock_count';
+            if ($hasRefId)   $logRow['reference_id']   = $sessionId !== '' ? $sessionId : null;
+            insertDynamic($pdo, 'inventory_logs', $logRow);
+
+            $applied++;
+            $results[] = [
+                'ingredient_id' => $ingredientId,
+                'stock_before'  => $before,
+                'stock_after'   => $after,
+                'delta'         => $delta,
+            ];
+        }
+
+        $pdo->commit();
+        return [
+            'branch_id'     => $branchId,
+            'items_total'   => count($targets),
+            'items_applied' => $applied,
+            'items_skipped' => $skipped,
+            'report_date'   => $reportDate !== '' ? $reportDate : null,
+            'results'       => $results,
+        ];
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 
 // open_cash_session_from_branch_balance
