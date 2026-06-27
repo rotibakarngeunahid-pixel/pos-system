@@ -203,15 +203,23 @@ const cashService = {
     }
 
     try {
+      // SUMBER KEBENARAN KAS LACI: penjualan tunai untuk rekonsiliasi diambil dari
+      // cash_logs (salesFromLogs / salesIn), BUKAN transactions.total. Ini menyamakan
+      // "Ekspektasi Kas" frontend dengan backend — estimated_running_cash (card admin)
+      // dan expected_cash (saat tutup shift) keduanya berbasis cash_logs. Memakai
+      // transactions.total dulu menimbulkan selisih tersembunyi (mis. transaksi refund
+      // dihitung dobel: penjualan asli hilang DARI total 'completed' sekaligus refund
+      // dikurangi lagi), sehingga angka di card ≠ angka saat tutup shift (kasus 167rb vs 172rb).
+      // transactions.totalCompleted hanya dipakai untuk total omzet (totalSales) mode
+      // rentang tanggal dan untuk scoping void.
       const txSummary = await this.getCashTransactionSummary({ branchId, sessionId, dateFrom, dateTo });
-      salesIn = txSummary.totalCompleted;
-      if (!sessionId) totalSales = salesIn;
+      if (!sessionId) totalSales = txSummary.totalCompleted;
 
       if (txSummary.scopedCashTransactionIds?.size) {
         voidOut = sum(voidRows.filter(r => !txSummary.scopedCashTransactionIds.has(Number(r.reference_id))));
       }
     } catch (e) {
-      console.warn('cashService.getSummary: fallback to cash_logs sales total', e);
+      console.warn('cashService.getSummary: gagal memuat ringkasan transaksi (omzet)', e);
     }
 
     try {

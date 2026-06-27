@@ -69,11 +69,13 @@ const adminBranchCashUi = {
     on('bc-close-shift-cancel-btn', 'click', () => this._closeModal('modal-branch-close-shift'));
     on('bc-close-shift-cancel-btn-2', 'click', () => this._closeModal('modal-branch-close-shift'));
     on('bc-close-shift-save-btn',   'click', () => this._saveCloseShift());
+    on('bc-close-shift-cash', 'input', e => this._renderSelisih('bc-close-shift-selisih', e.target.value, this._csTarget?.expected, 'bc-close-shift-save-btn'));
 
     // Force-close modal
     on('bc-forceclose-close-btn',  'click', () => this._closeModal('modal-branch-force-close'));
     on('bc-forceclose-cancel-btn', 'click', () => this._closeModal('modal-branch-force-close'));
     on('bc-forceclose-save-btn',   'click', () => this._saveForceClose());
+    on('bc-forceclose-cash', 'input', e => this._renderSelisih('bc-forceclose-selisih', e.target.value, this._fcTarget?.expected));
 
     // Ledger modal
     on('bc-ledger-close-btn',         'click', () => this._closeModal('modal-branch-cash-ledger'));
@@ -163,7 +165,7 @@ const adminBranchCashUi = {
     const activeCount   = this._rows.filter(r => r.shift_status === 'open').length;
     const pendingCount  = this._rows.filter(r => Number(r.pending_deposit_amount || 0) > 0).length;
     const pendingTotal  = this._rows.reduce((s, r) => s + Number(r.pending_deposit_amount || 0), 0);
-    const varianceCount = this._rows.filter(r => r.has_variance).length;
+    const varianceCount = this._rows.filter(r => Number(r.has_variance)).length;
 
     el.innerHTML = `
       <div class="stat-card">
@@ -207,7 +209,7 @@ const adminBranchCashUi = {
     if (filterBranch) rows = rows.filter(r => String(r.branch_id) === filterBranch);
     if (filterStatus !== 'all') rows = rows.filter(r => r.shift_status === filterStatus);
     if (hasPending)   rows = rows.filter(r => Number(r.pending_deposit_amount || 0) > 0);
-    if (hasVariance)  rows = rows.filter(r => r.has_variance);
+    if (hasVariance)  rows = rows.filter(r => Number(r.has_variance));
 
     this._renderTable(rows);
   },
@@ -226,8 +228,8 @@ const adminBranchCashUi = {
       const pendingHtml = hasPending
         ? `<span class="badge badge-warning">${formatRupiah(r.pending_deposit_amount)}</span>`
         : '<span class="text-muted">—</span>';
-      const varianceHtml = r.has_variance && r.last_variance_amount != null
-        ? `<span class="badge ${Number(r.last_variance_amount) >= 0 ? 'badge-success' : 'badge-danger'}">${Number(r.last_variance_amount) >= 0 ? '+' : ''}${formatRupiah(r.last_variance_amount)}</span>`
+      const varianceHtml = Number(r.has_variance) && r.last_variance_amount != null
+        ? `<span class="badge ${Number(r.last_variance_amount) >= 0 ? 'badge-success' : 'badge-danger'}" title="Kas fisik saat tutup − estimasi sistem">${Number(r.last_variance_amount) >= 0 ? '+' : ''}${formatRupiah(r.last_variance_amount)}</span>`
         : '<span class="text-muted">—</span>';
 
       const closeShiftBtn = r.shift_status === 'open'
@@ -410,12 +412,17 @@ const adminBranchCashUi = {
     const staffId =
       row.open_staff_id ?? row.open_session_staff_id ?? row.open_staff?.id ?? row.open_staff_id;
 
+    const expected = row.estimated_running_cash != null
+      ? Number(row.estimated_running_cash)
+      : Number(row.current_balance || 0);
+
     this._csTarget = {
       branchId:      row.branch_id,
       branchName:    row.branch_name,
       openSessionId: row.open_session_id,
       staffId:       staffId,
-      staffName:     row.open_staff_name || '—'
+      staffName:     row.open_staff_name || '—',
+      expected
     };
 
     if (!this._csTarget.staffId) {
@@ -426,18 +433,47 @@ const adminBranchCashUi = {
     const g = id => document.getElementById(id);
     const nameEl   = g('bc-close-shift-branch-name');
     const staffEl  = g('bc-close-shift-staff-name');
+    const expEl    = g('bc-close-shift-expected');
     const cashEl   = g('bc-close-shift-cash');
     const noteEl   = g('bc-close-shift-note');
     const saveBtn  = g('bc-close-shift-save-btn');
 
     if (nameEl)  nameEl.textContent  = row.branch_name;
     if (staffEl) staffEl.textContent = `Staff aktif: ${row.open_staff_name || '—'}`;
+    if (expEl)   expEl.textContent   = formatRupiah(expected);
     if (cashEl)  cashEl.value        = '';
     if (noteEl)  noteEl.value        = '';
     if (saveBtn) saveBtn.disabled    = false;
     if (saveBtn) saveBtn.textContent = 'Tutup Shift';
+    this._renderSelisih('bc-close-shift-selisih', null, expected, 'bc-close-shift-save-btn');
 
     this._openModal('modal-branch-close-shift');
+  },
+
+  // Tampilkan selisih live: kas fisik − estimasi sistem. Dipakai modal tutup &
+  // paksa tutup agar admin melihat selisih sebelum konfirmasi (transparan).
+  // blockBtnId: jika diberikan, tombol itu di-disable saat selisih KURANG (shortage)
+  // — dipakai tutup normal. Force-close TIDAK mengirim blockBtnId (boleh kurang).
+  _renderSelisih(boxId, actualStr, expected, blockBtnId = null) {
+    const box = document.getElementById(boxId);
+    if (!box) return;
+    const exp      = Number(expected || 0);
+    const actual   = parseFloat(actualStr);
+    const blockBtn = blockBtnId ? document.getElementById(blockBtnId) : null;
+    if (isNaN(actual)) {
+      box.style.display = 'none';
+      if (blockBtn) blockBtn.disabled = false;
+      return;
+    }
+    const diff    = actual - exp;
+    const isOk     = Math.abs(diff) < 0.5;
+    const isShort  = diff < -0.5;
+    box.style.display = 'block';
+    box.style.color = isShort ? 'var(--danger)' : 'var(--success)';
+    const label = isOk ? 'Sesuai estimasi'
+      : (diff > 0 ? 'Lebih (surplus)' : 'Kurang (shortage) — tutup normal diblokir, pakai Paksa Tutup');
+    box.textContent = `Selisih: ${diff >= 0 ? '+' : '−'}${formatRupiah(Math.abs(diff))} · ${label}`;
+    if (blockBtn) blockBtn.disabled = isShort;
   },
 
   async _saveCloseShift() {
@@ -451,6 +487,17 @@ const adminBranchCashUi = {
     const closingCash = parseFloat(cashStr);
     if (isNaN(closingCash) || closingCash < 0) {
       showToast('Masukkan kas penutupan yang valid (≥ 0)', 'error'); return;
+    }
+
+    // Selisih kurang dilarang untuk tutup normal — gunakan Paksa Tutup bila memang kurang.
+    const expected = Number(this._csTarget.expected || 0);
+    if (closingCash < expected - 0.5) {
+      showToast(
+        `Kas fisik kurang ${formatRupiah(expected - closingCash)} dari estimasi sistem. ` +
+        `Tutup normal tidak diizinkan saat kas kurang — gunakan "Paksa Tutup" bila memang kurang.`,
+        'error'
+      );
+      return;
     }
 
     this._csSaving = true;
@@ -483,27 +530,35 @@ const adminBranchCashUi = {
     if (row.shift_status !== 'open' || !row.open_session_id) {
       showToast('Tidak ada shift aktif untuk outlet ini', 'warning'); return;
     }
+    const expected = row.estimated_running_cash != null
+      ? Number(row.estimated_running_cash)
+      : Number(row.current_balance || 0);
+
     this._fcTarget = {
       branchId:      row.branch_id,
       branchName:    row.branch_name,
       openSessionId: row.open_session_id,
-      staffName:     row.open_staff_name || '—'
+      staffName:     row.open_staff_name || '—',
+      expected
     };
     this._fcSaving = false;
 
     const g = id => document.getElementById(id);
     const nameEl   = g('bc-forceclose-branch-name');
     const staffEl  = g('bc-forceclose-staff-name');
+    const expEl    = g('bc-forceclose-expected');
     const cashEl   = g('bc-forceclose-cash');
     const reasonEl = g('bc-forceclose-reason');
     const saveBtn  = g('bc-forceclose-save-btn');
 
     if (nameEl)   nameEl.textContent  = row.branch_name;
     if (staffEl)  staffEl.textContent = `Staff aktif: ${row.open_staff_name || '—'}`;
+    if (expEl)    expEl.textContent   = formatRupiah(expected);
     if (cashEl)   cashEl.value        = '';
     if (reasonEl) reasonEl.value      = '';
     if (saveBtn)  saveBtn.disabled    = false;
     if (saveBtn)  saveBtn.textContent = 'Paksa Tutup Shift';
+    this._renderSelisih('bc-forceclose-selisih', null, expected);
 
     this._openModal('modal-branch-force-close');
   },

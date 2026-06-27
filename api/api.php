@@ -1857,14 +1857,18 @@ function rpc_process_transaction(array $p): mixed {
         }
 
         // Log cash if payment is cash
+        // PENTING: penjualan tunai HARUS selalu dicatat ke cash_logs walau kategori
+        // 'Penjualan Tunai' tidak ada (mis. dihapus/diganti admin lewat menu kategori).
+        // Dulu insert ini di-gate `if ($cat)` sehingga kategori hilang = penjualan tunai
+        // diam-diam tidak tercatat → Ekspektasi/Estimasi Kas kurang ("penjualan tunai
+        // tidak kehitung"). Refund & setoran sudah pakai pola `$cat['id'] ?? null`;
+        // sale kini disamakan agar robust dan konsisten. category_id boleh NULL (FK ON DELETE SET NULL).
         if (strtolower($paymentMethod) === 'cash' && $total > 0 && $sessionId) {
             $cat = $pdo->query("SELECT id FROM cash_categories WHERE name='Penjualan Tunai' AND type='in' LIMIT 1")->fetch();
-            if ($cat) {
-                $pdo->prepare("
-                    INSERT INTO cash_logs (branch_id,session_id,type,category_id,amount,note,created_by,reference_type,reference_id)
-                    VALUES (?,?,'in',?,?,?,?,'sale',?)
-                ")->execute([$branchId,$sessionId,$cat['id'],$total,"Penjualan #$txId",$staffId,$txId]);
-            }
+            $pdo->prepare("
+                INSERT INTO cash_logs (branch_id,session_id,type,category_id,amount,note,created_by,reference_type,reference_id)
+                VALUES (?,?,'in',?,?,?,?,'sale',?)
+            ")->execute([$branchId,$sessionId,$cat['id'] ?? null,$total,"Penjualan #$txId",$staffId,$txId]);
         }
 
         // ── Member loyalty: konsumsi klaim reward (atomic, di transaksi yang sama) ──
