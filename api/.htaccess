@@ -1,1 +1,12 @@
 AcceptPathInfo On
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Paksa header CORS yang benar. Ini meng-OVERRIDE aturan CORS bawaan
+# hosting/cPanel (yang sebelumnya hanya mengizinkan "Content-Type, Authorization"
+# sehingga header X-API-Key ditolak saat preflight → error CORS di frontend).
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PATCH, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, X-API-Key, X-Session-Token, X-Member-Session-Token, Authorization"
+    Header always set Access-Control-Max-Age "86400"
+</IfModule>
