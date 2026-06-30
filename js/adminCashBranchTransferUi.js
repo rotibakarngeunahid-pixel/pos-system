@@ -12,6 +12,12 @@ const adminCashBranchTransferUi = {
   _loading: false,
   _actionBusy: new Set(),
 
+  // State untuk create modal
+  _createBusy: false,
+  _createRequestId: null,
+  _fromBranchBalance: null,
+  _fromBranchBalanceLoading: false,
+
   init() {
     document.addEventListener('DOMContentLoaded', async () => {
       try {
@@ -33,6 +39,31 @@ const adminCashBranchTransferUi = {
     on('cbt-filter-btn',        'click', () => this.load());
     on('cbt-filter-from-branch','change', () => {});
     on('cbt-filter-to-branch',  'change', () => {});
+
+    // Tombol buat transfer admin
+    on('cbt-create-btn', 'click', () => this._openCreateModal());
+
+    // Create modal events
+    on('act-modal-close',   'click', () => this._closeCreateModal());
+    on('act-modal-cancel',  'click', () => this._closeCreateModal());
+    on('act-from-branch',   'change', e => this._onFromBranchChange(e.target.value));
+    on('act-modal-submit',  'click', () => this._submitCreate());
+
+    // Tutup create modal saat klik overlay
+    const createModal = document.getElementById('modal-admin-create-cash-transfer');
+    if (createModal) {
+      createModal.addEventListener('click', e => {
+        if (e.target === createModal) this._closeCreateModal();
+      });
+    }
+
+    // Format input nominal jadi angka saja saat blur
+    const amtInput = document.getElementById('act-amount');
+    if (amtInput) {
+      amtInput.addEventListener('input', () => {
+        amtInput.value = amtInput.value.replace(/[^0-9]/g, '');
+      });
+    }
 
     // Table delegation
     const tbody = document.getElementById('cbt-table-body');
@@ -96,6 +127,13 @@ const adminCashBranchTransferUi = {
       const current = sel.value;
       sel.innerHTML = '<option value="">Semua Outlet</option>' + opts;
       if (current) sel.value = current;
+    });
+
+    // Isi dropdown create modal juga
+    const createOpts = '<option value="">-- Pilih Outlet --</option>' + opts;
+    ['act-from-branch', 'act-to-branch'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (sel) sel.innerHTML = createOpts;
     });
   },
 
@@ -224,7 +262,7 @@ const adminCashBranchTransferUi = {
           <td style="font-size:12px">${fmtDt(row.requested_at)}</td>
           <td>${escHtml(row.from_branch_name || '-')}</td>
           <td>${escHtml(row.to_branch_name || '-')}</td>
-          <td style="font-size:12px">${escHtml(row.staff_name || '-')}</td>
+          <td style="font-size:12px">${row.staff_name ? escHtml(row.staff_name) : '<span class="badge badge-info" style="font-size:10px">Admin</span>'}</td>
           <td class="text-right"><strong>${fmtRp(row.amount)}</strong></td>
           <td><span class="badge ${status.cls}">${escHtml(status.label)}</span></td>
           <td style="font-size:12px">${row.confirmed_by_name ? escHtml(row.confirmed_by_name) : (row.rejected_by_name ? escHtml(row.rejected_by_name) : '-')}</td>
@@ -269,7 +307,7 @@ const adminCashBranchTransferUi = {
         <div class="cbt-detail-row"><span>Status</span><span class="badge ${status.cls}">${escHtml(status.label)}</span></div>
         <div class="cbt-detail-row"><span>Dari Outlet</span><strong>${escHtml(row.from_branch_name || '-')}</strong></div>
         <div class="cbt-detail-row"><span>Ke Outlet</span><strong>${escHtml(row.to_branch_name || '-')}</strong></div>
-        <div class="cbt-detail-row"><span>Staff Pengirim</span><strong>${escHtml(row.staff_name || '-')}</strong></div>
+        <div class="cbt-detail-row"><span>${row.staff_name ? 'Staff Pengirim' : 'Inisiator'}</span><strong>${row.staff_name ? escHtml(row.staff_name) : '<span class="badge badge-info">Transfer Langsung Admin</span>'}</strong></div>
         <div class="cbt-detail-row"><span>Jumlah</span><strong>${fmtRp(row.amount)}</strong></div>
         <div class="cbt-detail-row"><span>Waktu Request</span><strong>${fmtDt(row.requested_at)}</strong></div>
         ${row.notes ? `<div class="cbt-detail-row"><span>Catatan</span><strong>${escHtml(row.notes)}</strong></div>` : ''}
@@ -442,6 +480,150 @@ const adminCashBranchTransferUi = {
       else if (typeof showToast === 'function') showToast(e.message || 'Gagal membatalkan transfer', 'error');
     } finally {
       this._setActionBusy(transferId, false);
+    }
+  },
+
+  // ── Create Transfer Admin ─────────────────────────────────────────────────
+
+  _openCreateModal() {
+    // Generate idempotency key baru untuk setiap pembukaan modal
+    this._createRequestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : (Date.now() + '-' + Math.random().toString(36).slice(2));
+
+    this._fromBranchBalance = null;
+    this._createBusy        = false;
+
+    // Reset form
+    const fields = ['act-from-branch', 'act-to-branch', 'act-amount', 'act-notes'];
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    this._updateBalanceDisplay(null, false);
+    this._setCreateSubmitState(false);
+
+    // Pastikan dropdown terisi
+    if (this._branches.length) this._populateBranchFilters();
+
+    const modal = document.getElementById('modal-admin-create-cash-transfer');
+    if (modal) { modal.style.display = 'flex'; modal.classList.add('active'); }
+    if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  _closeCreateModal() {
+    const modal = document.getElementById('modal-admin-create-cash-transfer');
+    if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; }
+  },
+
+  async _onFromBranchChange(branchId) {
+    if (!branchId) {
+      this._updateBalanceDisplay(null, false);
+      return;
+    }
+    this._updateBalanceDisplay(null, true);
+    try {
+      const balance = await cashBranchTransferService.getBranchBalance(branchId);
+      this._fromBranchBalance = balance;
+      this._updateBalanceDisplay(balance, false);
+    } catch {
+      this._updateBalanceDisplay(null, false);
+    }
+  },
+
+  _updateBalanceDisplay(balance, loading) {
+    const wrap = document.getElementById('act-from-balance-info');
+    const text = document.getElementById('act-from-balance-display');
+    if (!wrap || !text) return;
+
+    if (loading) {
+      wrap.style.display = 'block';
+      text.textContent = 'Memuat...';
+      return;
+    }
+    if (balance === null) {
+      wrap.style.display = 'none';
+      return;
+    }
+    wrap.style.display = 'block';
+    const fmt = v => typeof formatRupiah === 'function' ? formatRupiah(v || 0) : ('Rp ' + (v || 0));
+    text.textContent = fmt(balance);
+    text.style.color = balance > 0 ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)';
+  },
+
+  _setCreateSubmitState(busy) {
+    const btn = document.getElementById('act-modal-submit');
+    if (!btn) return;
+    btn.disabled = busy;
+    btn.innerHTML = busy
+      ? '<span class="btn-spinner"></span> Memproses...'
+      : '<i data-lucide="send" style="width:14px;height:14px"></i> Transfer Sekarang';
+    if (!busy && window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
+  },
+
+  async _submitCreate() {
+    if (this._createBusy) return;
+
+    const adminId    = auth.getSession()?.id;
+    const fromBranch = document.getElementById('act-from-branch')?.value;
+    const toBranch   = document.getElementById('act-to-branch')?.value;
+    const amountRaw  = document.getElementById('act-amount')?.value?.replace(/[^0-9]/g, '') || '';
+    const notes      = document.getElementById('act-notes')?.value?.trim() || '';
+
+    // Validasi frontend
+    if (!fromBranch) { if (typeof showToast === 'function') showToast('Outlet asal wajib dipilih', 'error'); return; }
+    if (!toBranch)   { if (typeof showToast === 'function') showToast('Outlet tujuan wajib dipilih', 'error'); return; }
+    if (String(fromBranch) === String(toBranch)) { if (typeof showToast === 'function') showToast('Outlet asal dan tujuan tidak boleh sama', 'error'); return; }
+    if (!amountRaw || amountRaw === '0') { if (typeof showToast === 'function') showToast('Nominal transfer wajib diisi', 'error'); return; }
+
+    const amount = Number(amountRaw);
+    if (!amount || amount <= 0) { if (typeof showToast === 'function') showToast('Nominal transfer harus lebih dari 0', 'error'); return; }
+    if (this._fromBranchBalance !== null && amount > this._fromBranchBalance) {
+      const fmt = v => typeof formatRupiah === 'function' ? formatRupiah(v) : ('Rp ' + v);
+      if (typeof showToast === 'function') showToast(`Saldo tidak cukup. Tersedia: ${fmt(this._fromBranchBalance)}`, 'error');
+      return;
+    }
+
+    const fromName = this._branches.find(b => String(b.id) === String(fromBranch))?.name || 'Outlet Asal';
+    const toName   = this._branches.find(b => String(b.id) === String(toBranch))?.name   || 'Outlet Tujuan';
+    const fmt = v => typeof formatRupiah === 'function' ? formatRupiah(v) : ('Rp ' + v);
+
+    const ok = await this._confirmDialog({
+      title:       'Konfirmasi Transfer Kas',
+      message:     `Transfer ${fmt(amount)} dari <strong>${fromName}</strong> ke <strong>${toName}</strong>?`,
+      subText:     'Saldo kedua outlet akan berubah seketika dan tidak bisa diurungkan.',
+      confirmText: 'Ya, Transfer Sekarang',
+      success:     true
+    });
+    if (!ok) return;
+
+    this._createBusy = true;
+    this._setCreateSubmitState(true);
+    try {
+      const result = await cashBranchTransferService.adminCreateTransfer({
+        adminId,
+        fromBranchId:    fromBranch,
+        toBranchId:      toBranch,
+        amount,
+        notes:           notes || null,
+        clientRequestId: this._createRequestId
+      });
+
+      if (typeof showToast === 'function') {
+        showToast(
+          `Transfer ${result.transfer_code || ''} berhasil. Saldo ${fromName} berkurang dan ${toName} bertambah.`,
+          'success'
+        );
+      }
+      this._closeCreateModal();
+      await this.load();
+      this._publishCashChanged('admin-create-transfer');
+    } catch (e) {
+      if (window.showDbError) showDbError(e, { action: 'membuat transfer kas outlet', entity: 'Transfer Kas' });
+      else if (typeof showToast === 'function') showToast(e.message || 'Gagal membuat transfer', 'error');
+    } finally {
+      this._createBusy = false;
+      this._setCreateSubmitState(false);
     }
   }
 };

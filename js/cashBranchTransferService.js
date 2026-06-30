@@ -170,6 +170,55 @@ const cashBranchTransferService = {
       .order('name', { ascending: true });
     if (error) throw error;
     return data || [];
+  },
+
+  /**
+   * Admin membuat transfer kas langsung antar outlet.
+   * Transfer langsung dikonfirmasi — saldo kedua outlet berubah seketika.
+   * Tidak memerlukan session/shift staff.
+   */
+  async adminCreateTransfer({
+    adminId,
+    fromBranchId,
+    toBranchId,
+    amount,
+    notes           = null,
+    clientRequestId = null
+  }) {
+    if (!adminId)      throw new Error('Admin ID tidak valid');
+    if (!fromBranchId) throw new Error('Outlet asal wajib dipilih');
+    if (!toBranchId)   throw new Error('Outlet tujuan wajib dipilih');
+    if (Number(fromBranchId) === Number(toBranchId)) {
+      throw new Error('Outlet asal dan tujuan tidak boleh sama');
+    }
+
+    const parsedAmount = safeNum(amount, 'Nominal transfer');
+    if (parsedAmount <= 0) throw new Error('Nominal transfer harus lebih dari 0');
+
+    const { data, error } = await db.rpc('admin_create_cash_branch_transfer', {
+      p_admin_id:          Number(adminId),
+      p_from_branch_id:    Number(fromBranchId),
+      p_to_branch_id:      Number(toBranchId),
+      p_amount:            parsedAmount,
+      p_notes:             notes || null,
+      p_client_request_id: clientRequestId || null
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Mendapatkan saldo kas terkini untuk outlet tertentu.
+   * Digunakan di form create transfer admin untuk menampilkan saldo outlet asal.
+   */
+  async getBranchBalance(branchId) {
+    const { data, error } = await db
+      .from('branch_cash_balances')
+      .select('current_balance')
+      .eq('branch_id', Number(branchId))
+      .limit(1);
+    if (error) throw error;
+    return data?.[0]?.current_balance ?? 0;
   }
 
 };

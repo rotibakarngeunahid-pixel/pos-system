@@ -1297,6 +1297,7 @@ function adminRpcNames(): array {
         'admin_create_manual_transaction',
         'confirm_deposit',
         'get_admin_cash_branch_transfers',
+        'admin_create_cash_branch_transfer',
         'admin_save_investor_access',
         'rbn_admin_list_api_keys',
         'admin_preview_branch_menu_copy',
@@ -1395,6 +1396,7 @@ function authorizeRpcRequest(string $name, array $params): array {
         'open_cash_session_from_branch_balance' => [10, 60],
         'create_deposit' => [15, 60],
         'create_cash_branch_transfer' => [15, 60],
+        'admin_create_cash_branch_transfer' => [10, 60],
         'void_transaction' => [20, 60],
         'refund_transaction' => [20, 60],
         'adjust_stock_atomic' => [60, 60],
@@ -3571,6 +3573,133 @@ function rpc_create_cash_branch_transfer(array $p): mixed {
                  $amount,$cashAtRequest,$notes,$proofUrl,$clientReqId]);
 
     return ['id'=>$id,'transfer_code'=>$code,'status'=>'pending','amount'=>$amount];
+}
+
+// ── admin_create_cash_branch_transfer ─────────────────────────────────────────
+// Admin/owner membuat transfer kas langsung tanpa memerlukan shift/session staff.
+// Transfer langsung dikonfirmasi (status='confirmed'), saldo kedua outlet diupdate
+// secara atomik dalam satu transaksi database.
+function rpc_admin_create_cash_branch_transfer(array $p): mixed {
+    $pdo         = getDB();
+    $adminId     = (int)($p['p_admin_id']       ?? 0);
+    $fromBranch  = (int)($p['p_from_branch_id'] ?? 0);
+    $toBranch    = (int)($p['p_to_branch_id']   ?? 0);
+    $amount      = (float)($p['p_amount']       ?? 0);
+    $notes       = trim($p['p_notes']           ?? '');
+    $clientReqId = $p['p_client_request_id']    ?? null;
+
+    // Validasi role
+    $adminStmt = $pdo->prepare("SELECT role FROM users WHERE id=? LIMIT 1");
+    $adminStmt->execute([$adminId]);
+    $ar = $adminStmt->fetch();
+    if (!$ar || !in_array($ar['role'], ['admin', 'owner'], true)) {
+        throw new Exception('Hanya admin/owner yang dapat membuat transfer kas outlet');
+    }
+
+    // Validasi parameter
+    if (!$fromBranch) throw new Exception('Outlet asal wajib dipilih');
+    if (!$toBranch)   throw new Exception('Outlet tujuan wajib dipilih');
+    if ($fromBranch === $toBranch) throw new Exception('Outlet asal dan tujuan tidak boleh sama');
+    if ($amount <= 0) throw new Exception('Nominal transfer harus lebih dari 0');
+
+    // Validasi outlet asal exist
+    $branchCheck = $pdo->prepare("SELECT id FROM branches WHERE id=? AND is_active=1 LIMIT 1");
+    $branchCheck->execute([$fromBranch]);
+    if (!$branchCheck->fetch()) throw new Exception('Outlet asal tidak ditemukan atau tidak aktif');
+    $branchCheck->execute([$toBranch]);
+    if (!$branchCheck->fetch()) throw new Exception('Outlet tujuan tidak ditemukan atau tidak aktif');
+
+    // Idempotency check
+    if ($clientReqId) {
+        $exist = $pdo->prepare("SELECT id, transfer_code, status, amount FROM cash_branch_transfers WHERE client_request_id=? LIMIT 1");
+        $exist->execute([$clientReqId]);
+        $existing = $exist->fetch();
+        if ($existing) {
+            return ['id'=>$existing['id'],'transfer_code'=>$existing['transfer_code'],'status'=>$existing['status'],'amount'=>(float)$existing['amount'],'_idempotent'=>true];
+        }
+    }
+
+    $pdo->beginTransaction();
+    try {
+        // Lock source balance
+        $srcStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
+        $srcStmt->execute([$fromBranch]);
+        $src = $srcStmt->fetch();
+        $srcBefore = $src ? (float)$src['current_balance'] : 0.0;
+
+        if ($amount > $srcBefore) {
+            $pdo->rollBack();
+            throw new Exception('Saldo kas outlet asal tidak cukup (tersedia: Rp ' . number_format($srcBefore, 0, ',', '.') . ')');
+        }
+
+        // Lock target balance
+        $dstStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
+        $dstStmt->execute([$toBranch]);
+        $dst = $dstStmt->fetch();
+        $dstBefore = $dst ? (float)$dst['current_balance'] : 0.0;
+
+        $srcAfter = $srcBefore - $amount;
+        $dstAfter = $dstBefore + $amount;
+
+        // Buat transfer record dengan status=confirmed langsung
+        $id   = uuid4();
+        $code = 'TRF-' . strtoupper(substr($id, 0, 8));
+
+        $pdo->prepare("
+            INSERT INTO cash_branch_transfers
+              (id, transfer_code, from_branch_id, to_branch_id, session_id, staff_id, requested_by,
+               amount, cash_balance_at_request, status, notes, client_request_id,
+               confirmed_by, confirmed_at,
+               source_balance_before, source_balance_after,
+               target_balance_before, target_balance_after)
+            VALUES (?,?,?,?,NULL,NULL,?,?,?,'confirmed',?,?,?,NOW(),?,?,?,?)
+        ")->execute([
+            $id, $code, $fromBranch, $toBranch, $adminId,
+            $amount, $srcBefore, $notes ?: null, $clientReqId,
+            $adminId, $srcBefore, $srcAfter, $dstBefore, $dstAfter
+        ]);
+
+        // Update saldo outlet asal (berkurang)
+        if ($src) {
+            $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW(),updated_by=? WHERE branch_id=?")
+                ->execute([$srcAfter, $adminId, $fromBranch]);
+        } else {
+            $pdo->prepare("INSERT INTO branch_cash_balances (branch_id,current_balance,version,updated_by) VALUES (?,?,1,?)")
+                ->execute([$fromBranch, $srcAfter, $adminId]);
+        }
+
+        // Update saldo outlet tujuan (bertambah)
+        if ($dst) {
+            $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW(),updated_by=? WHERE branch_id=?")
+                ->execute([$dstAfter, $adminId, $toBranch]);
+        } else {
+            $pdo->prepare("INSERT INTO branch_cash_balances (branch_id,current_balance,version,updated_by) VALUES (?,?,1,?)")
+                ->execute([$toBranch, $dstAfter, $adminId]);
+        }
+
+        // Ledger entries (immutable audit trail)
+        rpcInsertBranchCashLedger($pdo, $fromBranch, null, $adminId, null, $id,
+            'cash_branch_transfer_out', 'out', $amount, $srcBefore, $srcAfter,
+            'Transfer kas keluar (admin)', 'cash_branch_transfers', $id);
+        rpcInsertBranchCashLedger($pdo, $toBranch, null, $adminId, null, $id,
+            'cash_branch_transfer_in', 'in', $amount, $dstBefore, $dstAfter,
+            'Transfer kas masuk (admin)', 'cash_branch_transfers', $id . '_in');
+
+        $pdo->commit();
+        return [
+            'id'                    => $id,
+            'transfer_code'         => $code,
+            'status'                => 'confirmed',
+            'amount'                => $amount,
+            'source_balance_before' => $srcBefore,
+            'source_balance_after'  => $srcAfter,
+            'target_balance_before' => $dstBefore,
+            'target_balance_after'  => $dstAfter,
+        ];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
 }
 
 // ── get_pending_incoming_cash_branch_transfers ────────────────────────────────
