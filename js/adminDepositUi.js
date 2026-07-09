@@ -804,7 +804,6 @@ const adminDepositUi = {
     if (!accountId) { showToast('Pilih metode setoran terlebih dahulu', 'error'); return; }
     if (proofRequired && !this.selectedManualProofFile) { showToast('Upload bukti setoran terlebih dahulu.', 'error'); return; }
     if (amount <= 0) { showToast('Jumlah setoran harus lebih dari 0', 'error'); return; }
-    if (amount % 50000 !== 0) { showToast('Nominal harus kelipatan Rp 50.000', 'error'); return; }
     if (amount > availableCash) { showToast(`Jumlah setoran melebihi kas tersedia (${fRp(availableCash)})`, 'error'); return; }
 
     const branch = this.branches.find(b => Number(b.id) === branchId);

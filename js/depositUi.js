@@ -1,6 +1,5 @@
 'use strict';
 
-const DEPOSIT_STEP = 50000;
 const DEPOSIT_MAX_FILE_SIZE = 5 * 1024 * 1024;
 const DEPOSIT_ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'];
 const DEPOSIT_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'pdf'];
@@ -877,8 +876,6 @@ const depositUi = {
       message = showEmpty ? 'Jumlah setoran harus lebih dari 0' : '';
     } else if (this.hasEligibleClosedShift() && amount > this.depositableCash) {
       message = `Melebihi kas yang dapat disetor (${fRp(this.depositableCash)})`;
-    } else if (amount % DEPOSIT_STEP !== 0) {
-      message = 'Nominal harus kelipatan Rp 50.000';
     }
 
     if (this.el.amountError) {

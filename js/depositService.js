@@ -325,7 +325,6 @@ const depositService = {
 
     amount = safeNum(amount, 'Jumlah setoran');
     if (amount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
-    if (amount % 50000 !== 0) throw new Error('Nominal harus kelipatan Rp 50.000');
     if (cashBalance != null && amount > cashBalance) throw new Error('Jumlah setoran melebihi saldo kas');
     if (requireProof && !file) throw new Error('Bukti setoran wajib dilampirkan');
 
@@ -433,7 +432,6 @@ const depositService = {
     if (!normalizedAccountId) throw new Error('Pilih metode setoran terlebih dahulu');
     if (proofRequired && !proofFile) throw new Error('Upload bukti setoran terlebih dahulu.');
     if (amount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
-    if (amount % 50000 !== 0) throw new Error('Nominal harus kelipatan Rp 50.000');
 
     const proof = proofFile
       ? await this.uploadDepositProof({ branchId: normalizedBranchId, file: proofFile })

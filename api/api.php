@@ -3077,7 +3077,6 @@ function rpc_create_deposit(array $p): mixed {
     $cashBalance = $p['p_cash_balance_at_deposit'] ?? null;
 
     if ($amount <= 0) throw new Exception('Nominal setoran harus lebih dari 0');
-    if ((int)round($amount) % 50000 !== 0) throw new Exception('Nominal setoran harus kelipatan Rp 50.000');
     // Bukti setoran WAJIB untuk semua metode. Dengan bukti terlampir, setoran
     // otomatis dikonfirmasi (lihat $autoApprove di bawah) tanpa approval manual admin.
     if (empty($proofUrl)) throw new Exception('Bukti setoran wajib dilampirkan agar setoran otomatis disetujui.');
@@ -3208,7 +3207,6 @@ function rpc_admin_create_manual_deposit(array $p): mixed {
     if (!$branchId) throw new Exception('Cabang wajib dipilih');
     if (!$accountId) throw new Exception('Metode setoran wajib dipilih');
     if ($amount <= 0) throw new Exception('Nominal setoran harus lebih dari 0');
-    if ((int)round($amount) % 50000 !== 0) throw new Exception('Nominal setoran harus kelipatan Rp 50.000');
 
     $pdo->beginTransaction();
     try {
