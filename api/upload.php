@@ -87,7 +87,7 @@ function uploadSessionUser(): ?array {
 
 // ── Validasi folder ───────────────────────────────────────────────────────────
 $folder = $_POST['folder'] ?? 'products';
-$allowed_folders = ['products', 'qris', 'bukti_setoran', 'stok_keluar'];
+$allowed_folders = ['products', 'qris', 'bukti_setoran', 'stok_keluar', 'transfer_stok', 'transfer_kas'];
 if (!in_array($folder, $allowed_folders, true)) {
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => 'Folder tidak valid']);
@@ -105,9 +105,9 @@ if (in_array($folder, ['products', 'qris'], true) && !in_array($sessionUser['rol
     echo json_encode(['success' => false, 'error' => 'Upload folder ini membutuhkan akses admin']);
     exit;
 }
-if ($folder === 'stok_keluar' && !in_array($sessionUser['role'], ['staff', 'admin', 'owner'], true)) {
+if (in_array($folder, ['stok_keluar', 'transfer_stok', 'transfer_kas'], true) && !in_array($sessionUser['role'], ['staff', 'admin', 'owner'], true)) {
     http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Upload bukti stok keluar hanya untuk staff atau admin']);
+    echo json_encode(['success' => false, 'error' => 'Upload bukti transfer/stok keluar hanya untuk staff atau admin']);
     exit;
 }
 

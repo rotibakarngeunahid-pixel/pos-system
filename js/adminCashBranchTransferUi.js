@@ -264,8 +264,8 @@ const adminCashBranchTransferUi = {
           <td>${escHtml(row.to_branch_name || '-')}</td>
           <td style="font-size:12px">${row.staff_name ? escHtml(row.staff_name) : '<span class="badge badge-info" style="font-size:10px">Admin</span>'}</td>
           <td class="text-right"><strong>${fmtRp(row.amount)}</strong></td>
-          <td><span class="badge ${status.cls}">${escHtml(status.label)}</span></td>
-          <td style="font-size:12px">${row.confirmed_by_name ? escHtml(row.confirmed_by_name) : (row.rejected_by_name ? escHtml(row.rejected_by_name) : '-')}</td>
+          <td><span class="badge ${status.cls}">${escHtml(status.label)}</span>${Number(row.auto_approved) === 1 ? ' <span class="badge badge-info" style="font-size:9px">Auto</span>' : ''}</td>
+          <td style="font-size:12px">${Number(row.auto_approved) === 1 ? '<span class="text-muted">Otomatis (foto)</span>' : (row.confirmed_by_name ? escHtml(row.confirmed_by_name) : (row.rejected_by_name ? escHtml(row.rejected_by_name) : '-'))}</td>
           <td>
             <button class="btn btn-ghost btn-sm" data-cbt-action="detail" data-transfer-id="${escHtml(row.transfer_id)}" title="Lihat Detail">
               <i data-lucide="eye" style="width:14px;height:14px"></i>
@@ -304,7 +304,7 @@ const adminCashBranchTransferUi = {
     body.innerHTML = `
       <div class="cbt-detail-grid">
         <div class="cbt-detail-row"><span>Kode Transfer</span><strong>${escHtml(row.transfer_code || '-')}</strong></div>
-        <div class="cbt-detail-row"><span>Status</span><span class="badge ${status.cls}">${escHtml(status.label)}</span></div>
+        <div class="cbt-detail-row"><span>Status</span><span class="badge ${status.cls}">${escHtml(status.label)}</span>${Number(row.auto_approved) === 1 ? ' <span class="badge badge-info" style="font-size:9px">Auto</span>' : ''}</div>
         <div class="cbt-detail-row"><span>Dari Outlet</span><strong>${escHtml(row.from_branch_name || '-')}</strong></div>
         <div class="cbt-detail-row"><span>Ke Outlet</span><strong>${escHtml(row.to_branch_name || '-')}</strong></div>
         <div class="cbt-detail-row"><span>${row.staff_name ? 'Staff Pengirim' : 'Inisiator'}</span><strong>${row.staff_name ? escHtml(row.staff_name) : '<span class="badge badge-info">Transfer Langsung Admin</span>'}</strong></div>
@@ -313,7 +313,7 @@ const adminCashBranchTransferUi = {
         ${row.notes ? `<div class="cbt-detail-row"><span>Catatan</span><strong>${escHtml(row.notes)}</strong></div>` : ''}
         ${row.proof_url ? `<div class="cbt-detail-row"><span>Bukti</span><a href="${escHtml(depositService.normalizeProofUrl(row.proof_url))}" target="_blank" rel="noopener">${escHtml(row.proof_file_name || 'Lihat bukti')}</a></div>` : ''}
         ${row.confirmed_by_name ? `
-          <div class="cbt-detail-row cbt-detail-divider"><span>Dikonfirmasi Oleh</span><strong>${escHtml(row.confirmed_by_name)}</strong></div>
+          <div class="cbt-detail-row cbt-detail-divider"><span>Persetujuan</span><strong>${Number(row.auto_approved) === 1 ? 'Otomatis (foto bukti realtime)' : escHtml(row.confirmed_by_name)}</strong></div>
           <div class="cbt-detail-row"><span>Waktu Konfirmasi</span><strong>${fmtDt(row.confirmed_at)}</strong></div>
           <div class="cbt-detail-row"><span>Saldo Asal Sebelum</span><strong>${fmtRp(row.source_balance_before)}</strong></div>
           <div class="cbt-detail-row"><span>Saldo Asal Sesudah</span><strong>${fmtRp(row.source_balance_after)}</strong></div>

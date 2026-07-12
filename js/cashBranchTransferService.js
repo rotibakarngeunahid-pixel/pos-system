@@ -9,8 +9,10 @@
 const cashBranchTransferService = {
 
   /**
-   * Membuat request transfer kas dari outlet asal ke outlet tujuan.
-   * Saldo belum berubah setelah ini; status = pending.
+   * Membuat transfer kas dari outlet asal ke outlet tujuan.
+   * Foto bukti realtime WAJIB (diambil & diupload di depositUi sebelum memanggil ini,
+   * lihat js/utils/realtimeCameraCapture.js, folder 'transfer_kas'). Begitu bukti
+   * terlampir, backend otomatis menyetujui transfer — saldo kedua outlet langsung berubah.
    */
   async createTransfer({
     fromBranchId,
@@ -18,8 +20,12 @@ const cashBranchTransferService = {
     sessionId,
     staffId,
     amount,
-    notes      = null,
-    proofFile  = null,
+    notes           = null,
+    proofUrl,
+    proofFileName   = null,
+    proofFileType   = null,
+    proofFileSize   = null,
+    proofUploadedAt = null,
     clientRequestId = null
   }) {
     if (!fromBranchId) throw new Error('Outlet asal wajib dipilih');
@@ -28,16 +34,11 @@ const cashBranchTransferService = {
       throw new Error('Outlet asal dan tujuan tidak boleh sama');
     }
     if (!sessionId) throw new Error('Tutup shift terlebih dahulu sebelum membuat setoran antar outlet');
+    if (!proofUrl) throw new Error('Foto bukti realtime wajib dilampirkan agar transfer otomatis disetujui');
 
     const parsedAmount = safeNum(amount, 'Jumlah setoran');
     if (parsedAmount <= 0) throw new Error('Jumlah setoran harus lebih dari 0');
     // Transfer tunai antar outlet tidak wajib kelipatan Rp 50.000
-
-    // Upload bukti jika ada
-    let proof = null;
-    if (proofFile) {
-      proof = await depositService.uploadDepositProof({ branchId: fromBranchId, file: proofFile });
-    }
 
     const { data, error } = await db.rpc('create_cash_branch_transfer', {
       p_from_branch_id:    Number(fromBranchId),
@@ -46,12 +47,12 @@ const cashBranchTransferService = {
       p_staff_id:          Number(staffId),
       p_amount:            parsedAmount,
       p_notes:             notes || null,
-      p_proof_url:         proof?.url         || null,
-      p_proof_file_name:   proof?.fileName    || null,
-      p_proof_file_type:   proof?.fileType    || null,
-      p_proof_file_size:   proof?.fileSize    || null,
-      p_proof_uploaded_at: proof?.uploadedAt  || null,
-      p_client_request_id: clientRequestId    || null
+      p_proof_url:         proofUrl,
+      p_proof_file_name:   proofFileName,
+      p_proof_file_type:   proofFileType,
+      p_proof_file_size:   proofFileSize,
+      p_proof_uploaded_at: proofUploadedAt,
+      p_client_request_id: clientRequestId || null
     });
     if (error) throw error;
     return data;

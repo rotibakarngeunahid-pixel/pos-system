@@ -3579,11 +3579,11 @@ const ADMIN = {
     const tbody  = document.getElementById('transfer-monitoring-body');
     const status = document.getElementById('transfer-status-filter')?.value || null;
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Memuat...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-td">Memuat...</td></tr>';
     try {
       const transfers = await inventoryService.getAllTransfersAdmin(100, 0, status || null);
       if (!transfers.length) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Tidak ada data transfer.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="empty-td">Tidak ada data transfer.</td></tr>';
         return;
       }
       const statusCfg = {
@@ -3596,6 +3596,11 @@ const ADMIN = {
         const sc      = statusCfg[t.status] || { label: t.status, cls: 'badge-default' };
         const dateStr = new Date(t.created_at).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
         const items   = (t.items || []).map(i => `${escHtml(i.ingredient_name)}: ${parseFloat(i.qty).toLocaleString('id-ID')} ${escHtml(i.unit)}`).join('; ');
+        const proof   = t.evidence_photo_url
+          ? `<a href="${escHtml(t.evidence_photo_url)}" target="_blank" rel="noopener" style="font-size:11px;">Lihat</a>`
+          : '<span class="text-muted" style="font-size:11px;">—</span>';
+        const autoBadge = Number(t.auto_approved) === 1
+          ? ' <span class="badge badge-info" style="font-size:9px;">Auto</span>' : '';
         const actions = t.status === 'pending'
           ? `<button class="btn btn-primary btn-sm" style="font-size:11px;" data-admin-action="admin-confirm-transfer" data-id="${t.id}">Terima</button>
              <button class="btn btn-sm" style="font-size:11px;border:1px solid var(--danger);color:var(--danger);background:transparent;margin-left:4px;" data-admin-action="admin-reject-transfer" data-id="${t.id}">Tolak</button>`
@@ -3606,15 +3611,16 @@ const ADMIN = {
           <td style="font-size:12px;">${escHtml(t.from_branch_name)}</td>
           <td style="font-size:12px;">${escHtml(t.to_branch_name)}</td>
           <td style="font-size:11px;max-width:200px;">${escHtml(items)}</td>
-          <td><span class="badge ${sc.cls}" style="font-size:11px;">${sc.label}</span></td>
+          <td>${proof}</td>
+          <td><span class="badge ${sc.cls}" style="font-size:11px;">${sc.label}</span>${autoBadge}</td>
           <td style="font-size:12px;">${escHtml(t.created_by_name || '—')}</td>
-          <td style="font-size:12px;">${escHtml(t.confirmed_by_name || t.rejected_by_name || '—')}</td>
+          <td style="font-size:12px;">${Number(t.auto_approved) === 1 ? '<span class="text-muted">Otomatis (foto)</span>' : escHtml(t.confirmed_by_name || t.rejected_by_name || '—')}</td>
           <td style="font-size:12px;">${actions}</td>
         </tr>`;
       }).join('');
       if (window.lucide) lucide.createIcons();
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-td" style="color:var(--danger);">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-td" style="color:var(--danger);">Gagal memuat: ${escHtml(e.message)}</td></tr>`;
     }
   },
 

@@ -22,9 +22,8 @@ const depositUi = {
   // ── Transfer Antar Outlet state ──
   depositMode: 'regular',         // 'regular' | 'outlet'
   activeBranches: [],
-  selectedTransferFile: null,
-  selectedTransferFileUrl: null,
   isTransferSubmitting: false,
+  _transferCamera: null,
 
   getPOS() {
     if (typeof window !== 'undefined' && window.POS) return window.POS;
@@ -110,10 +109,8 @@ const depositUi = {
     this.el.transferAmountInput    = document.getElementById('transfer-amount');
     this.el.transferAmountError    = document.getElementById('transfer-amount-error');
     this.el.transferQuickButtons   = Array.from(document.querySelectorAll('[data-transfer-quick]'));
-    this.el.transferProofFile      = document.getElementById('transfer-proof-file');
-    this.el.transferProofZone      = document.getElementById('transfer-proof-zone');
-    this.el.transferUploadEmpty    = document.getElementById('transfer-upload-empty');
-    this.el.transferProofPreview   = document.getElementById('transfer-proof-preview');
+    this.el.transferCaptureBtn     = document.getElementById('btn-capture-transfer-photo');
+    this.el.transferRetakeBtn      = document.getElementById('btn-retake-transfer-photo');
     this.el.transferNotesInput     = document.getElementById('transfer-notes');
     this.el.transferSubmitBtn      = document.getElementById('btn-submit-transfer');
     this.el.transferSuccess        = document.getElementById('transfer-success');
@@ -121,6 +118,16 @@ const depositUi = {
     this.el.incomingSection = document.getElementById('deposit-incoming-section');
     this.el.incomingBody    = document.getElementById('deposit-incoming-body');
     this.el.incomingBadge   = document.getElementById('deposit-incoming-badge');
+
+    if (typeof createRealtimeCameraCapture === 'function') {
+      this._transferCamera = createRealtimeCameraCapture({
+        videoId:      'transfer-camera-video',
+        previewId:    'transfer-photo-preview',
+        errorId:      'transfer-camera-error',
+        captureBtnId: 'btn-capture-transfer-photo',
+        retakeBtnId:  'btn-retake-transfer-photo',
+      });
+    }
 
     this.bindModeSelector();
     this.bindTransferForm();
@@ -1287,9 +1294,20 @@ const depositUi = {
     if (this.el.panelOutlet)  this.el.panelOutlet.style.display  = mode === 'outlet'  ? '' : 'none';
 
     // Load branches when switching to outlet mode for the first time
-    if (mode === 'outlet' && !this.activeBranches.length) {
-      this.loadActiveBranches();
+    if (mode === 'outlet') {
+      if (!this.activeBranches.length) this.loadActiveBranches();
+      this._transferCamera?.start();
+    } else {
+      this._transferCamera?.stop();
     }
+  },
+
+  // Dipanggil dari pos.js saat berpindah tab utama/drawer kembali ke Deposits —
+  // kamera transfer outlet sudah dimatikan saat meninggalkan tab (lihat pos.js
+  // switchMainTab/switchMobileDrawerTab), jadi perlu dinyalakan ulang di sini
+  // kalau mode "Ke Outlet Lain" masih aktif, agar video feed tidak mati/beku.
+  resumeOutletCameraIfNeeded() {
+    if (this.depositMode === 'outlet') this._transferCamera?.start();
   },
 
   async loadActiveBranches() {
@@ -1346,75 +1364,27 @@ const depositUi = {
     if (this.el.transferToBranch) {
       this.el.transferToBranch.addEventListener('change', () => this.updateTransferSubmitState());
     }
-    // Proof file
-    if (this.el.transferProofFile) {
-      this.el.transferProofFile.addEventListener('change', e => this.onTransferFileChange(e.target.files));
+    // Foto bukti realtime dari kamera langsung
+    if (this.el.transferCaptureBtn) {
+      this.el.transferCaptureBtn.addEventListener('click', async () => {
+        try {
+          await this._transferCamera?.capture();
+        } catch (e) {
+          if (typeof showToast === 'function') showToast(e.message, 'error');
+          this._transferCamera?.start();
+        }
+        this.updateTransferSubmitState();
+      });
     }
-    this.bindTransferUploadZone();
+    if (this.el.transferRetakeBtn) {
+      this.el.transferRetakeBtn.addEventListener('click', () => {
+        this._transferCamera?.retake();
+        this.updateTransferSubmitState();
+      });
+    }
     // Submit
     if (this.el.transferSubmitBtn) {
       this.el.transferSubmitBtn.addEventListener('click', () => this.onTransferSubmit());
-    }
-  },
-
-  bindTransferUploadZone() {
-    const zone = this.el.transferProofZone;
-    if (!zone) return;
-    zone.addEventListener('click', e => {
-      if (e.target.closest('.deposit-proof-remove')) { this.removeTransferFile(); return; }
-      if (e.target.closest('a')) return;
-      this.el.transferProofFile?.click();
-    });
-    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
-    zone.addEventListener('dragleave', e => { if (e.currentTarget === zone) zone.classList.remove('dragover'); });
-    zone.addEventListener('drop', e => {
-      e.preventDefault(); zone.classList.remove('dragover');
-      this.onTransferFileChange(e.dataTransfer?.files);
-    });
-  },
-
-  onTransferFileChange(files) {
-    const file = files && files[0];
-    if (!file) { this.removeTransferFile({ clearInput: false }); return; }
-    const ext = (file.name || '').split('.').pop().toLowerCase();
-    if (file.size <= 0)                           { this.rejectFile('File tidak boleh kosong'); return; }
-    if (file.size > DEPOSIT_MAX_FILE_SIZE)         { this.rejectFile('Ukuran file maksimal 5 MB'); return; }
-    if (!DEPOSIT_ALLOWED_MIME.includes(file.type) && !DEPOSIT_ALLOWED_EXT.includes(ext)) {
-      this.rejectFile('Hanya JPG, PNG, atau PDF yang diterima'); return;
-    }
-    this.removeTransferObjectUrl();
-    this.selectedTransferFile = file;
-    // Render preview inside transfer zone
-    const preview = this.el.transferProofPreview;
-    const empty   = this.el.transferUploadEmpty;
-    if (empty)   empty.style.display = 'none';
-    if (preview) {
-      preview.style.display = '';
-      const safeName = this.esc(file.name || 'Bukti');
-      if (file.type === 'application/pdf' || safeName.toLowerCase().endsWith('.pdf')) {
-        preview.innerHTML = `<div class="deposit-preview-file"><i data-lucide="file-text" class="icon-lg"></i><div><strong>${safeName}</strong><span>${this.formatFileSize(file.size)}</span></div><button type="button" class="deposit-proof-remove" aria-label="Hapus"><i data-lucide="x" class="icon-sm"></i></button></div>`;
-      } else {
-        this.selectedTransferFileUrl = URL.createObjectURL(file);
-        preview.innerHTML = `<div class="deposit-preview-image"><img src="${this.selectedTransferFileUrl}" alt="Preview" /><div class="deposit-preview-meta"><strong>${safeName}</strong><span>${this.formatFileSize(file.size)}</span></div><button type="button" class="deposit-proof-remove" aria-label="Hapus"><i data-lucide="x" class="icon-sm"></i></button></div>`;
-      }
-      if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
-    }
-    this.updateTransferSubmitState();
-  },
-
-  removeTransferFile({ clearInput = true } = {}) {
-    this.removeTransferObjectUrl();
-    this.selectedTransferFile = null;
-    if (clearInput && this.el.transferProofFile) this.el.transferProofFile.value = '';
-    if (this.el.transferProofPreview) { this.el.transferProofPreview.innerHTML = ''; this.el.transferProofPreview.style.display = 'none'; }
-    if (this.el.transferUploadEmpty) this.el.transferUploadEmpty.style.display = '';
-    this.updateTransferSubmitState();
-  },
-
-  removeTransferObjectUrl() {
-    if (this.selectedTransferFileUrl) {
-      URL.revokeObjectURL(this.selectedTransferFileUrl);
-      this.selectedTransferFileUrl = null;
     }
   },
 
@@ -1442,7 +1412,7 @@ const depositUi = {
     // Transfer antar outlet tidak wajib kelipatan Rp 50.000
     if (amountErr) { amountErr.textContent = msg; amountErr.classList.toggle('show', Boolean(msg)); }
 
-    const valid   = !blocked && amount > 0 && !msg && branchId;
+    const valid   = !blocked && amount > 0 && !msg && branchId && Boolean(this._transferCamera?.hasPhoto());
     btn.disabled  = this.isTransferSubmitting || !valid;
   },
 
@@ -1468,6 +1438,11 @@ const depositUi = {
       return;
     }
 
+    if (!this._transferCamera?.hasPhoto()) {
+      if (typeof showToast === 'function') showToast('Ambil foto bukti serah tunai langsung dari kamera terlebih dahulu', 'error');
+      return;
+    }
+
     const branchName = this.el.transferToBranch?.options[this.el.transferToBranch.selectedIndex]?.text || branchId;
     const ok = await this.showTransferConfirm({ amount, branchName });
     if (!ok) return;
@@ -1475,10 +1450,15 @@ const depositUi = {
     this.isTransferSubmitting = true;
     if (this.el.transferSubmitBtn) {
       this.el.transferSubmitBtn.disabled = true;
-      this.el.transferSubmitBtn.innerHTML = '<span class="btn-spinner"></span><span>Mengirim...</span>';
+      this.el.transferSubmitBtn.innerHTML = '<span class="btn-spinner"></span><span>Mengupload foto...</span>';
     }
 
     try {
+      const proofUrl = await this._transferCamera.upload('transfer_kas', 'transfer_kas.jpg');
+      const proofBlob = this._transferCamera.getBlob();
+
+      if (this.el.transferSubmitBtn) this.el.transferSubmitBtn.innerHTML = '<span class="btn-spinner"></span><span>Mengirim...</span>';
+
       const clientRequestId = `tr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const result = await cashBranchTransferService.createTransfer({
         fromBranchId:    pos.branch.id,
@@ -1487,7 +1467,11 @@ const depositUi = {
         staffId:         pos.user.id,
         amount,
         notes:           this.el.transferNotesInput?.value?.trim() || null,
-        proofFile:       this.selectedTransferFile || null,
+        proofUrl,
+        proofFileName:   'transfer_kas.jpg',
+        proofFileType:   'image/jpeg',
+        proofFileSize:   proofBlob?.size || null,
+        proofUploadedAt: new Date().toISOString(),
         clientRequestId
       });
 
@@ -1495,7 +1479,8 @@ const depositUi = {
       if (this.el.transferAmountInput) this.el.transferAmountInput.value = '';
       if (this.el.transferToBranch)    this.el.transferToBranch.value = '';
       if (this.el.transferNotesInput)  this.el.transferNotesInput.value = '';
-      this.removeTransferFile();
+      this._transferCamera.reset();
+      this._transferCamera.start();
 
       // Show success
       const code = result?.transfer_code || '';
@@ -1504,13 +1489,13 @@ const depositUi = {
         this.el.transferSuccess.innerHTML = `
           <i data-lucide="check-circle-2" class="icon-lg"></i>
           <div>
-            <strong>Setoran ke ${this.esc(branchName)} berhasil dikirim</strong>
-            <span>Menunggu approval staff ${this.esc(branchName)}. Kode: ${this.esc(code)}</span>
+            <strong>Transfer ke ${this.esc(branchName)} berhasil</strong>
+            <span>Kas outlet tujuan sudah otomatis bertambah. Kode: ${this.esc(code)}</span>
           </div>`;
         setTimeout(() => { if (this.el.transferSuccess) this.el.transferSuccess.style.display = 'none'; }, 8000);
         if (window.lucide) window.requestAnimationFrame(() => lucide.createIcons());
       }
-      if (typeof showToast === 'function') showToast(result?.message || `Transfer ke ${branchName} dikirim. Kode: ${code}`, 'success');
+      if (typeof showToast === 'function') showToast(result?.message || `Transfer ke ${branchName} berhasil. Kode: ${code}`, 'success');
 
       // Refresh data
       await this.refresh();
@@ -1551,8 +1536,8 @@ const depositUi = {
               <div><span>Sisa Setelah Transfer</span><strong>${this.esc(typeof fRp === 'function' ? fRp(this.depositableCash - amount) : (this.depositableCash - amount))}</strong></div>
             </div>
             <p style="font-size:13px;color:var(--text-muted);margin:12px 0 0">
-              Transfer akan menunggu konfirmasi dari staff ${this.esc(branchName)}.
-              Saldo outlet belum berubah sampai disetujui.
+              Kas outlet ${this.esc(branchName)} akan <strong>langsung bertambah otomatis</strong> begitu Anda kirim.
+              Pastikan uang fisik benar-benar sudah diserahkan sebelum melanjutkan.
             </p>
           </div>
           <div class="deposit-confirm-footer">

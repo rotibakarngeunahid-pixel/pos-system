@@ -155,6 +155,8 @@ const POS = {
         case 'submit-send-transfer': POS.submitSendTransfer(); break;
         case 'add-transfer-item': POS.addTransferItem(); break;
         case 'remove-transfer-item': POS.removeTransferItem(Number(btn.dataset.index)); break;
+        case 'capture-transfer-stock-photo': POS.captureTransferStockPhoto(); break;
+        case 'retake-transfer-stock-photo': POS.retakeTransferStockPhoto(); break;
         case 'open-pending-transfers-modal': POS.openPendingTransfersModal(); break;
         case 'confirm-transfer': POS.confirmTransfer(Number(btn.dataset.id)); break;
         case 'reject-transfer': POS.rejectTransfer(Number(btn.dataset.id)); break;
@@ -223,9 +225,10 @@ const POS = {
       }
     });
 
-    // Matikan kamera stok keluar saat modal ditutup (✕ / Batal / sukses)
+    // Matikan kamera stok keluar / kirim stok saat modal ditutup (✕ / Batal / sukses)
     window.addEventListener('rbn:modal:closed', e => {
       if (e.detail?.id === 'modal-stock-adjust') POS._stopStockCamera();
+      if (e.detail?.id === 'modal-send-transfer') POS._transferStockCamera?.stop();
     });
     // shift-open-dep-account / shift-open-dep-proof listeners dihapus (section deposit di modal-shift sudah dinonaktifkan)
 
@@ -1665,6 +1668,7 @@ const POS = {
     }
 
     this.currentMainTab = tab;
+    if (tab !== 'deposits') window.depositUi?._transferCamera?.stop();
     document.body.classList.toggle('deposit-tab-active', tab === 'deposits');
     document.querySelectorAll('.pos-tab-item').forEach(b => b.classList.remove('active'));
     if (btnEl?.classList?.contains('pos-tab-item')) {
@@ -1716,6 +1720,7 @@ const POS = {
     }
     if (tab === 'deposits') {
       if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
+      window.depositUi?.resumeOutletCameraIfNeeded();
     }
     if (tab === 'transactions') {
       if (this._shouldReloadTab('transactions')) {
@@ -1734,6 +1739,7 @@ const POS = {
       if (!this._depositOnlyMode) setTimeout(() => this.showStartupChoice(), 200);
       return;
     }
+    if (tab !== 'deposits') window.depositUi?._transferCamera?.stop();
 
     document.querySelectorAll('.drawer-btn').forEach(b => b.classList.remove('active'));
     if (btnEl) btnEl.classList.add('active');
@@ -1780,6 +1786,7 @@ const POS = {
       }
       if (tab === 'deposits') {
         if (window.depositUi) (depositUi.refreshWhenReady || depositUi.refresh).call(depositUi);
+        window.depositUi?.resumeOutletCameraIfNeeded();
       }
       if (tab === 'transactions') {
         if (this._shouldReloadTab('transactions')) {
@@ -2591,7 +2598,39 @@ const POS = {
     // Tampilkan hanya bahan yang juga dipetakan ke outlet tujuan terpilih.
     await this._applySendTransferDestFilter();
 
+    this._resetTransferStockEvidence();
     openModal('modal-send-transfer');
+    this._ensureTransferStockCamera().start();
+  },
+
+  _ensureTransferStockCamera() {
+    if (!this._transferStockCamera && typeof createRealtimeCameraCapture === 'function') {
+      this._transferStockCamera = createRealtimeCameraCapture({
+        videoId:      'send-transfer-camera-video',
+        previewId:    'send-transfer-photo-preview',
+        errorId:      'send-transfer-camera-error',
+        captureBtnId: 'btn-capture-transfer-stock-photo',
+        retakeBtnId:  'btn-retake-transfer-stock-photo',
+      });
+    }
+    return this._transferStockCamera;
+  },
+
+  _resetTransferStockEvidence() {
+    this._ensureTransferStockCamera()?.reset();
+  },
+
+  async captureTransferStockPhoto() {
+    try {
+      await this._ensureTransferStockCamera().capture();
+    } catch (e) {
+      showToast(e.message, 'error');
+      this._transferStockCamera.start();
+    }
+  },
+
+  retakeTransferStockPhoto() {
+    this._ensureTransferStockCamera().retake();
   },
 
   // Re-filter daftar bahan saat outlet tujuan berubah.
@@ -2690,21 +2729,34 @@ const POS = {
 
     if (!items.length) { showToast('Isi minimal satu bahan dengan jumlah yang valid', 'error'); return; }
 
+    const camera = this._ensureTransferStockCamera();
+    if (!camera?.hasPhoto()) {
+      showToast('Ambil foto bukti pengiriman langsung dari kamera terlebih dahulu', 'error');
+      return;
+    }
+
     const btn = document.getElementById('btn-submit-send-transfer');
-    if (btn) { btn.disabled = true; btn.textContent = 'Mengirim...'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Mengupload foto...'; }
 
     try {
-      const { transferCode } = await inventoryService.createStockTransfer({
+      const evidencePhotoUrl = await camera.upload('transfer_stok', 'transfer_stok.jpg');
+      if (btn) btn.textContent = 'Mengirim...';
+
+      const { transferCode, status } = await inventoryService.createStockTransfer({
         fromBranchId: this.branch.id,
         toBranchId,
         items,
         notes: notes || null,
-        userId: this.user.id
+        userId: this.user.id,
+        evidencePhotoUrl
       });
       closeModal('modal-send-transfer');
       this.loadInventorySummary();
       this.refreshStockCache();
-      showToast(`Transfer ${transferCode} berhasil dikirim. Menunggu konfirmasi outlet tujuan.`, 'success');
+      const msg = status === 'confirmed'
+        ? `Transfer ${transferCode} berhasil dikirim. Stok outlet tujuan sudah otomatis bertambah.`
+        : `Transfer ${transferCode} berhasil dikirim. Menunggu konfirmasi outlet tujuan.`;
+      showToast(msg, 'success');
     } catch (e) {
       showToast('Gagal mengirim: ' + e.message, 'error');
     } finally {
@@ -2846,6 +2898,10 @@ const POS = {
     const cancelBtn = (t.status === 'pending' && isSender)
       ? `<button class="btn btn-sm" style="margin-top:8px;color:var(--danger);font-size:11px;border:1px solid var(--border);background:transparent;" data-action="cancel-transfer" data-id="${t.id}">Batalkan Transfer</button>`
       : '';
+    const autoBadge = Number(t.auto_approved) === 1
+      ? `<span style="flex-shrink:0;padding:2px 6px;border-radius:20px;font-size:10px;font-weight:700;background:#eff6ff;color:#1d4ed8;margin-left:4px;">Otomatis</span>` : '';
+    const proofHtml = t.evidence_photo_url
+      ? `<a href="${escapeHtml(t.evidence_photo_url)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;font-size:11px;color:var(--primary);font-weight:600;">Lihat Foto Bukti</a>` : '';
     return `
       <div style="border:1.5px solid var(--border);border-radius:var(--r-lg);padding:12px;background:#fff;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
@@ -2854,10 +2910,13 @@ const POS = {
             <div style="font-size:12px;margin-top:2px;">${dirLabel}</div>
             <div style="font-size:11px;color:var(--text-muted);">${dateStr}</div>
           </div>
-          <span style="flex-shrink:0;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};">${sc.label}</span>
+          <span style="flex-shrink:0;display:flex;align-items:center;">
+            <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};">${sc.label}</span>${autoBadge}
+          </span>
         </div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${items}</div>
         ${rejNote}
+        ${proofHtml}
         ${cancelBtn}
       </div>`;
   },

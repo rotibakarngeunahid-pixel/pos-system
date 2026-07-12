@@ -905,19 +905,23 @@
               </div>
 
               <div class="form-group">
-                <label class="form-label">Bukti Serah Tunai <span class="text-muted">(opsional)</span></label>
-                <input class="deposit-file-input" type="file" id="transfer-proof-file" accept="image/jpeg,image/png,application/pdf" capture="environment" />
-                <div id="transfer-proof-zone" class="deposit-upload-zone optional" role="button" tabindex="0" aria-label="Upload bukti serah tunai">
-                  <div class="deposit-upload-empty" id="transfer-upload-empty">
-                    <i data-lucide="upload-cloud" class="icon-lg"></i>
-                    <div class="deposit-upload-copy">
-                      <strong>Upload bukti (opsional)</strong>
-                      <span>Foto serah tunai JPG, PNG, PDF maks. 5MB.</span>
-                    </div>
-                  </div>
-                  <div id="transfer-proof-preview" class="deposit-proof-preview"></div>
+                <label class="form-label">Foto Bukti Serah Tunai (Kamera Langsung) *</label>
+                <div style="position:relative;border-radius:var(--r-sm);overflow:hidden;background:#000;">
+                  <video id="transfer-camera-video" autoplay playsinline muted
+                    style="display:block;width:100%;max-height:220px;object-fit:cover;"></video>
+                  <img id="transfer-photo-preview" alt="Preview foto bukti"
+                    style="display:none;width:100%;max-height:220px;object-fit:contain;background:#000;" />
                 </div>
-                <div class="form-hint">Foto opsional, tapi disarankan untuk keamanan.</div>
+                <div id="transfer-camera-error" style="display:none;margin-top:6px;font-size:11px;color:var(--danger);"></div>
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                  <button type="button" class="btn btn-outline btn-sm" id="btn-capture-transfer-photo" style="flex:1;">
+                    <i data-lucide="camera" class="icon-sm"></i> Ambil Foto
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" id="btn-retake-transfer-photo" style="flex:1;display:none;">
+                    <i data-lucide="refresh-ccw" class="icon-sm"></i> Ulangi Foto
+                  </button>
+                </div>
+                <div class="form-hint">Foto wajib diambil langsung dari kamera saat ini juga. Begitu foto diambil, transfer otomatis disetujui dan kas outlet tujuan langsung bertambah.</div>
               </div>
 
               <div class="form-group">
@@ -1592,6 +1596,7 @@
   <script src="js/utils/safeNum.js"></script>
   <script src="js/utils/formatter.js"></script>
   <script src="js/utils/validator.js"></script>
+  <script src="js/utils/realtimeCameraCapture.js?v=20260712-transfer-evidence-1"></script>
   <script src="js/ui.js?v=20260516-crud-friendly-1"></script>
   <script src="js/services/inventoryService.js"></script>
   <script src="js/services/cashService.js?v=20260520-branch-cash-outlet-1"></script>
@@ -1704,8 +1709,29 @@
           <input type="text" class="form-control" id="send-transfer-notes"
             placeholder="Contoh: Kiriman pagi, restock mingguan..." />
         </div>
+
+        <!-- Foto bukti wajib dari kamera langsung (bukan galeri) -->
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Foto Bukti Pengiriman (Kamera Langsung) *</label>
+          <div style="position:relative;border-radius:var(--r-sm);overflow:hidden;background:#000;">
+            <video id="send-transfer-camera-video" autoplay playsinline muted
+              style="display:block;width:100%;max-height:220px;object-fit:cover;"></video>
+            <img id="send-transfer-photo-preview" alt="Preview foto bukti"
+              style="display:none;width:100%;max-height:220px;object-fit:contain;background:#000;" />
+          </div>
+          <div id="send-transfer-camera-error" style="display:none;margin-top:6px;font-size:11px;color:var(--danger);"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button type="button" class="btn btn-outline btn-sm" id="btn-capture-transfer-stock-photo" data-action="capture-transfer-stock-photo" style="flex:1;">
+              <i data-lucide="camera" class="icon-sm"></i> Ambil Foto
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-retake-transfer-stock-photo" data-action="retake-transfer-stock-photo" style="flex:1;display:none;">
+              <i data-lucide="refresh-ccw" class="icon-sm"></i> Ulangi Foto
+            </button>
+          </div>
+        </div>
+
         <div style="padding:8px 12px;background:#fff7ed;border-radius:var(--r-sm);border-left:3px solid #f59e0b;font-size:12px;color:#92400e;">
-          Stok akan langsung berkurang dari outlet Anda saat dikirim. Outlet tujuan perlu klik <strong>Terima</strong> agar stoknya bertambah.
+          Foto bukti wajib diambil langsung dari kamera saat ini juga. Begitu foto diambil &amp; dikirim, stok outlet tujuan <strong>otomatis bertambah</strong> tanpa perlu konfirmasi manual.
         </div>
       </div>
       <div class="modal-footer">

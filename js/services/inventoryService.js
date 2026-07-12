@@ -127,18 +127,21 @@ const inventoryService = {
     if (error) throw new Error(error.message || 'Transfer stok gagal di server');
   },
 
-  // ── Transfer v2: Buat permintaan transfer (stok pengirim berkurang, status pending) ──
-  async createStockTransfer({ fromBranchId, toBranchId, items, notes, userId }) {
+  // ── Transfer v2: Buat permintaan transfer. Dengan foto bukti realtime terlampir,
+  // transfer otomatis disetujui (status 'confirmed') dan stok tujuan langsung bertambah;
+  // tanpa foto (jalur admin lama), transfer tetap 'pending' menunggu konfirmasi. ──
+  async createStockTransfer({ fromBranchId, toBranchId, items, notes, userId, evidencePhotoUrl }) {
     const { data, error } = await db.rpc('create_stock_transfer', {
       p_from_branch_id: fromBranchId,
       p_to_branch_id:   toBranchId,
       p_items:          items,   // [{ingredient_id, qty}, ...]
       p_notes:          notes || null,
-      p_user_id:        userId
+      p_user_id:        userId,
+      p_evidence_photo_url: evidencePhotoUrl || null
     });
     if (error) throw new Error(error.message || 'Gagal membuat transfer');
     if (!data?.success) throw new Error(data?.error || 'Gagal membuat transfer');
-    return { transferId: data.transfer_id, transferCode: data.transfer_code };
+    return { transferId: data.transfer_id, transferCode: data.transfer_code, status: data.status };
   },
 
   // ── Transfer v2: Outlet penerima menerima barang ─────────────

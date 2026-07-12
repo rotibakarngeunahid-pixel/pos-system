@@ -3510,7 +3510,46 @@ function rpc_get_deposit_eligible_sessions(array $p): mixed {
     }, $sessions);
 }
 
+// ── Helper: verifikasi file bukti benar-benar ada di server (bukan sekadar
+// string URL yang kebetulan mengandung nama folder) ───────────────────────────
+function verifyUploadedEvidenceFile(string $url, string $folder): bool {
+    $path = parse_url($url, PHP_URL_PATH);
+    if (!$path) return false;
+    $prefix = '/uploads/' . $folder . '/';
+    if (strpos($path, $prefix) !== 0) return false; // harus DIAWALI path ini, bukan sekadar mengandung
+    $filename = basename($path);
+    if ($filename === '' || strpos($filename, '..') !== false) return false;
+    $localPath = dirname(__DIR__) . '/uploads/' . $folder . '/' . $filename;
+    return is_file($localPath);
+}
+
+// ── Helper: kunci baris branch_cash_balances kedua outlet dalam urutan branch_id
+// menaik (bukan urutan from→to) agar tidak deadlock saat ada transfer konkuren
+// yang arahnya berlawanan antara pasangan outlet yang sama. ───────────────────
+function lockBranchCashBalancesInOrder(PDO $pdo, int $branchA, int $branchB): void {
+    $ids = array_unique([$branchA, $branchB]);
+    sort($ids);
+    foreach ($ids as $id) {
+        $pdo->prepare("SELECT branch_id FROM branch_cash_balances WHERE branch_id=? FOR UPDATE")->execute([$id]);
+    }
+}
+
+// ── Helper: kunci baris branch_inventory (bahan yang sama) kedua outlet dalam
+// urutan branch_id menaik agar tidak deadlock saat ada transfer stok konkuren
+// yang arahnya berlawanan antara pasangan outlet yang sama. ───────────────────
+function lockBranchInventoryInOrder(PDO $pdo, int $branchA, int $branchB, int $ingredientId): void {
+    $ids = array_unique([$branchA, $branchB]);
+    sort($ids);
+    foreach ($ids as $id) {
+        $pdo->prepare("SELECT stock FROM branch_inventory WHERE branch_id=? AND ingredient_id=? FOR UPDATE")->execute([$id, $ingredientId]);
+    }
+}
+
 // ── create_cash_branch_transfer ───────────────────────────────────────────────
+// Staff outlet pengirim wajib melampirkan foto bukti realtime dari kamera saat
+// menyerahkan kas ke outlet lain. Begitu foto valid terlampir, transfer langsung
+// auto-approve: saldo outlet asal & tujuan diupdate atomik dalam transaksi ini juga
+// (tidak perlu lagi menunggu konfirmasi manual staff outlet tujuan).
 function rpc_create_cash_branch_transfer(array $p): mixed {
     $pdo         = getDB();
     $fromBranch  = (int)($p['p_from_branch_id'] ?? 0);
@@ -3519,12 +3558,24 @@ function rpc_create_cash_branch_transfer(array $p): mixed {
     $staffId     = (int)($p['p_staff_id']       ?? 0);
     $amount      = (float)($p['p_amount']       ?? 0);
     $notes       = $p['p_notes']       ?? null;
-    $proofUrl    = $p['p_proof_url']   ?? null;
+    $proofUrl    = trim((string)($p['p_proof_url'] ?? ''));
     $clientReqId = $p['p_client_request_id'] ?? null;
 
     if ($fromBranch === $toBranch) throw new Exception('Outlet asal dan tujuan tidak boleh sama');
     if ($amount <= 0) throw new Exception('Nominal transfer harus lebih dari 0');
     if (!$sessionId || !$staffId) throw new Exception('Session dan staff wajib diisi');
+
+    if ($proofUrl === ''
+        || !preg_match('#^https?://#i', $proofUrl)
+        || !verifyUploadedEvidenceFile($proofUrl, 'transfer_kas')) {
+        throw new Exception('Foto bukti realtime wajib diambil dari kamera saat transfer kas ke outlet lain');
+    }
+
+    $branchCheck = $pdo->prepare("SELECT id FROM branches WHERE id=? AND is_active=1 LIMIT 1");
+    $branchCheck->execute([$fromBranch]);
+    if (!$branchCheck->fetch()) throw new Exception('Outlet asal tidak ditemukan atau tidak aktif');
+    $branchCheck->execute([$toBranch]);
+    if (!$branchCheck->fetch()) throw new Exception('Outlet tujuan tidak ditemukan atau tidak aktif');
 
     // Transfer hanya boleh dibuat dari shift staff sendiri yang sudah ditutup.
     $sess = $pdo->prepare("
@@ -3555,22 +3606,95 @@ function rpc_create_cash_branch_transfer(array $p): mixed {
     $id   = uuid4();
     $code = 'TRF-' . strtoupper(substr($id, 0, 8));
 
-    $bal = $pdo->prepare("SELECT current_balance FROM branch_cash_balances WHERE branch_id=? LIMIT 1");
-    $bal->execute([$fromBranch]);
-    $cashAtRequest = (float)($bal->fetchColumn() ?? 0);
-    if ($amount > $cashAtRequest) {
-        throw new Exception('Saldo kas outlet asal tidak cukup untuk transfer');
+    $pdo->beginTransaction();
+    try {
+        // Kunci kedua saldo dalam urutan branch_id menaik (bukan from→to) agar
+        // tidak deadlock dengan transfer konkuren yang arahnya berlawanan.
+        lockBranchCashBalancesInOrder($pdo, $fromBranch, $toBranch);
+
+        $srcStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
+        $srcStmt->execute([$fromBranch]);
+        $src = $srcStmt->fetch();
+        $srcBefore = $src ? (float)$src['current_balance'] : 0.0;
+        if ($amount > $srcBefore) {
+            throw new Exception('Saldo kas outlet asal tidak cukup untuk transfer (tersedia: Rp ' . number_format($srcBefore, 0, ',', '.') . ')');
+        }
+
+        $dstStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
+        $dstStmt->execute([$toBranch]);
+        $dst = $dstStmt->fetch();
+        $dstBefore = $dst ? (float)$dst['current_balance'] : 0.0;
+
+        $srcAfter = $srcBefore - $amount;
+        $dstAfter = $dstBefore + $amount;
+
+        $row = [
+            'id' => $id,
+            'transfer_code' => $code,
+            'from_branch_id' => $fromBranch,
+            'to_branch_id' => $toBranch,
+            'session_id' => $sessionId,
+            'staff_id' => $staffId,
+            'requested_by' => $staffId,
+            'amount' => $amount,
+            'cash_balance_at_request' => $srcBefore,
+            'status' => 'confirmed',
+            'notes' => $notes,
+            'proof_url' => $proofUrl,
+            'client_request_id' => $clientReqId,
+            'confirmed_by' => $staffId,
+            'confirmed_at' => date('Y-m-d H:i:s'),
+            'source_balance_before' => $srcBefore,
+            'source_balance_after' => $srcAfter,
+            'target_balance_before' => $dstBefore,
+            'target_balance_after' => $dstAfter,
+        ];
+        foreach (['proof_file_name','proof_file_type','proof_file_size','proof_uploaded_at'] as $suffix) {
+            $param = 'p_' . $suffix;
+            if (array_key_exists($param, $p) && dbColumnExists($pdo, 'cash_branch_transfers', $suffix)) $row[$suffix] = $p[$param];
+        }
+        if (dbColumnExists($pdo, 'cash_branch_transfers', 'auto_approved')) $row['auto_approved'] = 1;
+        insertDynamic($pdo, 'cash_branch_transfers', $row);
+
+        if ($src) {
+            $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW() WHERE branch_id=?")->execute([$srcAfter,$fromBranch]);
+        } else {
+            $pdo->prepare("INSERT INTO branch_cash_balances (branch_id,current_balance,version) VALUES (?,?,1)")->execute([$fromBranch,$srcAfter]);
+        }
+        if ($dst) {
+            $pdo->prepare("UPDATE branch_cash_balances SET current_balance=?,version=version+1,updated_at=NOW() WHERE branch_id=?")->execute([$dstAfter,$toBranch]);
+        } else {
+            $pdo->prepare("INSERT INTO branch_cash_balances (branch_id,current_balance,version) VALUES (?,?,1)")->execute([$toBranch,$dstAfter]);
+        }
+
+        rpcInsertBranchCashLedger($pdo, $fromBranch, $staffId, null, $sessionId, $id,
+            'cash_branch_transfer_out', 'out', $amount, $srcBefore, $srcAfter,
+            'Transfer kas keluar (bukti realtime terlampir - otomatis disetujui)', 'cash_branch_transfers', $id);
+        rpcInsertBranchCashLedger($pdo, $toBranch, null, null, null, $id,
+            'cash_branch_transfer_in', 'in', $amount, $dstBefore, $dstAfter,
+            'Transfer kas masuk (bukti realtime terlampir - otomatis disetujui)', 'cash_branch_transfers', $id . '_in');
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        // Race idempotency: dua submit konkuren dengan client_request_id yang sama
+        // bisa lolos pre-check di atas lalu bentrok di unique constraint saat insert.
+        // Daripada melempar error DB mentah, kembalikan data yang sudah tersimpan.
+        if ($clientReqId && $e instanceof PDOException && ($e->errorInfo[1] ?? null) == 1062) {
+            $exist = $pdo->prepare("SELECT id, transfer_code, status, amount, source_balance_after, target_balance_after FROM cash_branch_transfers WHERE client_request_id=? LIMIT 1");
+            $exist->execute([$clientReqId]);
+            $existing = $exist->fetch();
+            if ($existing) {
+                return ['id'=>$existing['id'],'transfer_code'=>$existing['transfer_code'],'status'=>$existing['status'],'amount'=>(float)$existing['amount'],'source_balance_after'=>(float)$existing['source_balance_after'],'target_balance_after'=>(float)$existing['target_balance_after'],'_idempotent'=>true];
+            }
+        }
+        throw $e;
     }
 
-    $pdo->prepare("
-        INSERT INTO cash_branch_transfers
-          (id,transfer_code,from_branch_id,to_branch_id,session_id,staff_id,requested_by,
-           amount,cash_balance_at_request,status,notes,proof_url,client_request_id)
-        VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?)
-    ")->execute([$id,$code,$fromBranch,$toBranch,$sessionId,$staffId,$staffId,
-                 $amount,$cashAtRequest,$notes,$proofUrl,$clientReqId]);
-
-    return ['id'=>$id,'transfer_code'=>$code,'status'=>'pending','amount'=>$amount];
+    return [
+        'id' => $id, 'transfer_code' => $code, 'status' => 'confirmed', 'amount' => $amount,
+        'source_balance_after' => $srcAfter, 'target_balance_after' => $dstAfter,
+    ];
 }
 
 // ── admin_create_cash_branch_transfer ─────────────────────────────────────────
@@ -3619,6 +3743,10 @@ function rpc_admin_create_cash_branch_transfer(array $p): mixed {
 
     $pdo->beginTransaction();
     try {
+        // Kunci kedua saldo dalam urutan branch_id menaik (bukan from→to) agar
+        // tidak deadlock dengan transfer konkuren yang arahnya berlawanan.
+        lockBranchCashBalancesInOrder($pdo, $fromBranch, $toBranch);
+
         // Lock source balance
         $srcStmt = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
         $srcStmt->execute([$fromBranch]);
@@ -3745,6 +3873,10 @@ function rpc_confirm_cash_branch_transfer(array $p): mixed {
         }
 
         $amount = (float)$transfer['amount'];
+
+        // Kunci kedua saldo dalam urutan branch_id menaik (bukan from→to) agar
+        // tidak deadlock dengan transfer konkuren yang arahnya berlawanan.
+        lockBranchCashBalancesInOrder($pdo, (int)$transfer['from_branch_id'], (int)$transfer['to_branch_id']);
 
         // Deduct source
         $srcBal = $pdo->prepare("SELECT * FROM branch_cash_balances WHERE branch_id=? FOR UPDATE");
@@ -5132,6 +5264,8 @@ function stockTransferRows(PDO $pdo, string $where, array $values, int $limit, i
     $confirmedAt = dbColumnExists($pdo, 'stock_transfers', 'confirmed_at') ? 'st.confirmed_at' : 'NULL';
     $rejectedAt = dbColumnExists($pdo, 'stock_transfers', 'rejected_at') ? 'st.rejected_at' : 'NULL';
     $cancelledAt = dbColumnExists($pdo, 'stock_transfers', 'cancelled_at') ? 'st.cancelled_at' : 'NULL';
+    $evidenceUrl = dbColumnExists($pdo, 'stock_transfers', 'evidence_photo_url') ? 'st.evidence_photo_url' : 'NULL';
+    $autoApproved = dbColumnExists($pdo, 'stock_transfers', 'auto_approved') ? 'st.auto_approved' : '0';
     $limit = max(1, min(500, $limit));
     $offset = max(0, $offset);
 
@@ -5139,6 +5273,7 @@ function stockTransferRows(PDO $pdo, string $where, array $values, int $limit, i
         SELECT st.id, st.transfer_code, st.from_branch_id, st.to_branch_id, st.status, st.notes,
                $reasonExpr AS rejection_reason, st.created_at,
                $confirmedAt AS confirmed_at, $rejectedAt AS rejected_at, $cancelledAt AS cancelled_at,
+               $evidenceUrl AS evidence_photo_url, $autoApproved AS auto_approved,
                fb.name AS from_branch_name, tb.name AS to_branch_name,
                uc.name AS created_by_name, ucf.name AS confirmed_by_name, urj.name AS rejected_by_name
         FROM stock_transfers st
@@ -5438,13 +5573,36 @@ function rpc_create_stock_transfer(array $p): mixed {
     $items = normalizeStockTransferItems($p['p_items'] ?? []);
     $notes = $p['p_notes'] ?? null;
     $userId = (int)($p['p_user_id'] ?? 0);
+    $evidencePhotoUrl = trim((string)($p['p_evidence_photo_url'] ?? ''));
 
     if ($fromBranch <= 0 || $toBranch <= 0 || $fromBranch === $toBranch) throw new Exception('Outlet asal dan tujuan tidak valid');
     if (!$items) throw new Exception('Tidak ada bahan yang dipilih untuk dikirim');
 
+    // ── Staff outlet pengirim wajib foto bukti realtime dari kamera ─────────────
+    // Begitu foto terlampir, transfer otomatis disetujui (auto-approve): stok
+    // outlet tujuan langsung bertambah tanpa menunggu konfirmasi manual.
+    $authUser = $p['_auth_user'] ?? null;
+    $isStaff  = ($authUser['role'] ?? '') === 'staff';
+    $validEvidence = $evidencePhotoUrl !== ''
+        && strlen($evidencePhotoUrl) <= 500
+        && preg_match('#^https?://#i', $evidencePhotoUrl)
+        && verifyUploadedEvidenceFile($evidencePhotoUrl, 'transfer_stok');
+
+    if ($isStaff && !$validEvidence) {
+        throw new Exception('Foto bukti realtime wajib diambil dari kamera saat mengirim stok ke outlet lain');
+    }
+    $autoApprove = $validEvidence;
+    if (!$validEvidence) $evidencePhotoUrl = '';
+
     $pdo->beginTransaction();
     try {
         foreach ($items as $item) {
+            if ($autoApprove) {
+                // Kunci baris branch_inventory kedua outlet dalam urutan branch_id
+                // menaik (bukan from→to) agar tidak deadlock dengan transfer stok
+                // konkuren yang arahnya berlawanan antara pasangan outlet yang sama.
+                lockBranchInventoryInOrder($pdo, $fromBranch, $toBranch, $item['ingredient_id']);
+            }
             $stmt = $pdo->prepare("SELECT stock FROM branch_inventory WHERE branch_id=? AND ingredient_id=? FOR UPDATE");
             $stmt->execute([$fromBranch, $item['ingredient_id']]);
             $stock = (float)($stmt->fetch()['stock'] ?? 0);
@@ -5462,16 +5620,30 @@ function rpc_create_stock_transfer(array $p): mixed {
             'transfer_code' => $code,
             'from_branch_id' => $fromBranch,
             'to_branch_id' => $toBranch,
-            'status' => 'pending',
+            'status' => $autoApprove ? 'confirmed' : 'pending',
             'notes' => $notes,
             $creatorCol => $userId,
         ];
+        if (dbColumnExists($pdo, 'stock_transfers', 'evidence_photo_url')) {
+            $transferRow['evidence_photo_url'] = $evidencePhotoUrl !== '' ? $evidencePhotoUrl : null;
+        }
+        if (dbColumnExists($pdo, 'stock_transfers', 'auto_approved')) $transferRow['auto_approved'] = $autoApprove ? 1 : 0;
+        if ($autoApprove) {
+            if (dbColumnExists($pdo, 'stock_transfers', 'confirmed_by')) $transferRow['confirmed_by'] = $userId;
+            if (dbColumnExists($pdo, 'stock_transfers', 'confirmed_at')) $transferRow['confirmed_at'] = date('Y-m-d H:i:s');
+        }
         insertDynamic($pdo, 'stock_transfers', $transferRow);
         $transferId = (int)$pdo->lastInsertId();
 
         $toNameStmt = $pdo->prepare("SELECT name FROM branches WHERE id=? LIMIT 1");
         $toNameStmt->execute([$toBranch]);
         $toName = $toNameStmt->fetchColumn() ?: 'outlet tujuan';
+        $fromName = null;
+        if ($autoApprove) {
+            $fromNameStmt = $pdo->prepare("SELECT name FROM branches WHERE id=? LIMIT 1");
+            $fromNameStmt->execute([$fromBranch]);
+            $fromName = $fromNameStmt->fetchColumn() ?: 'outlet asal';
+        }
         $qtyCol = stockTransferQtyCol($pdo);
 
         foreach ($items as $item) {
@@ -5480,8 +5652,16 @@ function rpc_create_stock_transfer(array $p): mixed {
                 'ingredient_id' => $item['ingredient_id'],
                 $qtyCol => $item['qty'],
             ]);
+            $outNote = $autoApprove
+                ? "Dikirim ke $toName [$code] - bukti realtime terlampir, otomatis disetujui"
+                : "Dikirim ke $toName [$code] - menunggu konfirmasi";
             [$before, $after] = adjustBranchInventory($pdo, $fromBranch, $item['ingredient_id'], -$item['qty']);
-            insertInventoryMovement($pdo, $fromBranch, $item['ingredient_id'], -$item['qty'], 'transfer_out', $before, $after, "Dikirim ke $toName [$code] - menunggu konfirmasi", $userId, 'transfer', (string)$transferId);
+            insertInventoryMovement($pdo, $fromBranch, $item['ingredient_id'], -$item['qty'], 'transfer_out', $before, $after, $outNote, $userId, 'transfer', (string)$transferId);
+
+            if ($autoApprove) {
+                [$dBefore, $dAfter] = adjustBranchInventory($pdo, $toBranch, $item['ingredient_id'], $item['qty']);
+                insertInventoryMovement($pdo, $toBranch, $item['ingredient_id'], $item['qty'], 'transfer_in', $dBefore, $dAfter, "Diterima dari $fromName [$code] - otomatis (bukti realtime)", $userId, 'transfer', (string)$transferId);
+            }
         }
 
         $pdo->commit();
@@ -5500,7 +5680,7 @@ function rpc_create_stock_transfer(array $p): mixed {
                 'transfer_code'            => $code,
                 'from_pos_branch_id'       => $fromBranch,
                 'to_pos_branch_id'         => $toBranch,
-                'status'                   => 'pending',
+                'status'                   => $autoApprove ? 'confirmed' : 'pending',
                 'created_at'               => date('c'),
                 'requested_by_pos_user_id' => $userId ?: null,
                 'requested_by_name'        => lookupUserName($pdo, $userId ?: null),
@@ -5509,7 +5689,11 @@ function rpc_create_stock_transfer(array $p): mixed {
             ]);
         } catch (Throwable $e) { error_log('sync transfer→inventori: ' . $e->getMessage()); }
 
-        return ['success'=>true,'transfer_id'=>$transferId,'transfer_code'=>$code];
+        if ($autoApprove) {
+            syncTransferStatusToInventori($transferId, $code, 'confirmed');
+        }
+
+        return ['success'=>true,'transfer_id'=>$transferId,'transfer_code'=>$code,'status'=>$autoApprove ? 'confirmed' : 'pending'];
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
