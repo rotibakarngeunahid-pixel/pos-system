@@ -5145,7 +5145,10 @@ function rpc_get_my_onboarding(array $p): mixed { return null; }
 function rpc_admin_preview_branch_menu_copy(array $p): mixed { return []; }
 function rpc_admin_copy_branch_menu(array $p): mixed { return ['success'=>true]; }
 function stockTransferQtyCol(PDO $pdo): string {
-    return dbColumnExists($pdo, 'stock_transfer_items', 'qty') ? 'qty' : 'quantity';
+    // `quantity` DECIMAL(10,3) menyimpan pecahan (mis. 8.5) dengan benar.
+    // Kolom `qty` BIGINT legacy membulatkan otomatis di MySQL saat INSERT
+    // (8.5 -> 9), jadi harus jadi pilihan terakhir, bukan yang diutamakan.
+    return dbColumnExists($pdo, 'stock_transfer_items', 'quantity') ? 'quantity' : 'qty';
 }
 
 function inventoryLogQtyCol(PDO $pdo): string {
