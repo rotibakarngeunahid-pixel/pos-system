@@ -1303,6 +1303,7 @@ function adminRpcNames(): array {
         'admin_preview_branch_menu_copy',
         'admin_copy_branch_menu',
         'get_all_transfers_admin',
+        'get_inventory_logs_admin',
         'rbn_require_admin_session',
         'sync_investor_payment_methods',
         // PO sync admin actions
@@ -4451,6 +4452,54 @@ function rpc_get_ingredient_inventory_logs(array $p): mixed {
         FROM inventory_logs il
         LEFT JOIN ingredients i ON i.id = il.ingredient_id
         LEFT JOIN users u ON u.id = il.created_by
+        $where
+        ORDER BY il.created_at DESC
+        LIMIT ? OFFSET ?
+    ");
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+// ── get_inventory_logs_admin: log inventori admin, transfer rows dilengkapi rute + bukti ──
+function rpc_get_inventory_logs_admin(array $p): mixed {
+    $pdo      = getDB();
+    $branchId = (int)($p['p_branch_id'] ?? 0);
+    $type     = !empty($p['p_type']) ? trim($p['p_type']) : null;
+    $limit    = max(1, min(500, (int)($p['p_limit'] ?? 300)));
+    $offset   = max(0, (int)($p['p_offset'] ?? 0));
+
+    $conditions = [];
+    $params     = [];
+    if ($branchId) { $conditions[] = 'il.branch_id = ?'; $params[] = $branchId; }
+    if ($type)     { $conditions[] = 'il.type = ?';      $params[] = $type; }
+    $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
+
+    $evidenceUrl  = dbColumnExists($pdo, 'stock_transfers', 'evidence_photo_url') ? 'st.evidence_photo_url' : 'NULL';
+    $autoApproved = dbColumnExists($pdo, 'stock_transfers', 'auto_approved')      ? 'st.auto_approved'      : '0';
+    $confirmedAt  = dbColumnExists($pdo, 'stock_transfers', 'confirmed_at')       ? 'st.confirmed_at'       : 'NULL';
+
+    $params[] = $limit;
+    $params[] = $offset;
+
+    $stmt = $pdo->prepare("
+        SELECT il.*,
+               i.name AS ingredient_name, i.unit AS ingredient_unit,
+               b.name AS branch_name,
+               u.name AS created_by_name,
+               st.transfer_code AS transfer_code,
+               st.status        AS transfer_status,
+               $autoApproved    AS transfer_auto_approved,
+               $confirmedAt     AS transfer_confirmed_at,
+               $evidenceUrl     AS transfer_evidence_photo_url,
+               fb.name AS transfer_from_branch_name,
+               tb.name AS transfer_to_branch_name
+        FROM inventory_logs il
+        LEFT JOIN ingredients i ON i.id = il.ingredient_id
+        LEFT JOIN branches b ON b.id = il.branch_id
+        LEFT JOIN users u ON u.id = il.created_by
+        LEFT JOIN stock_transfers st ON il.reference_type = 'transfer' AND st.id = CAST(il.reference_id AS UNSIGNED)
+        LEFT JOIN branches fb ON fb.id = st.from_branch_id
+        LEFT JOIN branches tb ON tb.id = st.to_branch_id
         $where
         ORDER BY il.created_at DESC
         LIMIT ? OFFSET ?

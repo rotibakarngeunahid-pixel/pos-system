@@ -2370,29 +2370,46 @@ const ADMIN = {
     const tbody    = document.getElementById('inv-log-body');
     tbody.innerHTML = '<tr><td colspan="9" class="empty-td">Memuat...</td></tr>';
 
-    let q = db.from('inventory_logs')
-      .select('*, ingredients(name, unit), branches(name), users!created_by(name)')
-      .order('created_at', { ascending:false }).limit(300);
-    if (branchId) q = q.eq('branch_id', branchId);
-    if (type)     q = q.eq('type', type);
-
-    const { data } = await q;
+    const { data, error } = await db.rpc('get_inventory_logs_admin', {
+      p_branch_id: branchId || null,
+      p_type:      type || null,
+      p_limit:     300,
+    });
+    if (error) {
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-td" style="color:var(--danger);">Gagal memuat: ${escHtml(error.message)}</td></tr>`;
+      return;
+    }
     const typeLabel = { in:'Masuk', out:'Keluar', opname:'Opname', transfer_in:'Transfer Masuk', transfer_out:'Transfer Keluar' };
     const typeBadge = { in:'badge-green', out:'badge-red', opname:'badge-orange', transfer_in:'badge-green', transfer_out:'badge-orange' };
     const reasonLabel = { roti_berjamur:'Roti Berjamur', roti_hilang:'Roti Hilang' };
+    const transferStatusCfg = {
+      pending:   { label:'Menunggu',   cls:'badge-orange'  },
+      confirmed: { label:'Selesai',    cls:'badge-green'   },
+      rejected:  { label:'Ditolak',    cls:'badge-red'     },
+      cancelled: { label:'Dibatalkan', cls:'badge-default' },
+    };
 
     tbody.innerHTML = data?.length ? data.map(log => {
       const qty = parseFloat(log.quantity ?? 0);
       const qtyStr = qty > 0 ? '+' + qty : String(qty);
-      const noteStr = log.note || log.reference_type || '—';
+      const isTransfer = log.type === 'transfer_in' || log.type === 'transfer_out';
 
-      // Bukti stok keluar staff: foto (roti berjamur) atau kronologi (roti hilang)
+      // Untuk baris transfer, tampilkan rute outlet asal→tujuan alih-alih catatan generik
+      let noteStr = log.note || log.reference_type || '—';
+      if (isTransfer && (log.transfer_from_branch_name || log.transfer_to_branch_name)) {
+        const from = log.transfer_from_branch_name || '?';
+        const to   = log.transfer_to_branch_name || '?';
+        noteStr = `${from} → ${to}${log.transfer_code ? ' [' + log.transfer_code + ']' : ''}`;
+      }
+
+      // Bukti: foto (roti berjamur) / kronologi (roti hilang) / bukti foto transfer antar outlet
       let evidenceHtml = '—';
       const isSafePhotoUrl = typeof log.evidence_photo_url === 'string' && /^https?:\/\//i.test(log.evidence_photo_url);
+      const isSafeTransferPhotoUrl = typeof log.transfer_evidence_photo_url === 'string' && /^https?:\/\//i.test(log.transfer_evidence_photo_url);
       if (log.reason === 'roti_berjamur' && isSafePhotoUrl) {
         evidenceHtml = `
           <div class="text-xs"><span class="badge badge-red" style="font-size:10px;">${reasonLabel[log.reason]}</span></div>
-          <a href="${escHtml(log.evidence_photo_url)}" target="_blank" rel="noopener" title="Klik untuk lihat foto ukuran penuh">
+          <a href="${escHtml(log.evidence_photo_url)}" target="_blank" rel="noopener" data-proof-url="${escHtml(log.evidence_photo_url)}" title="Klik untuk lihat foto ukuran penuh">
             <img src="${escHtml(log.evidence_photo_url)}" alt="Foto bukti roti berjamur" loading="lazy"
               style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border);margin-top:4px;display:block;" />
           </a>`;
@@ -2402,16 +2419,27 @@ const ADMIN = {
           <div class="text-xs" style="max-width:220px;white-space:pre-wrap;word-break:break-word;margin-top:4px;" title="Kronologi kejadian">${escHtml(log.chronology)}</div>`;
       } else if (reasonLabel[log.reason]) {
         evidenceHtml = `<span class="badge badge-orange" style="font-size:10px;">${reasonLabel[log.reason]}</span>`;
+      } else if (isTransfer && log.transfer_code) {
+        const sc = transferStatusCfg[log.transfer_status];
+        const autoBadge = Number(log.transfer_auto_approved) === 1
+          ? ' <span class="badge badge-info" style="font-size:9px;">Auto</span>' : '';
+        const proofLink = isSafeTransferPhotoUrl
+          ? `<a href="${escHtml(log.transfer_evidence_photo_url)}" target="_blank" rel="noopener" data-proof-url="${escHtml(log.transfer_evidence_photo_url)}" style="font-size:11px;">Lihat Bukti</a>`
+          : '<span class="text-muted" style="font-size:11px;">Tanpa foto</span>';
+        evidenceHtml = `
+          <div class="text-xs fw-600">${escHtml(log.transfer_code)}</div>
+          <div class="text-xs">${sc ? `<span class="badge ${sc.cls}" style="font-size:10px;">${sc.label}</span>${autoBadge}` : ''}</div>
+          <div style="margin-top:2px;">${proofLink}</div>`;
       }
 
       return `<tr>
         <td class="nowrap text-xs">${fDate(log.created_at)}</td>
-        <td>${escHtml(log.branches?.name||'—')}</td>
-        <td class="fw-600">${escHtml(log.ingredients?.name||'—')}</td>
+        <td>${escHtml(log.branch_name||'—')}</td>
+        <td class="fw-600">${escHtml(log.ingredient_name||'—')}</td>
         <td><span class="badge ${typeBadge[log.type]||'badge-orange'}">${typeLabel[log.type]||log.type}</span></td>
-        <td class="fw-700">${qtyStr} ${escHtml(log.ingredients?.unit||'')}</td>
+        <td class="fw-700">${qtyStr} ${escHtml(log.ingredient_unit||'')}</td>
         <td>${parseFloat(log.stock_before??0)} → ${parseFloat(log.stock_after??0)}</td>
-        <td>${escHtml(log.users?.name||'Sistem')}</td>
+        <td>${escHtml(log.created_by_name||'Sistem')}</td>
         <td class="text-xs text-muted">${escHtml(noteStr)}</td>
         <td>${evidenceHtml}</td>
       </tr>`;}).join('')
