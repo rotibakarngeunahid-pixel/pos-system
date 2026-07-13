@@ -1211,7 +1211,7 @@ const depositUi = {
         || 'Metode lama/tidak tersedia';
       const proofUrl = depositService.normalizeProofUrl(row.proof_url);
       const proof = proofUrl
-        ? `<a href="${this.esc(proofUrl)}" target="_blank" rel="noopener">${this.esc(row.proof_file_name || 'Lihat bukti')}</a>`
+        ? `<a class="deposit-admin-proof-link" href="${this.esc(proofUrl)}" target="_blank" rel="noopener" data-proof-url="${this.esc(proofUrl)}" data-proof-name="${this.esc(row.proof_file_name || '')}">${this.esc(row.proof_file_name || 'Lihat bukti')}</a>`
         : '<span class="text-muted">Bukti belum tersedia</span>';
       const rejectRow = row.status === 'rejected' && row.reject_reason
         ? `<div><span>Alasan Penolakan</span><strong class="text-danger">${this.esc(row.reject_reason)}</strong></div>`
@@ -1612,7 +1612,7 @@ const depositUi = {
     body.innerHTML = items.map(item => {
       const proofUrl = depositService.normalizeProofUrl(item.proof_url);
       const proofHtml = proofUrl
-        ? `<a class="deposit-incoming-proof" href="${this.esc(proofUrl)}" target="_blank" rel="noopener">Lihat Bukti</a>`
+        ? `<a class="deposit-admin-proof-link deposit-incoming-proof" href="${this.esc(proofUrl)}" target="_blank" rel="noopener" data-proof-url="${this.esc(proofUrl)}" data-proof-name="${this.esc(item.proof_file_name || '')}">Lihat Bukti</a>`
         : '';
       return `
         <div class="deposit-incoming-item">

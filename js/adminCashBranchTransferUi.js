@@ -311,7 +311,7 @@ const adminCashBranchTransferUi = {
         <div class="cbt-detail-row"><span>Jumlah</span><strong>${fmtRp(row.amount)}</strong></div>
         <div class="cbt-detail-row"><span>Waktu Request</span><strong>${fmtDt(row.requested_at)}</strong></div>
         ${row.notes ? `<div class="cbt-detail-row"><span>Catatan</span><strong>${escHtml(row.notes)}</strong></div>` : ''}
-        ${row.proof_url ? `<div class="cbt-detail-row"><span>Bukti</span><a href="${escHtml(depositService.normalizeProofUrl(row.proof_url))}" target="_blank" rel="noopener">${escHtml(row.proof_file_name || 'Lihat bukti')}</a></div>` : ''}
+        ${row.proof_url ? `<div class="cbt-detail-row"><span>Bukti</span><div class="cbt-proof-thumb-wrap"><img class="cbt-proof-thumb" src="${escHtml(depositService.normalizeProofUrl(row.proof_url))}" alt="Bukti transfer" data-proof-url="${escHtml(depositService.normalizeProofUrl(row.proof_url))}" data-proof-name="${escHtml(row.proof_file_name || 'Bukti Transfer')}" title="Klik untuk perbesar" onerror="this.classList.add('cbt-proof-thumb-error')" /></div></div>` : ''}
         ${row.confirmed_by_name ? `
           <div class="cbt-detail-row cbt-detail-divider"><span>Persetujuan</span><strong>${Number(row.auto_approved) === 1 ? 'Otomatis (foto bukti realtime)' : escHtml(row.confirmed_by_name)}</strong></div>
           <div class="cbt-detail-row"><span>Waktu Konfirmasi</span><strong>${fmtDt(row.confirmed_at)}</strong></div>

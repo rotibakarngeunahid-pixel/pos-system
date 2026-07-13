@@ -508,7 +508,7 @@ const adminStaffCashUi = {
       const method = escHtml(d.deposit_account_name_snapshot || 'Metode lama/tidak tersedia');
       const proofUrl = depositService.normalizeProofUrl(d.proof_url);
       const proof = proofUrl
-        ? `<a class="deposit-admin-proof-link" href="${escHtml(proofUrl)}" target="_blank" rel="noopener">${escHtml(d.proof_file_name || 'Lihat Bukti')}</a>`
+        ? `<a class="deposit-admin-proof-link" href="${escHtml(proofUrl)}" target="_blank" rel="noopener" data-proof-url="${escHtml(proofUrl)}" data-proof-name="${escHtml(d.proof_file_name || '')}"><i data-lucide="image" style="width:12px;height:12px;vertical-align:middle"></i> ${escHtml(d.proof_file_name || 'Lihat Bukti')}</a>`
         : '<span class="text-muted">Bukti belum tersedia</span>';
       const sessionBadge = String(d.session_id || '') === String(this._activeDetail?.session?.id || '')
         ? '<span class="badge badge-success" style="font-size:10px">Sesi ini</span>'

@@ -342,6 +342,137 @@
     });
   };
 
+  /* ── Image / Proof Viewer (Lightbox) ───────────────────────────────────── */
+  function _injectImageViewerCSS() {
+    if (document.getElementById('ui-iv-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ui-iv-style';
+    style.textContent = `
+      .ui-iv-overlay {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.78);
+        z-index: 9200;
+        display: flex; align-items: center; justify-content: center;
+        padding: 24px;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+      .ui-iv-overlay.ui-show { opacity: 1; }
+      .ui-iv-box {
+        width: 100%; max-width: 720px; max-height: 90vh;
+        display: flex; flex-direction: column;
+        background: var(--surface, #fff);
+        border-radius: 16px;
+        overflow: hidden;
+        transform: scale(0.94);
+        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        box-shadow: 0 32px 80px rgba(0,0,0,0.35);
+      }
+      .ui-iv-overlay.ui-show .ui-iv-box { transform: scale(1); }
+      .ui-iv-header {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 12px 16px;
+        border-bottom: 1px solid var(--border, #E5E7EB);
+        flex-shrink: 0;
+      }
+      .ui-iv-title { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text, #111827); }
+      .ui-iv-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+      .ui-iv-icon-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; border-radius: 8px;
+        color: var(--text-muted, #6B7280); background: transparent; border: none; cursor: pointer;
+        text-decoration: none;
+      }
+      .ui-iv-icon-btn:hover { background: var(--bg-hover, rgba(0,0,0,0.06)); color: var(--text, #111827); }
+      .ui-iv-body {
+        flex: 1; min-height: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: repeating-conic-gradient(#00000008 0% 25%, transparent 0% 50%) 50% / 20px 20px;
+        overflow: auto;
+        padding: 12px;
+      }
+      .ui-iv-body img { max-width: 100%; max-height: 78vh; object-fit: contain; border-radius: 4px; display: block; }
+      .ui-iv-fallback { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; color: var(--text-muted, #6B7280); text-align: center; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Assume image unless there's positive evidence otherwise (e.g. a .pdf name/url) —
+  // most proof uploads are photos and proof_file_name may be a generic fallback with no extension.
+  const UI_IV_NON_IMAGE_RE = /\.pdf(\?.*)?$/i;
+
+  /**
+   * @param {Object} opts
+   * @param {string} opts.url
+   * @param {string} [opts.title='Bukti']
+   * @param {string} [opts.fileName='']
+   * @returns {Promise<void>}
+   */
+  window.showImagePreview = function ({ url, title = 'Bukti', fileName = '' } = {}) {
+    if (!url) return Promise.resolve();
+    _injectImageViewerCSS();
+    return new Promise((resolve) => {
+      const overlay = _createOverlay();
+      overlay.className = 'ui-iv-overlay';
+
+      const isImage = !UI_IV_NON_IMAGE_RE.test(fileName || '') && !UI_IV_NON_IMAGE_RE.test(url);
+      const bodyHtml = isImage
+        ? `<img src="${_esc(url)}" alt="${_esc(fileName || title)}" />`
+        : `<div class="ui-iv-fallback">
+             <i data-lucide="file-text" style="width:40px;height:40px"></i>
+             <span>${_esc(fileName || 'Berkas bukti')}</span>
+           </div>`;
+
+      overlay.innerHTML = `
+        <div class="ui-iv-box">
+          <div class="ui-iv-header">
+            <span class="ui-iv-title">${_esc(fileName || title)}</span>
+            <div class="ui-iv-actions">
+              <a href="${_esc(url)}" target="_blank" rel="noopener" class="ui-iv-icon-btn" title="Buka di tab baru"><i data-lucide="external-link" style="width:16px;height:16px"></i></a>
+              <button class="ui-iv-icon-btn" id="ui-iv-close" title="Tutup"><i data-lucide="x" style="width:18px;height:18px"></i></button>
+            </div>
+          </div>
+          <div class="ui-iv-body">${bodyHtml}</div>
+        </div>
+      `;
+
+      const ac = new AbortController();
+      function close() {
+        ac.abort();
+        _removeOverlay(overlay);
+        resolve();
+      }
+
+      overlay.querySelector('#ui-iv-close').addEventListener('click', close);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); }, { signal: ac.signal });
+
+      const img = overlay.querySelector('.ui-iv-body img');
+      if (img) {
+        img.addEventListener('error', () => {
+          img.closest('.ui-iv-body').innerHTML = `<div class="ui-iv-fallback"><i data-lucide="image-off" style="width:40px;height:40px"></i><span>Gagal memuat gambar</span></div>`;
+          if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+        }, { once: true });
+      }
+
+      if (window.lucide) requestAnimationFrame(() => lucide.createIcons());
+    });
+  };
+
+  // Global delegated trigger: any element with data-proof-url opens the lightbox on click,
+  // while its native href/target still works for ctrl/middle-click or right-click "open in new tab".
+  document.addEventListener('click', (e) => {
+    const trigger = e.target.closest('[data-proof-url]');
+    if (!trigger) return;
+    const url = trigger.getAttribute('data-proof-url');
+    if (!url) return;
+    e.preventDefault();
+    window.showImagePreview({
+      url,
+      fileName: trigger.getAttribute('data-proof-name') || '',
+    });
+  });
+
 })();
 
 window.formatDbError = function (error, { action = 'memproses data', entity = 'data ini' } = {}) {

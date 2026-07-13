@@ -291,8 +291,8 @@ const adminDepositUi = {
     const label = row.proof_file_name ? 'Lihat Bukti' : 'Lihat';
     const title = row.proof_file_name ? ` title="${escHtml(row.proof_file_name)}"` : '';
     const proofUrl = depositService.normalizeProofUrl(row.proof_url);
-    return `<a class="deposit-admin-proof-link" href="${escHtml(proofUrl)}" target="_blank" rel="noopener"${title}>
-      <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle"></i> ${escHtml(label)}
+    return `<a class="deposit-admin-proof-link" href="${escHtml(proofUrl)}" target="_blank" rel="noopener" data-proof-url="${escHtml(proofUrl)}" data-proof-name="${escHtml(row.proof_file_name || '')}"${title}>
+      <i data-lucide="image" style="width:12px;height:12px;vertical-align:middle"></i> ${escHtml(label)}
     </a>`;
   },
 

@@ -125,6 +125,10 @@
     .cbt-detail-row span:first-child { color:var(--text-muted); flex-shrink:0; min-width:140px; }
     .cbt-detail-row strong, .cbt-detail-row a { text-align:right; word-break:break-all; }
     .cbt-detail-divider { margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+    .cbt-proof-thumb-wrap { display:flex; justify-content:flex-end; }
+    .cbt-proof-thumb { width:72px; height:72px; object-fit:cover; border-radius:10px; border:1px solid var(--border); cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; }
+    .cbt-proof-thumb:hover { transform:scale(1.05); box-shadow:0 6px 16px rgba(0,0,0,.18); }
+    .cbt-proof-thumb-error { object-fit:contain; padding:12px; background:var(--bg-hover,#f3f4f6); }
 
     /* ── PO Sync Run Cards (Riwayat Sync) ──────────────────────── */
     .po-run-card { border:1px solid var(--border,#e5e7eb); border-radius:var(--r-md,8px); margin-bottom:10px; overflow:hidden; background:var(--card-bg,#fff); transition:box-shadow .15s; }
