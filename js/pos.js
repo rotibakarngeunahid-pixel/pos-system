@@ -21,6 +21,8 @@ const POS = {
   _currentPaymentTxId: null,
   bomData:     null,   // { recipeMap: {variantId→recipeId}, recipeItemsMap: {recipeId→[items]} }
   stockCache:  null,   // Map<ingredientId, stock> — refreshed after each transaction
+  _bomReady:          false,  // true setelah preloadBOM() sukses memuat resep+stok
+  _bomPreloadPromise: null,   // promise preload yang sedang berjalan (biar tidak dobel fetch)
   toppingMap:  {},     // productId → [{id, name, price}]
   _cartIdCounter: 0,   // increments to give each cart line a unique cartItemId
   _pendingVariantId: null,   // staged while topping modal is open
@@ -342,6 +344,11 @@ const POS = {
     this.cart     = [];
     this.discount = { type: 'none', value: 0 };
     this.heldCarts = [];
+    // Cache BOM/stok cabang sebelumnya sudah tidak berlaku — checkout harus
+    // menunggu data cabang baru dulu (lihat ensureBOMReady()).
+    this._bomReady  = false;
+    this.bomData    = null;
+    this.stockCache = null;
     this.renderCart();
     this.updateHeldBadge();
     this.branch = { id, name, address };
@@ -1127,63 +1134,93 @@ const POS = {
   },
 
   // ── BOM / Stock Cache ─────────────────────────────────────────
-  async preloadBOM() {
-    if (!this.allProducts.length) return;
+  // preloadBOM() dipicu non-blocking saat produk termuat (lihat pemanggilnya).
+  // Checkout WAJIB menunggu ini lewat ensureBOMReady() sebelum boleh lanjut —
+  // supaya deduksi bahan baku selalu punya data "stok awal" yang benar, bukan
+  // bergantung pada seberapa cepat kasir checkout / seberapa bagus koneksi.
+  preloadBOM() {
+    const p = this._fetchBOM()
+      .then(() => { this._bomReady = true; })
+      .catch(() => {
+        this.bomData    = null;
+        this.stockCache = null;
+        this._bomReady  = false;
+      })
+      .finally(() => {
+        if (this._bomPreloadPromise === p) this._bomPreloadPromise = null;
+      });
+    this._bomPreloadPromise = p;
+    return p;
+  },
+
+  async _fetchBOM() {
+    if (!this.allProducts.length || !this.branch) return;
     const allVariantIds = this.allProducts.flatMap(p => p.variants.map(v => v.id));
-    if (!allVariantIds.length) return;
-    try {
-      const { data: recipesData } = await db.from('recipes')
-        .select('id, variant_id').in('variant_id', allVariantIds);
-
-      const recipeMap = {};
-      for (const r of (recipesData || [])) recipeMap[r.variant_id] = r.id;
-
-      const recipeIds = Object.values(recipeMap);
-      if (!recipeIds.length) {
-        this.bomData = { recipeMap: {}, recipeItemsMap: {} };
-        this.stockCache = new Map();
-        return;
-      }
-
-      const [itemsRes, invRes, assignRes] = await Promise.all([
-        db.from('recipe_items')
-          .select('recipe_id, ingredient_id, quantity, ingredients(name, unit)')
-          .in('recipe_id', recipeIds),
-        db.from('branch_inventory')
-          .select('ingredient_id, stock')
-          .eq('branch_id', this.branch.id),
-        db.from('branch_ingredient_assignments').select('ingredient_id, branch_id')
-      ]);
-
-      // Build map: ingredientId → Set<branchId>. Kosong = tersedia di semua cabang.
-      const assignMap = new Map();
-      for (const a of (assignRes.data || [])) {
-        if (!assignMap.has(a.ingredient_id)) assignMap.set(a.ingredient_id, new Set());
-        assignMap.get(a.ingredient_id).add(a.branch_id);
-      }
-      const myBranchId = this.branch.id;
-
-      const recipeItemsMap = {};
-      for (const ri of (itemsRes.data || [])) {
-        // Skip bahan yang di-assign ke cabang lain (tidak termasuk cabang ini)
-        const assigns = assignMap.get(ri.ingredient_id);
-        if (assigns && !assigns.has(myBranchId)) continue;
-        if (!recipeItemsMap[ri.recipe_id]) recipeItemsMap[ri.recipe_id] = [];
-        recipeItemsMap[ri.recipe_id].push(ri);
-      }
-
-      const stockCache = new Map();
-      for (const row of (invRes.data || [])) {
-        stockCache.set(row.ingredient_id, parseFloat(row.stock));
-      }
-
-      this.bomData    = { recipeMap, recipeItemsMap };
-      this.stockCache = stockCache;
-    } catch (e) {
-      // Non-fatal: fall back to allowing all adds; checkout will re-validate via DB
-      this.bomData    = null;
-      this.stockCache = null;
+    if (!allVariantIds.length) {
+      this.bomData    = { recipeMap: {}, recipeItemsMap: {} };
+      this.stockCache = new Map();
+      return;
     }
+
+    const { data: recipesData } = await db.from('recipes')
+      .select('id, variant_id').in('variant_id', allVariantIds);
+
+    const recipeMap = {};
+    for (const r of (recipesData || [])) recipeMap[r.variant_id] = r.id;
+
+    const recipeIds = Object.values(recipeMap);
+    if (!recipeIds.length) {
+      this.bomData = { recipeMap: {}, recipeItemsMap: {} };
+      this.stockCache = new Map();
+      return;
+    }
+
+    const [itemsRes, invRes, assignRes] = await Promise.all([
+      db.from('recipe_items')
+        .select('recipe_id, ingredient_id, quantity, ingredients(name, unit)')
+        .in('recipe_id', recipeIds),
+      db.from('branch_inventory')
+        .select('ingredient_id, stock')
+        .eq('branch_id', this.branch.id),
+      db.from('branch_ingredient_assignments').select('ingredient_id, branch_id')
+    ]);
+
+    // Build map: ingredientId → Set<branchId>. Kosong = tersedia di semua cabang.
+    const assignMap = new Map();
+    for (const a of (assignRes.data || [])) {
+      if (!assignMap.has(a.ingredient_id)) assignMap.set(a.ingredient_id, new Set());
+      assignMap.get(a.ingredient_id).add(a.branch_id);
+    }
+    const myBranchId = this.branch.id;
+
+    const recipeItemsMap = {};
+    for (const ri of (itemsRes.data || [])) {
+      // Skip bahan yang di-assign ke cabang lain (tidak termasuk cabang ini)
+      const assigns = assignMap.get(ri.ingredient_id);
+      if (assigns && !assigns.has(myBranchId)) continue;
+      if (!recipeItemsMap[ri.recipe_id]) recipeItemsMap[ri.recipe_id] = [];
+      recipeItemsMap[ri.recipe_id].push(ri);
+    }
+
+    const stockCache = new Map();
+    for (const row of (invRes.data || [])) {
+      stockCache.set(row.ingredient_id, parseFloat(row.stock));
+    }
+
+    this.bomData    = { recipeMap, recipeItemsMap };
+    this.stockCache = stockCache;
+  },
+
+  // Pastikan resep + stok awal SUDAH termuat sebelum checkout diizinkan lanjut.
+  // Dipanggil dari openPaymentModal() & confirmCheckout(). Kalau preload masih
+  // berjalan → tunggu; kalau belum pernah / gagal → coba ulang (maks 3x).
+  async ensureBOMReady(maxAttempts = 3) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (this._bomReady) return true;
+      await (this._bomPreloadPromise || this.preloadBOM());
+      if (this._bomReady) return true;
+    }
+    return false;
   },
 
   async refreshStockCache() {
@@ -3203,6 +3240,20 @@ const POS = {
       return;
     }
 
+    // Tunggu data resep + stok bahan siap sebelum membuka modal pembayaran.
+    // Mencegah checkout jalan duluan sebelum cache BOM selesai dimuat
+    // (lihat ensureBOMReady()).
+    if (!this._bomReady) {
+      const checkoutBtn = document.getElementById('btn-checkout');
+      if (checkoutBtn) { checkoutBtn.disabled = true; checkoutBtn.textContent = 'Menyiapkan data stok...'; }
+      const ready = await this.ensureBOMReady();
+      if (checkoutBtn) { checkoutBtn.disabled = false; checkoutBtn.textContent = 'Bayar Sekarang →'; }
+      if (!ready) {
+        showToast('Gagal memuat data stok bahan. Periksa koneksi internet lalu coba lagi.', 'error');
+        return;
+      }
+    }
+
     const subtotal = this.cartSubtotal();
     const disc     = this.calcDiscount(subtotal);
     const total    = Math.max(0, subtotal - disc);
@@ -3450,6 +3501,22 @@ const POS = {
       this._checkoutLock = false;
       if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
       return;
+    }
+
+    // Jaring pengaman kedua: openPaymentModal() harusnya sudah menunggu ini,
+    // tapi dicek ulang di sini kalau-kalau state berubah selagi modal terbuka.
+    // Tanpa data resep + stok awal yang valid, deduksi bahan baku pasca-checkout
+    // bisa salah hitung — jadi checkout TIDAK boleh lanjut sebelum ini siap.
+    if (!this._bomReady) {
+      if (btn) btn.textContent = 'Menyiapkan data stok...';
+      const ready = await this.ensureBOMReady();
+      if (!ready) {
+        showToast('Gagal memuat data stok bahan. Periksa koneksi internet lalu coba lagi.', 'error');
+        this._checkoutLock = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Konfirmasi Bayar'; }
+        return;
+      }
+      if (btn) btn.textContent = 'Memproses...';
     }
 
     const subtotal = this.cartSubtotal();
