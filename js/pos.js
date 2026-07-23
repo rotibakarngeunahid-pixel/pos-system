@@ -1207,8 +1207,14 @@ const POS = {
         if (!recipeId) continue;
         for (const bi of (recipeItemsMap[recipeId] || [])) {
           const expected  = bi.quantity * item.quantity;
-          const preLvl    = preStock.get(bi.ingredient_id) ?? 0;
           const postLvl   = this.stockCache.get(bi.ingredient_id) ?? 0;
+          // Jika bahan ini belum ada di snapshot preStock (mis. preloadBOM belum
+          // selesai saat checkout ditekan — sangat mungkin terjadi pada transaksi
+          // QRIS yang tidak butuh input "uang diterima" sehingga langsung klik
+          // konfirmasi), JANGAN anggap stok awal = 0. Anggap saja "belum berubah"
+          // (= postLvl) supaya hasilnya deduksi normal sebesar `expected`, bukan
+          // `expected + postLvl` yang membuat stok langsung minus banyak.
+          const preLvl    = preStock.has(bi.ingredient_id) ? preStock.get(bi.ingredient_id) : postLvl;
           const remaining = expected - (preLvl - postLvl);
           if (remaining > 0.0001) {
             await inventoryService.adjustStock({
@@ -1240,8 +1246,10 @@ const POS = {
         if (!recipeId) continue;
         for (const bi of (recipeItemsMap[recipeId] || [])) {
           const expected  = bi.quantity * item.quantity;
-          const preLvl    = preStock.get(bi.ingredient_id) ?? 0;
           const postLvl   = this.stockCache.get(bi.ingredient_id) ?? 0;
+          // Sama seperti _applyBOMDeduction: jangan anggap stok awal = 0 kalau
+          // bahan belum ada di snapshot preStock.
+          const preLvl    = preStock.has(bi.ingredient_id) ? preStock.get(bi.ingredient_id) : postLvl;
           const remaining = expected - (postLvl - preLvl);
           if (remaining > 0.0001) {
             await inventoryService.adjustStock({
